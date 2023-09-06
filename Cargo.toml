@@ -20,7 +20,7 @@ serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 serde_repr = "0.1"
 read_color = "1.0"
-euclid = "0.22"
+euclid = "0.22" # geometric types with a focus on 2d graphics and layout
 
 [dev-dependencies]
 serde_path_to_error = "0.1"
