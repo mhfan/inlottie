@@ -1,0 +1,71 @@
+
+### https://github.com/sagiegurari/cargo-make
+
+[config]
+default_to_workspace = false
+
+[env]
+#CARGO_TERM_COLOR = "always"
+
+[tasks.default]
+alias = "test"
+
+[tasks.coverage]
+alias = "llvm-cov"
+
+[tasks.test-doc]
+command = "cargo"
+args = [ "t", "--doc" ]
+
+[tasks.test]
+command = "cargo"   # cargo test -- --nocapture && cargo bench
+# cargo t --doc && cargo nextest r && cargo bench  #--no-capture
+dependencies = [ "test-doc" ]
+args = [ "nextest", "r", #"--no-capture",
+         #"t", "--", "--nocapture",
+]   # https://nexte.st/index.html
+
+[tasks.fuzz]    # https://rust-fuzz.github.io/book/
+cwd = "fuzz"
+command = "cargo"   # cargo +nightly fuzz run calc24
+toolchain = "nightly"
+args = [ "fuzz", "run", "calc24" ]
+
+[tasks.llvm-cov]    # https://doc.rust-lang.org/stable/rustc/instrument-coverage.html
+command = "cargo"
+#toolchain = "nightly"
+env = { CC  = "clang", CXX = "clang++" }
+# cargo +nightly llvm-cov --include-ffi --doctests #--lcov --output-path lcov.info #nextest
+# cargo tarpaulin --run-types 'Tests,Doctests' --out Lcov --exclude-files 'inperse/src/*'
+args = [ "llvm-cov", #"--doctests", "--include-ffi",
+            "--lcov", "--output-path", "lcov.info", #"nextest",
+]   # https://github.com/taiki-e/cargo-llvm-cov
+
+[tasks.codecov]
+#command = "codecov"
+dependencies = [ "coverage" ]
+env = { "CODECOV_TOKEN" = "b24b2436-512a-461e-9947-488213b27add" }
+#args = [ "-t", "${CODECOV_TOKEN}", #"--url", "https://app.codecov.io/gh/mhfan/intvg"
+#]
+
+[tasks.bench-fg]    # https://github.com/flamegraph-rs/flamegraph
+#command = "cargo"
+#args = [ "flamegraph", "--bench", "calc24_bench" ]
+script = [ "sudo cargo flamegraph --bench calc24_bench" ]
+
+[tasks.bench-mem]
+command = "cargo"   # cargo bench --features dhat-heap
+args = [ "bench", "--features", "dhat-heap", ]
+
+[tasks.bench-pprof]
+command = "cargo"   # cargo bench --features pprof
+args = [ "bench", "--features", "pprof", ]
+
+[tasks.publish]
+#command = "cargo"
+#dependencies = [ "package" ]
+env = { "CARGO_MAKE_CARGO_PUBLISH_FLAGS" = "--registry crates-io" }
+#args = [ "publish", "--registry", "crates-io" ]
+
+# cargo modules generate tree --package inrust --lib --with-types --with-tests
+
