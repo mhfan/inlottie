@@ -4,11 +4,10 @@
     "type": "object",
     "allOf": [
         {
-            "$ref": "#/$defs/animation/animation"
+            "$ref": "#/$defs/animation"
         }
     ],
     "$defs": {
-        "animated-properties": {
             "animated-property": {
                 "type": "object",
                 "title": "Animated Property",
@@ -23,7 +22,7 @@
                             "a": {
                                 "title": "Animated",
                                 "description": "Whether the property is animated",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "default": 0
                             },
                             "x": {
@@ -52,7 +51,7 @@
                                     "title": "Animated Value",
                                     "description": "Array of keyframes",
                                     "items": {
-                                        "$ref": "#/$defs/animated-properties/keyframe"
+                                        "$ref": "#/$defs/keyframe"
                                     }
                                 }
                             }
@@ -69,7 +68,7 @@
                 "description": "An animatable property that holds a Color",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/animated-properties/animated-property"
+                        "$ref": "#/$defs/animated-property"
                     },
                     {
                         "if": {
@@ -83,7 +82,7 @@
                             "properties": {
                                 "k": {
                                     "title": "Static value",
-                                    "$ref": "#/$defs/helpers/color"
+                                    "$ref": "#/$defs/color"
                                 }
                             }
                         }
@@ -96,7 +95,7 @@
                 "description": "Keyframe holding Bezier objects",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/animated-properties/keyframe-base"
+                        "$ref": "#/$defs/keyframe-base"
                     },
                     {
                         "type": "object",
@@ -105,7 +104,7 @@
                                 "title": "Start",
                                 "type": "array",
                                 "items": {
-                                    "$ref": "#/$defs/helpers/bezier"
+                                    "$ref": "#/$defs/bezier"
                                 }
                             }
                         }
@@ -118,7 +117,7 @@
                 "description": "An animatable property that holds an array of numbers",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/animated-properties/animated-property"
+                        "$ref": "#/$defs/animated-property"
                     },
                     {
                         "if": {
@@ -163,7 +162,7 @@
                             },
                             "h": {
                                 "title": "Hold",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "default": 0
                             }
                         }
@@ -192,12 +191,12 @@
                                 "i": {
                                     "title": "In Tangent",
                                     "description": "Easing tangent going into the next keyframe",
-                                    "$ref": "#/$defs/animated-properties/keyframe-bezier-handle"
+                                    "$ref": "#/$defs/keyframe-bezier-handle"
                                 },
                                 "o": {
                                     "title": "Out Tangent",
                                     "description": "Easing tangent leaving the current keyframe",
-                                    "$ref": "#/$defs/animated-properties/keyframe-bezier-handle"
+                                    "$ref": "#/$defs/keyframe-bezier-handle"
                                 }
                             }
                         }
@@ -222,7 +221,7 @@
                             "a": {
                                 "title": "Animated",
                                 "description": "Whether the property is animated",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "default": 0
                             },
                             "x": {
@@ -246,7 +245,7 @@
                                     "title": "Animated Value",
                                     "description": "Array of keyframes",
                                     "items": {
-                                        "$ref": "#/$defs/animated-properties/shape-keyframe"
+                                        "$ref": "#/$defs/shape-keyframe"
                                     }
                                 }
                             }
@@ -254,7 +253,7 @@
                         "else": {
                             "properties": {
                                 "k": {
-                                    "$ref": "#/$defs/helpers/bezier",
+                                    "$ref": "#/$defs/bezier",
                                     "title": "Static Value"
                                 }
                             }
@@ -271,7 +270,7 @@
                 "description": "A Keyframes specifies the value at a specific time and the interpolation function to reach the next keyframe.",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/animated-properties/keyframe-base"
+                        "$ref": "#/$defs/keyframe-base"
                     },
                     {
                         "properties": {
@@ -318,12 +317,12 @@
                                 "i": {
                                     "title": "In Tangent",
                                     "description": "Easing tangent going into the next keyframe",
-                                    "$ref": "#/$defs/animated-properties/keyframe-bezier-handle"
+                                    "$ref": "#/$defs/keyframe-bezier-handle"
                                 },
                                 "o": {
                                     "title": "Out Tangent",
                                     "description": "Easing tangent leaving the current keyframe",
-                                    "$ref": "#/$defs/animated-properties/keyframe-bezier-handle"
+                                    "$ref": "#/$defs/keyframe-bezier-handle"
                                 }
                             }
                         }
@@ -348,7 +347,7 @@
                             "a": {
                                 "title": "Animated",
                                 "description": "Whether the property is animated",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "default": 0
                             },
                             "x": {
@@ -377,7 +376,7 @@
                                     "title": "Animated Value",
                                     "description": "Array of keyframes",
                                     "items": {
-                                        "$ref": "#/$defs/animated-properties/position-keyframe"
+                                        "$ref": "#/$defs/position-keyframe"
                                     }
                                 }
                             }
@@ -461,7 +460,7 @@
                 "properties": {
                     "k": {
                         "title": "Colors",
-                        "$ref": "#/$defs/animated-properties/multi-dimensional"
+                        "$ref": "#/$defs/multi-dimensional"
                     },
                     "p": {
                         "title": "Count",
@@ -487,15 +486,15 @@
                     },
                     "x": {
                         "title": "X",
-                        "$ref": "#/$defs/animated-properties/value"
+                        "$ref": "#/$defs/value"
                     },
                     "y": {
                         "title": "Y",
-                        "$ref": "#/$defs/animated-properties/value"
+                        "$ref": "#/$defs/value"
                     },
                     "z": {
                         "title": "Z",
-                        "$ref": "#/$defs/animated-properties/value"
+                        "$ref": "#/$defs/value"
                     }
                 },
                 "required": [
@@ -510,7 +509,7 @@
                 "description": "An animatable property that holds a float",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/animated-properties/animated-property"
+                        "$ref": "#/$defs/animated-property"
                     },
                     {
                         "if": {
@@ -536,7 +535,7 @@
                 "title": "Position Keyframe",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/animated-properties/keyframe"
+                        "$ref": "#/$defs/keyframe"
                     },
                     {
                         "properties": {
@@ -560,8 +559,7 @@
                     }
                 ]
             }
-        },
-        "animation": {
+        ,
             "motion-blur": {
                 "type": "object",
                 "title": "Motion Blur",
@@ -593,7 +591,7 @@
                 "description": "Top level object, describing the animation",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/helpers/visual-object"
+                        "$ref": "#/$defs/visual-object"
                     },
                     {
                         "type": "object",
@@ -635,7 +633,7 @@
                             },
                             "ddd": {
                                 "title": "Threedimensional",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "default": 0,
                                 "description": "Whether the animation has 3D layers"
                             },
@@ -646,16 +644,16 @@
                                 "items": {
                                     "oneOf": [
                                         {
-                                            "$ref": "#/$defs/assets/image"
+                                            "$ref": "#/$defs/image"
                                         },
                                         {
-                                            "$ref": "#/$defs/assets/precomposition"
+                                            "$ref": "#/$defs/precomposition"
                                         },
                                         {
-                                            "$ref": "#/$defs/assets/sound"
+                                            "$ref": "#/$defs/sound"
                                         },
                                         {
-                                            "$ref": "#/$defs/assets/data-source"
+                                            "$ref": "#/$defs/data-source"
                                         }
                                     ]
                                 }
@@ -665,41 +663,41 @@
                                 "type": "array",
                                 "description": "List of Extra compositions not referenced by anything",
                                 "items": {
-                                    "$ref": "#/$defs/assets/precomposition"
+                                    "$ref": "#/$defs/precomposition"
                                 }
                             },
                             "fonts": {
                                 "title": "Fonts",
-                                "$ref": "#/$defs/text/font-list"
+                                "$ref": "#/$defs/font-list"
                             },
                             "chars": {
                                 "title": "Characters",
                                 "description": "Data defining text characters as lottie shapes. If present a player might only render characters defined here and nothing else.",
                                 "type": "array",
                                 "items": {
-                                    "$ref": "#/$defs/text/character-data"
+                                    "$ref": "#/$defs/character-data"
                                 }
                             },
                             "meta": {
                                 "title": "Metadata",
                                 "description": "Document metadata",
-                                "$ref": "#/$defs/animation/metadata"
+                                "$ref": "#/$defs/metadata"
                             },
                             "metadata": {
                                 "title": "User Metadata",
-                                "$ref": "#/$defs/animation/user-metadata"
+                                "$ref": "#/$defs/user-metadata"
                             },
                             "markers": {
                                 "title": "Markers",
                                 "description": "Markers defining named sections of the composition.",
                                 "type": "array",
                                 "items": {
-                                    "$ref": "#/$defs/helpers/marker"
+                                    "$ref": "#/$defs/marker"
                                 }
                             },
                             "mb": {
                                 "title": "Motion Blur",
-                                "$ref": "#/$defs/animation/motion-blur"
+                                "$ref": "#/$defs/motion-blur"
                             },
                             "slots": {
                                 "title": "Slots",
@@ -709,19 +707,19 @@
                                     ".*": {
                                         "anyOf": [
                                             {
-                                                "$ref": "#/$defs/animated-properties/multi-dimensional"
+                                                "$ref": "#/$defs/multi-dimensional"
                                             },
                                             {
-                                                "$ref": "#/$defs/animated-properties/color-value"
+                                                "$ref": "#/$defs/color-value"
                                             },
                                             {
-                                                "$ref": "#/$defs/animated-properties/position"
+                                                "$ref": "#/$defs/position"
                                             },
                                             {
-                                                "$ref": "#/$defs/animated-properties/shape-property"
+                                                "$ref": "#/$defs/shape-property"
                                             },
                                             {
-                                                "$ref": "#/$defs/animated-properties/value"
+                                                "$ref": "#/$defs/value"
                                             }
                                         ]
                                     }
@@ -738,7 +736,7 @@
                         ]
                     },
                     {
-                        "$ref": "#/$defs/animation/composition"
+                        "$ref": "#/$defs/composition"
                     }
                 ]
             },
@@ -768,31 +766,31 @@
                         "items": {
                             "oneOf": [
                                 {
-                                    "$ref": "#/$defs/layers/precomposition-layer"
+                                    "$ref": "#/$defs/precomposition-layer"
                                 },
                                 {
-                                    "$ref": "#/$defs/layers/solid-color-layer"
+                                    "$ref": "#/$defs/solid-color-layer"
                                 },
                                 {
-                                    "$ref": "#/$defs/layers/image-layer"
+                                    "$ref": "#/$defs/image-layer"
                                 },
                                 {
-                                    "$ref": "#/$defs/layers/null-layer"
+                                    "$ref": "#/$defs/null-layer"
                                 },
                                 {
-                                    "$ref": "#/$defs/layers/shape-layer"
+                                    "$ref": "#/$defs/shape-layer"
                                 },
                                 {
-                                    "$ref": "#/$defs/layers/text-layer"
+                                    "$ref": "#/$defs/text-layer"
                                 },
                                 {
-                                    "$ref": "#/$defs/layers/audio-layer"
+                                    "$ref": "#/$defs/audio-layer"
                                 },
                                 {
-                                    "$ref": "#/$defs/layers/camera-layer"
+                                    "$ref": "#/$defs/camera-layer"
                                 },
                                 {
-                                    "$ref": "#/$defs/layers/data-layer"
+                                    "$ref": "#/$defs/data-layer"
                                 }
                             ]
                         }
@@ -847,15 +845,14 @@
                     }
                 ]
             }
-        },
-        "assets": {
+        ,
             "sound": {
                 "type": "object",
                 "title": "Sound",
                 "description": "External sound",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/assets/file-asset"
+                        "$ref": "#/$defs/file-asset"
                     }
                 ]
             },
@@ -865,7 +862,7 @@
                 "description": "External data source, usually a JSON file",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/assets/file-asset"
+                        "$ref": "#/$defs/file-asset"
                     },
                     {
                         "type": "object",
@@ -914,7 +911,7 @@
                 "description": "Asset referencing a file",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/assets/asset"
+                        "$ref": "#/$defs/asset"
                     },
                     {
                         "type": "object",
@@ -934,7 +931,7 @@
                             "e": {
                                 "title": "Embedded",
                                 "description": "Whether the file is embedded",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "default": 0
                             }
                         },
@@ -950,7 +947,7 @@
                 "description": "External image",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/assets/file-asset"
+                        "$ref": "#/$defs/file-asset"
                     },
                     {
                         "type": "object",
@@ -986,10 +983,10 @@
                 "description": "Asset containing an animation that can be referenced by layers.",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/assets/asset"
+                        "$ref": "#/$defs/asset"
                     },
                     {
-                        "$ref": "#/$defs/animation/composition"
+                        "$ref": "#/$defs/composition"
                     },
                     {
                         "type": "object",
@@ -1002,15 +999,14 @@
                             "xt": {
                                 "title": "Extra",
                                 "description": "Extra composition",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "default": 0
                             }
                         }
                     }
                 ]
             }
-        },
-        "constants": {
+        ,
             "mask-mode": {
                 "type": "string",
                 "title": "Mask Mode",
@@ -1502,15 +1498,14 @@
                     }
                 ]
             }
-        },
-        "effect-values": {
+        ,
             "point": {
                 "type": "object",
                 "title": "Effect Value Point",
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effect-values/effect-value"
+                        "$ref": "#/$defs/effect-value"
                     },
                     {
                         "type": "object",
@@ -1522,7 +1517,7 @@
                             },
                             "v": {
                                 "title": "Value",
-                                "$ref": "#/$defs/animated-properties/multi-dimensional"
+                                "$ref": "#/$defs/multi-dimensional"
                             }
                         },
                         "required": [
@@ -1537,7 +1532,7 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effect-values/effect-value"
+                        "$ref": "#/$defs/effect-value"
                     },
                     {
                         "type": "object",
@@ -1549,7 +1544,7 @@
                             },
                             "v": {
                                 "title": "Value",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -1558,13 +1553,13 @@
                     }
                 ]
             },
-            "color": {
+            "effect-color": {
                 "type": "object",
                 "title": "Effect Value Color",
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effect-values/effect-value"
+                        "$ref": "#/$defs/effect-value"
                     },
                     {
                         "type": "object",
@@ -1576,7 +1571,7 @@
                             },
                             "v": {
                                 "title": "Value",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             }
                         },
                         "required": [
@@ -1591,7 +1586,7 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effect-values/effect-value"
+                        "$ref": "#/$defs/effect-value"
                     },
                     {
                         "type": "object",
@@ -1620,7 +1615,7 @@
                 "caniuse": "effects",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/helpers/visual-object"
+                        "$ref": "#/$defs/visual-object"
                     },
                     {
                         "type": "object",
@@ -1651,13 +1646,13 @@
                 "title": "Effect No Value",
                 "description": ""
             },
-            "layer": {
+            "effect-layer": {
                 "type": "object",
                 "title": "Effect Value Layer",
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effect-values/effect-value"
+                        "$ref": "#/$defs/effect-value"
                     },
                     {
                         "type": "object",
@@ -1669,7 +1664,7 @@
                             },
                             "v": {
                                 "title": "Value",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -1684,7 +1679,7 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effect-values/effect-value"
+                        "$ref": "#/$defs/effect-value"
                     },
                     {
                         "type": "object",
@@ -1696,7 +1691,7 @@
                             },
                             "v": {
                                 "title": "Value",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -1711,7 +1706,7 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effect-values/effect-value"
+                        "$ref": "#/$defs/effect-value"
                     },
                     {
                         "type": "object",
@@ -1723,7 +1718,7 @@
                             },
                             "v": {
                                 "title": "Value",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -1738,7 +1733,7 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effect-values/effect-value"
+                        "$ref": "#/$defs/effect-value"
                     },
                     {
                         "type": "object",
@@ -1750,7 +1745,7 @@
                             },
                             "v": {
                                 "title": "Value",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -1759,15 +1754,14 @@
                     }
                 ]
             }
-        },
-        "effects": {
+        ,
             "matte3-effect": {
                 "type": "object",
                 "title": "Set Matte Effect",
                 "description": "Uses a layer as a mask",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -1784,30 +1778,30 @@
                                     {
                                         "title": "Layer",
                                         "description": "Use this layer as a mask",
-                                        "$ref": "#/$defs/effect-values/layer"
+                                        "$ref": "#/$defs/effect-layer"
                                     },
                                     {
                                         "title": "Channel",
                                         "description": "Channel to use as a mask:\n1 - Red\n2 - Green\n3 - Blue\n4 - Alpha\n5 - Luminance\n6 - Hue\n7 - Lightness\n8 - Saturation\n9 - Full\n10 - Off",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "Invert",
                                         "description": "Use 0 as opaque value when true",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "Stretch To Fit",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "Show Mask",
                                         "description": "If false, the mask layer won't be shown",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "Premultiply Mask",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     }
                                 ]
                             }
@@ -1825,7 +1819,7 @@
                 "caniuse": "effect-tint",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -1842,17 +1836,17 @@
                                     {
                                         "title": "Black Color",
                                         "description": "Tint of the darker parts of the layer",
-                                        "$ref": "#/$defs/effect-values/color"
+                                        "$ref": "#/$defs/effect-color"
                                     },
                                     {
                                         "title": "White Color",
                                         "description": "Tint of the lighter parts of the layer",
-                                        "$ref": "#/$defs/effect-values/color"
+                                        "$ref": "#/$defs/effect-color"
                                     },
                                     {
                                         "title": "Intensity",
                                         "description": "Intensity of the effect, 0 means the layer is unchanged. 100 means full effect",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     }
                                 ]
                             }
@@ -1869,7 +1863,7 @@
                 "description": "Some lottie files use `ty` = 5 for many different effects",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -1893,7 +1887,7 @@
                 "caniuse": "effect-stroke",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -1909,47 +1903,47 @@
                                 "prefixItems": [
                                     {
                                         "title": "00",
-                                        "$ref": "#/$defs/effect-values/color"
+                                        "$ref": "#/$defs/effect-color"
                                     },
                                     {
                                         "title": "01",
-                                        "$ref": "#/$defs/effect-values/checkbox"
+                                        "$ref": "#/$defs/checkbox"
                                     },
                                     {
                                         "title": "02",
-                                        "$ref": "#/$defs/effect-values/checkbox"
+                                        "$ref": "#/$defs/checkbox"
                                     },
                                     {
                                         "title": "color",
-                                        "$ref": "#/$defs/effect-values/color"
+                                        "$ref": "#/$defs/effect-color"
                                     },
                                     {
                                         "title": "04",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "05",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "06",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "07",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "08",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "09",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "type",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     }
                                 ]
                             }
@@ -1967,7 +1961,7 @@
                 "caniuse": "effect-displacement-map",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -1983,35 +1977,35 @@
                                 "prefixItems": [
                                     {
                                         "title": "Displacement Map Layer",
-                                        "$ref": "#/$defs/effect-values/layer"
+                                        "$ref": "#/$defs/effect-layer"
                                     },
                                     {
                                         "title": "Use For Horizontal Displacement",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "Max Horizontal Displacement",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "Use For Vertical Displacement",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "Max Vertical Displacement",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "Displacement Map Behavior",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "Edge Behavior",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "Expand Output",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     }
                                 ]
                             }
@@ -2030,7 +2024,7 @@
                 "caniuse": "effect-color-levels-individual-controls",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -2046,143 +2040,143 @@
                                 "prefixItems": [
                                     {
                                         "title": "00",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "01",
-                                        "$ref": "#/$defs/effect-values/no-value"
+                                        "$ref": "#/$defs/no-value"
                                     },
                                     {
                                         "title": "02",
-                                        "$ref": "#/$defs/effect-values/no-value"
+                                        "$ref": "#/$defs/no-value"
                                     },
                                     {
                                         "title": "comp_inblack",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "comp_inwhite",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "comp_gamma",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "comp_outblack",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "comp_outwhite",
-                                        "$ref": "#/$defs/effect-values/no-value"
+                                        "$ref": "#/$defs/no-value"
                                     },
                                     {
                                         "title": "08",
-                                        "$ref": "#/$defs/effect-values/no-value"
+                                        "$ref": "#/$defs/no-value"
                                     },
                                     {
                                         "title": "09",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "r_inblack",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "r_inwhite",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "r_gamma",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "r_outblack",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "r_outwhite",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "15",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "16",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "g_inblack",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "g_inwhite",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "g_gamma",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "g_outblack",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "g_outwhite",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "22",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "23",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "b_inblack",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "b_inwhite",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "b_gamma",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "b_outblack",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "b_outwhite",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "29",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "a_inblack",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "a_inwhite",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "a_gamma",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "a_outblack",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "a_outwhite",
-                                        "$ref": "#/$defs/effect-values/no-value"
+                                        "$ref": "#/$defs/no-value"
                                     }
                                 ]
                             }
@@ -2199,7 +2193,7 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -2215,15 +2209,15 @@
                                 "prefixItems": [
                                     {
                                         "title": "Angle",
-                                        "$ref": "#/$defs/effect-values/angle"
+                                        "$ref": "#/$defs/angle"
                                     },
                                     {
                                         "title": "Radius",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "Center",
-                                        "$ref": "#/$defs/effect-values/point"
+                                        "$ref": "#/$defs/point"
                                     }
                                 ]
                             }
@@ -2242,7 +2236,7 @@
                 "caniuse": "effects",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/helpers/visual-object"
+                        "$ref": "#/$defs/visual-object"
                     },
                     {
                         "type": "object",
@@ -2253,31 +2247,31 @@
                                 "items": {
                                     "oneOf": [
                                         {
-                                            "$ref": "#/$defs/effect-values/no-value"
+                                            "$ref": "#/$defs/no-value"
                                         },
                                         {
-                                            "$ref": "#/$defs/effect-values/angle"
+                                            "$ref": "#/$defs/angle"
                                         },
                                         {
-                                            "$ref": "#/$defs/effect-values/checkbox"
+                                            "$ref": "#/$defs/checkbox"
                                         },
                                         {
-                                            "$ref": "#/$defs/effect-values/color"
+                                            "$ref": "#/$defs/effect-color"
                                         },
                                         {
-                                            "$ref": "#/$defs/effect-values/drop-down"
+                                            "$ref": "#/$defs/drop-down"
                                         },
                                         {
-                                            "$ref": "#/$defs/effect-values/ignored"
+                                            "$ref": "#/$defs/ignored"
                                         },
                                         {
-                                            "$ref": "#/$defs/effect-values/layer"
+                                            "$ref": "#/$defs/effect-layer"
                                         },
                                         {
-                                            "$ref": "#/$defs/effect-values/point"
+                                            "$ref": "#/$defs/point"
                                         },
                                         {
-                                            "$ref": "#/$defs/effect-values/slider"
+                                            "$ref": "#/$defs/slider"
                                         }
                                     ]
                                 }
@@ -2298,7 +2292,7 @@
                             },
                             "en": {
                                 "title": "Enabled",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "default": 1
                             }
                         },
@@ -2315,7 +2309,7 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -2331,19 +2325,19 @@
                                 "prefixItems": [
                                     {
                                         "title": "Rows",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "Columns",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "Quality",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "03",
-                                        "$ref": "#/$defs/effect-values/no-value"
+                                        "$ref": "#/$defs/no-value"
                                     }
                                 ]
                             }
@@ -2362,7 +2356,7 @@
                 "caniuse": "effect-cc-sphere",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -2378,11 +2372,11 @@
                                 "prefixItems": [
                                     {
                                         "title": "radius",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "center",
-                                        "$ref": "#/$defs/effect-values/point"
+                                        "$ref": "#/$defs/point"
                                     }
                                 ]
                             }
@@ -2400,7 +2394,7 @@
                 "caniuse": "effect-fill",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -2416,32 +2410,32 @@
                                 "prefixItems": [
                                     {
                                         "title": "00",
-                                        "$ref": "#/$defs/effect-values/point"
+                                        "$ref": "#/$defs/point"
                                     },
                                     {
                                         "title": "01",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "color",
-                                        "$ref": "#/$defs/effect-values/color"
+                                        "$ref": "#/$defs/effect-color"
                                     },
                                     {
                                         "title": "03",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "04",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "05",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "opacity",
                                         "description": "Opacity in [0, 1]",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     }
                                 ]
                             }
@@ -2459,7 +2453,7 @@
                 "caniuse": "effect-gaussian-blur",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -2475,15 +2469,15 @@
                                 "prefixItems": [
                                     {
                                         "title": "sigma",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "direction",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "wrap",
-                                        "$ref": "#/$defs/effect-values/checkbox"
+                                        "$ref": "#/$defs/checkbox"
                                     }
                                 ]
                             }
@@ -2501,7 +2495,7 @@
                 "caniuse": "effect-tritone",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -2517,15 +2511,15 @@
                                 "prefixItems": [
                                     {
                                         "title": "bright",
-                                        "$ref": "#/$defs/effect-values/color"
+                                        "$ref": "#/$defs/effect-color"
                                     },
                                     {
                                         "title": "mid",
-                                        "$ref": "#/$defs/effect-values/color"
+                                        "$ref": "#/$defs/effect-color"
                                     },
                                     {
                                         "title": "dark",
-                                        "$ref": "#/$defs/effect-values/color"
+                                        "$ref": "#/$defs/effect-color"
                                     }
                                 ]
                             }
@@ -2542,7 +2536,7 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -2558,31 +2552,31 @@
                                 "prefixItems": [
                                     {
                                         "title": "Radius",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "Center",
-                                        "$ref": "#/$defs/effect-values/point"
+                                        "$ref": "#/$defs/point"
                                     },
                                     {
                                         "title": "Conversion type",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "Speed",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "Width",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "Height",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "Phase",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     }
                                 ]
                             }
@@ -2601,7 +2595,7 @@
                 "caniuse": "effect-drop-shadow",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -2617,24 +2611,24 @@
                                 "prefixItems": [
                                     {
                                         "title": "color",
-                                        "$ref": "#/$defs/effect-values/color"
+                                        "$ref": "#/$defs/effect-color"
                                     },
                                     {
                                         "title": "opacity",
                                         "description": "Opacity between 0 and 255",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "angle",
-                                        "$ref": "#/$defs/effect-values/angle"
+                                        "$ref": "#/$defs/angle"
                                     },
                                     {
                                         "title": "distance",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "blur",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     }
                                 ]
                             }
@@ -2651,7 +2645,7 @@
                 "caniuse": "effect-radial-wipe",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -2668,23 +2662,23 @@
                                     {
                                         "title": "Completion",
                                         "description": "Between 0 and 100",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "Start Angle",
-                                        "$ref": "#/$defs/effect-values/angle"
+                                        "$ref": "#/$defs/angle"
                                     },
                                     {
                                         "title": "Wipe Center",
-                                        "$ref": "#/$defs/effect-values/point"
+                                        "$ref": "#/$defs/point"
                                     },
                                     {
                                         "title": "Wipe",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "Feather",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     }
                                 ]
                             }
@@ -2701,7 +2695,7 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/effects/effect"
+                        "$ref": "#/$defs/effect"
                     },
                     {
                         "type": "object",
@@ -2717,19 +2711,19 @@
                                 "prefixItems": [
                                     {
                                         "title": "Puppet Engine",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "Mesh Rotation Refinement",
-                                        "$ref": "#/$defs/effect-values/slider"
+                                        "$ref": "#/$defs/slider"
                                     },
                                     {
                                         "title": "On Transparent",
-                                        "$ref": "#/$defs/effect-values/drop-down"
+                                        "$ref": "#/$defs/drop-down"
                                     },
                                     {
                                         "title": "03",
-                                        "$ref": "#/$defs/effect-values/no-value"
+                                        "$ref": "#/$defs/no-value"
                                     }
                                 ]
                             }
@@ -2741,8 +2735,7 @@
                     }
                 ]
             }
-        },
-        "helpers": {
+        ,
             "transform": {
                 "type": "object",
                 "title": "Transform",
@@ -2754,30 +2747,30 @@
                                 "title": "Anchor Point",
                                 "caniuse": "transform-anchor-point",
                                 "description": "Anchor point: a position (relative to its parent) around which transformations are applied (ie: center for rotation / scale)",
-                                "$ref": "#/$defs/animated-properties/position"
+                                "$ref": "#/$defs/position"
                             },
                             "s": {
                                 "title": "Scale",
                                 "caniuse": "transform-scale",
                                 "description": "Scale factor, `[100, 100]` for no scaling",
-                                "$ref": "#/$defs/animated-properties/multi-dimensional"
+                                "$ref": "#/$defs/multi-dimensional"
                             },
                             "o": {
                                 "title": "Opacity",
                                 "caniuse": "transform-opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "sk": {
                                 "title": "Skew",
                                 "caniuse": "transform-skew",
                                 "description": "Skew amount as an angle in degrees",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "sa": {
                                 "title": "Skew Axis",
                                 "caniuse": "transform-skew",
                                 "description": "Direction along which skew is applied, in degrees (`0` skews along the X axis, `90` along the Y axis)",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         }
                     },
@@ -2791,7 +2784,7 @@
                                                 "title": "Position",
                                                 "caniuse": "transform-position",
                                                 "description": "Position / Translation",
-                                                "$ref": "#/$defs/animated-properties/position"
+                                                "$ref": "#/$defs/position"
                                             }
                                         }
                                     },
@@ -2800,7 +2793,7 @@
                                             "p": {
                                                 "title": "Position",
                                                 "description": "Position / Translation with split components",
-                                                "$ref": "#/$defs/animated-properties/split-vector"
+                                                "$ref": "#/$defs/split-vector"
                                             }
                                         }
                                     }
@@ -2814,7 +2807,7 @@
                                                 "title": "Rotation",
                                                 "caniuse": "transform-rotation",
                                                 "description": "Rotation in degrees, clockwise",
-                                                "$ref": "#/$defs/animated-properties/value"
+                                                "$ref": "#/$defs/value"
                                             }
                                         }
                                     },
@@ -2823,21 +2816,21 @@
                                             "rx": {
                                                 "title": "X Rotation",
                                                 "description": "Split rotation component",
-                                                "$ref": "#/$defs/animated-properties/value"
+                                                "$ref": "#/$defs/value"
                                             },
                                             "ry": {
                                                 "title": "Y Rotation",
                                                 "description": "Split rotation component",
-                                                "$ref": "#/$defs/animated-properties/value"
+                                                "$ref": "#/$defs/value"
                                             },
                                             "rz": {
                                                 "title": "Z Rotation",
                                                 "description": "Split rotation component, equivalent to `r` when not split",
-                                                "$ref": "#/$defs/animated-properties/value"
+                                                "$ref": "#/$defs/value"
                                             },
                                             "or": {
                                                 "title": "Orientation",
-                                                "$ref": "#/$defs/animated-properties/multi-dimensional"
+                                                "$ref": "#/$defs/multi-dimensional"
                                             }
                                         }
                                     }
@@ -2866,7 +2859,7 @@
                 "description": "Bezier shape used to mask/clip a layer",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/helpers/visual-object"
+                        "$ref": "#/$defs/visual-object"
                     },
                     {
                         "type": "object",
@@ -2879,23 +2872,23 @@
                             },
                             "pt": {
                                 "title": "Shape",
-                                "$ref": "#/$defs/animated-properties/shape-property"
+                                "$ref": "#/$defs/shape-property"
                             },
                             "o": {
                                 "title": "Opacity",
                                 "caniuse": "mask-opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "mode": {
                                 "title": "Mode",
                                 "caniuse": "mask-modes",
-                                "$ref": "#/$defs/constants/mask-mode",
+                                "$ref": "#/$defs/mask-mode",
                                 "default": "i"
                             },
                             "x": {
                                 "title": "Expand",
                                 "caniuse": "mask-expansion",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": []
@@ -3020,14 +3013,13 @@
                     }
                 }
             }
-        },
-        "layers": {
+        ,
             "data-layer": {
                 "type": "object",
                 "title": "Data Layer",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/layers/layer"
+                        "$ref": "#/$defs/layer"
                     },
                     {
                         "type": "object",
@@ -3057,7 +3049,7 @@
                 "caniuse": "layer-solid",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/layers/visual-layer"
+                        "$ref": "#/$defs/visual-layer"
                     },
                     {
                         "type": "object",
@@ -3098,7 +3090,7 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/helpers/visual-object"
+                        "$ref": "#/$defs/visual-object"
                     },
                     {
                         "type": "object",
@@ -3106,7 +3098,7 @@
                             "ddd": {
                                 "title": "Threedimensional",
                                 "description": "Whether the layer is threedimensional",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "default": 0
                             },
                             "hd": {
@@ -3232,7 +3224,7 @@
                 "description": "Layer used to affect visual elements",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/layers/layer"
+                        "$ref": "#/$defs/layer"
                     },
                     {
                         "type": "object",
@@ -3241,18 +3233,18 @@
                                 "title": "Transform",
                                 "caniuse": "transform",
                                 "description": "Layer transform",
-                                "$ref": "#/$defs/helpers/transform"
+                                "$ref": "#/$defs/transform"
                             },
                             "ao": {
                                 "title": "Auto Orient",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "default": 0,
                                 "description": "If 1, The layer will rotate itself to match its animated position path"
                             },
                             "tt": {
                                 "title": "Matte Mode",
                                 "caniuse": "property-matte-mask",
-                                "$ref": "#/$defs/constants/matte-mode",
+                                "$ref": "#/$defs/matte-mode",
                                 "description": "Defines the track matte mode for the layer"
                             },
                             "tp": {
@@ -3263,7 +3255,7 @@
                             "td": {
                                 "title": "Matte Target",
                                 "caniuse": "property-matte-mask",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "description": "If set to 1, it means a layer is using this layer as a track matte"
                             },
                             "hasMask": {
@@ -3277,7 +3269,7 @@
                                 "caniuse": "mask",
                                 "type": "array",
                                 "items": {
-                                    "$ref": "#/$defs/helpers/mask"
+                                    "$ref": "#/$defs/mask"
                                 }
                             },
                             "ef": {
@@ -3288,52 +3280,52 @@
                                 "items": {
                                     "oneOf": [
                                         {
-                                            "$ref": "#/$defs/effects/custom-effect"
+                                            "$ref": "#/$defs/custom-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/drop-shadow-effect"
+                                            "$ref": "#/$defs/drop-shadow-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/fill-effect"
+                                            "$ref": "#/$defs/fill-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/gaussian-blur-effect"
+                                            "$ref": "#/$defs/gaussian-blur-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/matte3-effect"
+                                            "$ref": "#/$defs/matte3-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/pro-levels-effect"
+                                            "$ref": "#/$defs/pro-levels-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/stroke-effect"
+                                            "$ref": "#/$defs/stroke-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/tint-effect"
+                                            "$ref": "#/$defs/tint-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/tritone-effect"
+                                            "$ref": "#/$defs/tritone-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/radial-wipe-effect"
+                                            "$ref": "#/$defs/radial-wipe-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/wavy-effect"
+                                            "$ref": "#/$defs/wavy-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/puppet-effect"
+                                            "$ref": "#/$defs/puppet-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/spherize-effect"
+                                            "$ref": "#/$defs/spherize-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/mesh-warp-effect"
+                                            "$ref": "#/$defs/mesh-warp-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/displacement-map-effect"
+                                            "$ref": "#/$defs/displacement-map-effect"
                                         },
                                         {
-                                            "$ref": "#/$defs/effects/twirl-effect"
+                                            "$ref": "#/$defs/twirl-effect"
                                         }
                                     ]
                                 }
@@ -3351,38 +3343,38 @@
                                 "items": {
                                     "oneOf": [
                                         {
-                                            "$ref": "#/$defs/styles/stroke-style"
+                                            "$ref": "#/$defs/stroke-style"
                                         },
                                         {
-                                            "$ref": "#/$defs/styles/drop-shadow-style"
+                                            "$ref": "#/$defs/drop-shadow-style"
                                         },
                                         {
-                                            "$ref": "#/$defs/styles/inner-shadow-style"
+                                            "$ref": "#/$defs/inner-shadow-style"
                                         },
                                         {
-                                            "$ref": "#/$defs/styles/outer-glow-style"
+                                            "$ref": "#/$defs/outer-glow-style"
                                         },
                                         {
-                                            "$ref": "#/$defs/styles/inner-glow-style"
+                                            "$ref": "#/$defs/inner-glow-style"
                                         },
                                         {
-                                            "$ref": "#/$defs/styles/bevel-emboss-style"
+                                            "$ref": "#/$defs/bevel-emboss-style"
                                         },
                                         {
-                                            "$ref": "#/$defs/styles/satin-style"
+                                            "$ref": "#/$defs/satin-style"
                                         },
                                         {
-                                            "$ref": "#/$defs/styles/color-overlay-style"
+                                            "$ref": "#/$defs/color-overlay-style"
                                         },
                                         {
-                                            "$ref": "#/$defs/styles/gradient-overlay-style"
+                                            "$ref": "#/$defs/gradient-overlay-style"
                                         }
                                     ]
                                 }
                             },
                             "bm": {
                                 "title": "Blend Mode",
-                                "$ref": "#/$defs/constants/blend-mode",
+                                "$ref": "#/$defs/blend-mode",
                                 "default": 0
                             },
                             "cl": {
@@ -3409,7 +3401,7 @@
                             "ct": {
                                 "title": "Collapse Transform",
                                 "description": "Marks that transforms should be applied before masks",
-                                "$ref": "#/$defs/helpers/int-boolean",
+                                "$ref": "#/$defs/int-boolean",
                                 "default": 0
                             }
                         },
@@ -3425,7 +3417,7 @@
                 "description": "A layer playing sounds",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/layers/layer"
+                        "$ref": "#/$defs/layer"
                     },
                     {
                         "type": "object",
@@ -3438,7 +3430,7 @@
                             },
                             "au": {
                                 "title": "Audio Settings",
-                                "$ref": "#/$defs/layers/audio-settings"
+                                "$ref": "#/$defs/audio-settings"
                             },
                             "refId": {
                                 "title": "Sound Id",
@@ -3460,7 +3452,7 @@
                 "caniuse": "layer-precomp",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/layers/visual-layer"
+                        "$ref": "#/$defs/visual-layer"
                     },
                     {
                         "type": "object",
@@ -3489,7 +3481,7 @@
                             "tm": {
                                 "title": "Time Remapping",
                                 "caniuse": "property-timeremap",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -3507,7 +3499,7 @@
                 "description": "3D Camera",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/layers/layer"
+                        "$ref": "#/$defs/layer"
                     },
                     {
                         "type": "object",
@@ -3521,12 +3513,12 @@
                             "ks": {
                                 "title": "Transform",
                                 "description": "Layer transform",
-                                "$ref": "#/$defs/helpers/transform"
+                                "$ref": "#/$defs/transform"
                             },
                             "pe": {
                                 "title": "Perspective",
                                 "description": "Distance from the Z=0 plane.\nSmall values yield a higher perspective effect.",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -3544,7 +3536,7 @@
                 "caniuse": "layer-shape",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/layers/visual-layer"
+                        "$ref": "#/$defs/visual-layer"
                     },
                     {
                         "type": "object",
@@ -3557,7 +3549,7 @@
                             },
                             "shapes": {
                                 "title": "Shapes",
-                                "$ref": "#/$defs/shapes/shape-list"
+                                "$ref": "#/$defs/shape-list"
                             }
                         },
                         "required": [
@@ -3573,7 +3565,7 @@
                 "description": "Layer with no data, useful to group layers together",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/layers/visual-layer"
+                        "$ref": "#/$defs/visual-layer"
                     },
                     {
                         "type": "object",
@@ -3598,7 +3590,7 @@
                 "caniuse": "layer-text",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/layers/visual-layer"
+                        "$ref": "#/$defs/visual-layer"
                     },
                     {
                         "type": "object",
@@ -3611,7 +3603,7 @@
                             },
                             "t": {
                                 "title": "Data",
-                                "$ref": "#/$defs/text/text-data"
+                                "$ref": "#/$defs/text-data"
                             }
                         },
                         "required": [
@@ -3628,7 +3620,7 @@
                 "caniuse": "layer-image",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/layers/visual-layer"
+                        "$ref": "#/$defs/visual-layer"
                     },
                     {
                         "type": "object",
@@ -3663,7 +3655,7 @@
                         "properties": {
                             "lv": {
                                 "title": "Level",
-                                "$ref": "#/$defs/animated-properties/multi-dimensional"
+                                "$ref": "#/$defs/multi-dimensional"
                             }
                         },
                         "required": [
@@ -3672,8 +3664,7 @@
                     }
                 ]
             }
-        },
-        "shapes": {
+        ,
             "pucker-bloat": {
                 "type": "object",
                 "title": "Pucker Bloat",
@@ -3681,7 +3672,7 @@
                 "caniuse": "shape-pucker-and-bloat",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
                         "type": "object",
@@ -3694,7 +3685,7 @@
                             "a": {
                                 "title": "Amount",
                                 "description": "Amount as a percentage",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -3710,7 +3701,7 @@
                 "caniuse": "shape-rectangle",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape"
+                        "$ref": "#/$defs/shape"
                     },
                     {
                         "type": "object",
@@ -3723,16 +3714,16 @@
                             "p": {
                                 "title": "Position",
                                 "description": "Center of the rectangle",
-                                "$ref": "#/$defs/animated-properties/position"
+                                "$ref": "#/$defs/position"
                             },
                             "s": {
                                 "title": "Size",
-                                "$ref": "#/$defs/animated-properties/multi-dimensional"
+                                "$ref": "#/$defs/multi-dimensional"
                             },
                             "r": {
                                 "title": "Rounded",
                                 "description": "Rounded corners radius",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -3744,16 +3735,16 @@
                     }
                 ]
             },
-            "transform": {
+            "shape-transform": {
                 "type": "object",
                 "title": "Transform Shape",
                 "description": "Group transform",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
-                        "$ref": "#/$defs/helpers/transform"
+                        "$ref": "#/$defs/transform"
                     },
                     {
                         "type": "object",
@@ -3777,7 +3768,7 @@
                 "description": "Boolean operator on shapes",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
                         "type": "object",
@@ -3789,7 +3780,7 @@
                             },
                             "mm": {
                                 "title": "Merge Mode",
-                                "$ref": "#/$defs/constants/merge-mode",
+                                "$ref": "#/$defs/merge-mode",
                                 "default": 1
                             }
                         },
@@ -3806,7 +3797,7 @@
                 "caniuse": "shape-repeater",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/modifier"
+                        "$ref": "#/$defs/modifier"
                     },
                     {
                         "type": "object",
@@ -3819,22 +3810,22 @@
                             "c": {
                                 "title": "Copies",
                                 "description": "Number of copies",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "o": {
                                 "title": "Offset",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "m": {
                                 "title": "Composite",
                                 "description": "Stacking order",
-                                "$ref": "#/$defs/constants/composite",
+                                "$ref": "#/$defs/composite",
                                 "default": 1
                             },
                             "tr": {
                                 "title": "Transform",
                                 "description": "Transform applied to each copy",
-                                "$ref": "#/$defs/shapes/repeater-transform"
+                                "$ref": "#/$defs/repeater-transform"
                             }
                         },
                         "required": [
@@ -3852,7 +3843,7 @@
                 "description": "Interpolates the shape with its center point and bezier tangents with the opposite direction",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
                         "type": "object",
@@ -3864,16 +3855,16 @@
                             },
                             "a": {
                                 "title": "Amount",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "lj": {
                                 "title": "Line Join",
-                                "$ref": "#/$defs/constants/line-join",
+                                "$ref": "#/$defs/line-join",
                                 "default": 2
                             },
                             "ml": {
                                 "title": "Miter Limit",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -3889,7 +3880,7 @@
                 "caniuse": "shape-fill",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
                         "type": "object",
@@ -3902,15 +3893,15 @@
                             "o": {
                                 "title": "Opacity",
                                 "description": "Opacity, 100 means fully opaque",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "c": {
                                 "title": "Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             },
                             "r": {
                                 "title": "Fill Rule",
-                                "$ref": "#/$defs/constants/fill-rule"
+                                "$ref": "#/$defs/fill-rule"
                             }
                         },
                         "required": [
@@ -3927,7 +3918,7 @@
                 "description": "Transform used by a repeater, the transform is applied to each subsequent repeated object.",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/helpers/transform"
+                        "$ref": "#/$defs/transform"
                     },
                     {
                         "type": "object",
@@ -3935,12 +3926,12 @@
                             "so": {
                                 "title": "Start Opacity",
                                 "description": "Opacity of the first repeated object.",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "eo": {
                                 "title": "End Opacity",
                                 "description": "Opacity of the last repeated object.",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": []
@@ -3954,7 +3945,7 @@
                 "caniuse": "shape-polystar",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape"
+                        "$ref": "#/$defs/shape"
                     },
                     {
                         "type": "object",
@@ -3966,30 +3957,30 @@
                             },
                             "p": {
                                 "title": "Position",
-                                "$ref": "#/$defs/animated-properties/position"
+                                "$ref": "#/$defs/position"
                             },
                             "or": {
                                 "title": "Outer Radius",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "os": {
                                 "title": "Outer Roundness",
                                 "description": "Outer Roundness as a percentage",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "r": {
                                 "title": "Rotation",
                                 "description": "Rotation, clockwise in degrees",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "pt": {
                                 "title": "Points",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "sy": {
                                 "title": "Star Type",
                                 "description": "Star type, `1` for Star, `2` for Polygon",
-                                "$ref": "#/$defs/constants/star-type",
+                                "$ref": "#/$defs/star-type",
                                 "default": 1
                             }
                         },
@@ -4014,12 +4005,12 @@
                             "properties": {
                                 "ir": {
                                     "title": "Inner Radius",
-                                    "$ref": "#/$defs/animated-properties/value"
+                                    "$ref": "#/$defs/value"
                                 },
                                 "is": {
                                     "title": "Inner Roundness",
                                     "description": "Inner Roundness as a percentage",
-                                    "$ref": "#/$defs/animated-properties/value"
+                                    "$ref": "#/$defs/value"
                                 }
                             },
                             "required": [
@@ -4036,7 +4027,7 @@
                 "description": "Base class for all elements of ShapeLayer and Group",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/helpers/visual-object"
+                        "$ref": "#/$defs/visual-object"
                     },
                     {
                         "type": "object",
@@ -4130,7 +4121,7 @@
                             },
                             "bm": {
                                 "title": "Blend Mode",
-                                "$ref": "#/$defs/constants/blend-mode"
+                                "$ref": "#/$defs/blend-mode"
                             },
                             "ix": {
                                 "title": "Property index",
@@ -4160,7 +4151,7 @@
                 "description": "Drawable shape",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
                         "type": "object",
@@ -4168,7 +4159,7 @@
                             "d": {
                                 "title": "Direction",
                                 "description": "Direction the shape is drawn as, mostly relevant when using trim path",
-                                "$ref": "#/$defs/constants/shape-direction"
+                                "$ref": "#/$defs/shape-direction"
                             }
                         }
                     }
@@ -4181,7 +4172,7 @@
                 "caniuse": "shape-trim-path",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/modifier"
+                        "$ref": "#/$defs/modifier"
                     },
                     {
                         "type": "object",
@@ -4194,21 +4185,21 @@
                             "s": {
                                 "title": "Start",
                                 "description": "Segment start",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "e": {
                                 "title": "End",
                                 "description": "Segment end",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "o": {
                                 "title": "Offset",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "m": {
                                 "title": "Multiple",
                                 "description": "How to treat multiple copies",
-                                "$ref": "#/$defs/constants/trim-multiple-shapes"
+                                "$ref": "#/$defs/trim-multiple-shapes"
                             }
                         },
                         "required": [
@@ -4227,10 +4218,10 @@
                 "caniuse": "shape-stroke",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
-                        "$ref": "#/$defs/shapes/base-stroke"
+                        "$ref": "#/$defs/base-stroke"
                     },
                     {
                         "type": "object",
@@ -4243,7 +4234,7 @@
                             "c": {
                                 "title": "Color",
                                 "description": "Stroke color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             }
                         },
                         "required": [
@@ -4260,7 +4251,7 @@
                 "caniuse": "shape-path",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape"
+                        "$ref": "#/$defs/shape"
                     },
                     {
                         "type": "object",
@@ -4273,7 +4264,7 @@
                             "ks": {
                                 "title": "Shape",
                                 "description": "Bezier path",
-                                "$ref": "#/$defs/animated-properties/shape-property"
+                                "$ref": "#/$defs/shape-property"
                             }
                         },
                         "required": [
@@ -4290,13 +4281,13 @@
                 "caniuse": "shape-stroke-gradient",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
-                        "$ref": "#/$defs/shapes/base-stroke"
+                        "$ref": "#/$defs/base-stroke"
                     },
                     {
-                        "$ref": "#/$defs/shapes/gradient"
+                        "$ref": "#/$defs/gradient"
                     },
                     {
                         "type": "object",
@@ -4320,7 +4311,7 @@
                 "caniuse": "shape-ellipse",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape"
+                        "$ref": "#/$defs/shape"
                     },
                     {
                         "type": "object",
@@ -4332,11 +4323,11 @@
                             },
                             "p": {
                                 "title": "Position",
-                                "$ref": "#/$defs/animated-properties/position"
+                                "$ref": "#/$defs/position"
                             },
                             "s": {
                                 "title": "Size",
-                                "$ref": "#/$defs/animated-properties/multi-dimensional"
+                                "$ref": "#/$defs/multi-dimensional"
                             }
                         },
                         "required": [
@@ -4353,7 +4344,7 @@
                 "description": "Shape Element that can contain other shapes",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
                         "type": "object",
@@ -4369,7 +4360,7 @@
                             },
                             "it": {
                                 "title": "Shapes",
-                                "$ref": "#/$defs/shapes/shape-list"
+                                "$ref": "#/$defs/shape-list"
                             },
                             "cix": {
                                 "title": "Property index",
@@ -4389,20 +4380,20 @@
                 "description": "An item used to described the dashe pattern in a stroked path",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/helpers/visual-object"
+                        "$ref": "#/$defs/visual-object"
                     },
                     {
                         "type": "object",
                         "properties": {
                             "n": {
                                 "title": "Dash Type",
-                                "$ref": "#/$defs/constants/stroke-dash-type",
+                                "$ref": "#/$defs/stroke-dash-type",
                                 "default": "d"
                             },
                             "v": {
                                 "title": "Length",
                                 "description": "Length of the dash",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": []
@@ -4416,61 +4407,61 @@
                 "items": {
                     "oneOf": [
                         {
-                            "$ref": "#/$defs/shapes/ellipse"
+                            "$ref": "#/$defs/ellipse"
                         },
                         {
-                            "$ref": "#/$defs/shapes/fill"
+                            "$ref": "#/$defs/fill"
                         },
                         {
-                            "$ref": "#/$defs/shapes/gradient-fill"
+                            "$ref": "#/$defs/gradient-fill"
                         },
                         {
-                            "$ref": "#/$defs/shapes/gradient-stroke"
+                            "$ref": "#/$defs/gradient-stroke"
                         },
                         {
-                            "$ref": "#/$defs/shapes/group"
+                            "$ref": "#/$defs/group"
                         },
                         {
-                            "$ref": "#/$defs/shapes/path"
+                            "$ref": "#/$defs/path"
                         },
                         {
-                            "$ref": "#/$defs/shapes/polystar"
+                            "$ref": "#/$defs/polystar"
                         },
                         {
-                            "$ref": "#/$defs/shapes/pucker-bloat"
+                            "$ref": "#/$defs/pucker-bloat"
                         },
                         {
-                            "$ref": "#/$defs/shapes/rectangle"
+                            "$ref": "#/$defs/rectangle"
                         },
                         {
-                            "$ref": "#/$defs/shapes/repeater"
+                            "$ref": "#/$defs/repeater"
                         },
                         {
-                            "$ref": "#/$defs/shapes/rounded-corners"
+                            "$ref": "#/$defs/rounded-corners"
                         },
                         {
-                            "$ref": "#/$defs/shapes/stroke"
+                            "$ref": "#/$defs/stroke"
                         },
                         {
-                            "$ref": "#/$defs/shapes/transform"
+                            "$ref": "#/$defs/shape-transform"
                         },
                         {
-                            "$ref": "#/$defs/shapes/trim"
+                            "$ref": "#/$defs/trim"
                         },
                         {
-                            "$ref": "#/$defs/shapes/twist"
+                            "$ref": "#/$defs/twist"
                         },
                         {
-                            "$ref": "#/$defs/shapes/merge"
+                            "$ref": "#/$defs/merge"
                         },
                         {
-                            "$ref": "#/$defs/shapes/offset-path"
+                            "$ref": "#/$defs/offset-path"
                         },
                         {
-                            "$ref": "#/$defs/shapes/zig-zag"
+                            "$ref": "#/$defs/zig-zag"
                         },
                         {
-                            "$ref": "#/$defs/shapes/no-style"
+                            "$ref": "#/$defs/no-style"
                         }
                     ]
                 }
@@ -4481,7 +4472,7 @@
                 "description": "Changes the edges of affected shapes into a series of peaks and valleys of uniform size",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
                         "type": "object",
@@ -4494,17 +4485,17 @@
                             "r": {
                                 "title": "Frequency",
                                 "description": "Number of ridges per segment",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "s": {
                                 "title": "Amplitude",
                                 "description": "Distance between peaks and troughs",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "pt": {
                                 "title": "Point Type",
                                 "description": "Point type (1 = corner, 2 = smooth)",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -4519,7 +4510,7 @@
                 "description": "Represents a style for shapes without fill or stroke",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
                         "type": "object",
@@ -4546,12 +4537,12 @@
                         "properties": {
                             "lc": {
                                 "title": "Line Cap",
-                                "$ref": "#/$defs/constants/line-cap",
+                                "$ref": "#/$defs/line-cap",
                                 "default": 2
                             },
                             "lj": {
                                 "title": "Line Join",
-                                "$ref": "#/$defs/constants/line-join",
+                                "$ref": "#/$defs/line-join",
                                 "default": 2
                             },
                             "ml": {
@@ -4562,24 +4553,24 @@
                             "ml2": {
                                 "title": "Miter Limit",
                                 "description": "Animatable alternative to ml",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "o": {
                                 "title": "Opacity",
                                 "description": "Opacity, 100 means fully opaque",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "w": {
                                 "title": "Width",
                                 "description": "Stroke width",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "d": {
                                 "title": "Dashes",
                                 "description": "Dashed line definition",
                                 "type": "array",
                                 "items": {
-                                    "$ref": "#/$defs/shapes/stroke-dash"
+                                    "$ref": "#/$defs/stroke-dash"
                                 }
                             }
                         },
@@ -4596,7 +4587,7 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
                         "type": "object",
@@ -4608,11 +4599,11 @@
                             },
                             "a": {
                                 "title": "Angle",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "c": {
                                 "title": "Center",
-                                "$ref": "#/$defs/animated-properties/multi-dimensional"
+                                "$ref": "#/$defs/multi-dimensional"
                             }
                         },
                         "required": [
@@ -4627,7 +4618,7 @@
                 "description": "Rounds corners of other shapes",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/modifier"
+                        "$ref": "#/$defs/modifier"
                     },
                     {
                         "type": "object",
@@ -4639,7 +4630,7 @@
                             },
                             "r": {
                                 "title": "Radius",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -4656,10 +4647,10 @@
                 "caniuse": "shape-fill-gradient",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     },
                     {
-                        "$ref": "#/$defs/shapes/gradient"
+                        "$ref": "#/$defs/gradient"
                     },
                     {
                         "type": "object",
@@ -4671,11 +4662,11 @@
                             },
                             "o": {
                                 "title": "Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "r": {
                                 "title": "Fill Rule",
-                                "$ref": "#/$defs/constants/fill-rule"
+                                "$ref": "#/$defs/fill-rule"
                             }
                         },
                         "required": [
@@ -4696,33 +4687,33 @@
                             "s": {
                                 "title": "Start Point",
                                 "description": "Starting point for the gradient",
-                                "$ref": "#/$defs/animated-properties/multi-dimensional"
+                                "$ref": "#/$defs/multi-dimensional"
                             },
                             "e": {
                                 "title": "End Point",
                                 "description": "End point for the gradient",
-                                "$ref": "#/$defs/animated-properties/multi-dimensional"
+                                "$ref": "#/$defs/multi-dimensional"
                             },
                             "t": {
                                 "title": "Gradient Type",
                                 "description": "Type of the gradient",
-                                "$ref": "#/$defs/constants/gradient-type",
+                                "$ref": "#/$defs/gradient-type",
                                 "default": 1
                             },
                             "h": {
                                 "title": "Highlight Length",
                                 "description": "Highlight Length, as a percentage between `s` and `e`",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "a": {
                                 "title": "Highlight Angle",
                                 "description": "Highlight Angle, relative to the direction from `s` to `e`",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "g": {
                                 "title": "Colors",
                                 "description": "Gradient colors",
-                                "$ref": "#/$defs/animated-properties/gradient-colors"
+                                "$ref": "#/$defs/gradient-colors"
                             }
                         },
                         "required": [
@@ -4739,19 +4730,18 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/shapes/shape-element"
+                        "$ref": "#/$defs/shape-element"
                     }
                 ]
             }
-        },
-        "styles": {
+        ,
             "satin-style": {
                 "type": "object",
                 "title": "Satin",
                 "caniuse": "style-satin",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/styles/layer-style"
+                        "$ref": "#/$defs/layer-style"
                     },
                     {
                         "type": "object",
@@ -4764,31 +4754,31 @@
                             },
                             "bm": {
                                 "title": "Blend Mode",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "c": {
                                 "title": "Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             },
                             "o": {
                                 "title": "Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "a": {
                                 "title": "Angle",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "d": {
                                 "title": "Distance",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "s": {
                                 "title": "Size",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "in": {
                                 "title": "Invert",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -4803,7 +4793,7 @@
                 "caniuse": "style-gradient-overlay",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/styles/layer-style"
+                        "$ref": "#/$defs/layer-style"
                     },
                     {
                         "type": "object",
@@ -4816,44 +4806,44 @@
                             },
                             "bm": {
                                 "title": "Blend Mode",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "o": {
                                 "title": "Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "gf": {
                                 "title": "Gradient",
-                                "$ref": "#/$defs/animated-properties/gradient-colors"
+                                "$ref": "#/$defs/gradient-colors"
                             },
                             "gs": {
                                 "title": "Smoothness",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "a": {
                                 "title": "Angle",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "gt": {
                                 "title": "Gradient Type",
-                                "$ref": "#/$defs/constants/gradient-type"
+                                "$ref": "#/$defs/gradient-type"
                             },
                             "re": {
                                 "title": "Reverse",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "al": {
                                 "title": "Align",
                                 "description": "Align with layer",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "s": {
                                 "title": "Scale",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "of": {
                                 "title": "Offset",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -4868,7 +4858,7 @@
                 "caniuse": "style-color-overlay",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/styles/layer-style"
+                        "$ref": "#/$defs/layer-style"
                     },
                     {
                         "type": "object",
@@ -4881,15 +4871,15 @@
                             },
                             "bm": {
                                 "title": "Blend Mode",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "c": {
                                 "title": "Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             },
                             "so": {
                                 "title": "Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -4904,7 +4894,7 @@
                 "caniuse": "style-outer-glow",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/styles/layer-style"
+                        "$ref": "#/$defs/layer-style"
                     },
                     {
                         "type": "object",
@@ -4917,31 +4907,31 @@
                             },
                             "c": {
                                 "title": "Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             },
                             "o": {
                                 "title": "Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "r": {
                                 "title": "Range",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "ch": {
                                 "title": "Choke Spread",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "bm": {
                                 "title": "Blend Mode",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "no": {
                                 "title": "Noise",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "j": {
                                 "title": "Jitter",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -4956,7 +4946,7 @@
                 "caniuse": "style-bevel-and-emboss",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/styles/layer-style"
+                        "$ref": "#/$defs/layer-style"
                     },
                     {
                         "type": "object",
@@ -4969,62 +4959,62 @@
                             },
                             "bs": {
                                 "title": "Bevel Style",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "bt": {
                                 "title": "Technique",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "sr": {
                                 "title": "Strength",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "s": {
                                 "title": "Size",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "sf": {
                                 "title": "Soften",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "ga": {
                                 "title": "Global Angle",
                                 "description": "Use global light",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "a": {
                                 "title": "Angle",
                                 "description": "Local lighting angle",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "ll": {
                                 "title": "Altitude",
                                 "description": "Local lighting altitude",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "hm": {
                                 "title": "Highlight Mode",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "hc": {
                                 "title": "Highlight Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             },
                             "ho": {
                                 "title": "Highlight Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "sm": {
                                 "title": "Shadow Mode",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "sc": {
                                 "title": "Shadow Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             },
                             "so": {
                                 "title": "Shadow Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -5039,7 +5029,7 @@
                 "caniuse": "style-inner-glow",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/styles/layer-style"
+                        "$ref": "#/$defs/layer-style"
                     },
                     {
                         "type": "object",
@@ -5052,35 +5042,35 @@
                             },
                             "c": {
                                 "title": "Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             },
                             "o": {
                                 "title": "Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "r": {
                                 "title": "Range",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "sr": {
                                 "title": "Source",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "ch": {
                                 "title": "Choke Spread",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "bm": {
                                 "title": "Blend Mode",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "no": {
                                 "title": "Noise",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "j": {
                                 "title": "Jitter",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -5096,7 +5086,7 @@
                 "description": "Stroke / frame",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/styles/layer-style"
+                        "$ref": "#/$defs/layer-style"
                     },
                     {
                         "type": "object",
@@ -5109,11 +5099,11 @@
                             },
                             "s": {
                                 "title": "Size",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "c": {
                                 "title": "Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             }
                         },
                         "required": [
@@ -5128,7 +5118,7 @@
                 "caniuse": "style-drop-shadow",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/styles/layer-style"
+                        "$ref": "#/$defs/layer-style"
                     },
                     {
                         "type": "object",
@@ -5141,42 +5131,42 @@
                             },
                             "c": {
                                 "title": "Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             },
                             "o": {
                                 "title": "Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "a": {
                                 "title": "Angle",
                                 "description": "Local light angle",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "s": {
                                 "title": "Size",
                                 "description": "Blur size",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "d": {
                                 "title": "Distance",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "ch": {
                                 "title": "Choke Spread",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "bm": {
                                 "title": "Blend Mode",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "no": {
                                 "title": "Noise",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "lc": {
                                 "title": "Layer Conceal",
                                 "description": "Layer knowck out drop shadow",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -5191,7 +5181,7 @@
                 "caniuse": "style-inner-shadow",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/styles/layer-style"
+                        "$ref": "#/$defs/layer-style"
                     },
                     {
                         "type": "object",
@@ -5204,37 +5194,37 @@
                             },
                             "c": {
                                 "title": "Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             },
                             "o": {
                                 "title": "Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "a": {
                                 "title": "Angle",
                                 "description": "Local light angle",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "s": {
                                 "title": "Size",
                                 "description": "Blur size",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "d": {
                                 "title": "Distance",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "ch": {
                                 "title": "Choke Spread",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "bm": {
                                 "title": "Blend Mode",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "no": {
                                 "title": "Noise",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": [
@@ -5249,7 +5239,7 @@
                 "description": "Style applied to a layer",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/helpers/visual-object"
+                        "$ref": "#/$defs/visual-object"
                     },
                     {
                         "type": "object",
@@ -5266,8 +5256,7 @@
                     }
                 ]
             }
-        },
-        "text": {
+        ,
             "text-range-selector": {
                 "type": "object",
                 "title": "Text Range Selector",
@@ -5275,52 +5264,52 @@
                 "properties": {
                     "t": {
                         "title": "Expressible",
-                        "$ref": "#/$defs/helpers/int-boolean"
+                        "$ref": "#/$defs/int-boolean"
                     },
                     "xe": {
                         "title": "Max Ease",
-                        "$ref": "#/$defs/animated-properties/value"
+                        "$ref": "#/$defs/value"
                     },
                     "ne": {
                         "title": "Min Ease",
-                        "$ref": "#/$defs/animated-properties/value"
+                        "$ref": "#/$defs/value"
                     },
                     "a": {
                         "title": "Max Amount",
-                        "$ref": "#/$defs/animated-properties/value"
+                        "$ref": "#/$defs/value"
                     },
                     "b": {
                         "title": "Based On",
-                        "$ref": "#/$defs/constants/text-based"
+                        "$ref": "#/$defs/text-based"
                     },
                     "rn": {
                         "title": "Randomize",
-                        "$ref": "#/$defs/helpers/int-boolean"
+                        "$ref": "#/$defs/int-boolean"
                     },
                     "sh": {
                         "title": "Shape",
-                        "$ref": "#/$defs/constants/text-shape"
+                        "$ref": "#/$defs/text-shape"
                     },
                     "o": {
                         "title": "Offset",
-                        "$ref": "#/$defs/animated-properties/value"
+                        "$ref": "#/$defs/value"
                     },
                     "r": {
                         "title": "Range Units",
                         "caniuse": "range-selectors-units",
-                        "$ref": "#/$defs/constants/text-range-units"
+                        "$ref": "#/$defs/text-range-units"
                     },
                     "sm": {
                         "title": "Selector Smoothness",
-                        "$ref": "#/$defs/animated-properties/value"
+                        "$ref": "#/$defs/value"
                     },
                     "s": {
                         "title": "Start",
-                        "$ref": "#/$defs/animated-properties/value"
+                        "$ref": "#/$defs/value"
                     },
                     "e": {
                         "title": "End",
-                        "$ref": "#/$defs/animated-properties/value"
+                        "$ref": "#/$defs/value"
                     }
                 },
                 "required": [
@@ -5342,13 +5331,13 @@
                                 "title": "Alignment",
                                 "description": "Group alignment",
                                 "caniuse": "animators-grouping-alignment",
-                                "$ref": "#/$defs/animated-properties/multi-dimensional"
+                                "$ref": "#/$defs/multi-dimensional"
                             },
                             "g": {
                                 "title": "Grouping",
                                 "description": "Anchor point grouping",
                                 "caniuse": "animators-anchor-point-grouping",
-                                "$ref": "#/$defs/constants/text-grouping"
+                                "$ref": "#/$defs/text-grouping"
                             }
                         },
                         "required": []
@@ -5368,7 +5357,7 @@
                     "ks": {
                         "title": "Transform",
                         "description": "Layer transform",
-                        "$ref": "#/$defs/helpers/transform"
+                        "$ref": "#/$defs/transform"
                     },
                     "ip": {
                         "title": "In Point",
@@ -5431,10 +5420,10 @@
                         "title": "Data",
                         "oneOf": [
                             {
-                                "$ref": "#/$defs/text/character-shapes"
+                                "$ref": "#/$defs/character-shapes"
                             },
                             {
-                                "$ref": "#/$defs/text/character-precomp"
+                                "$ref": "#/$defs/character-precomp"
                             }
                         ]
                     }
@@ -5460,7 +5449,7 @@
                     },
                     "fc": {
                         "title": "Fill Color",
-                        "$ref": "#/$defs/helpers/color",
+                        "$ref": "#/$defs/color",
                         "default": [
                             0,
                             0,
@@ -5469,7 +5458,7 @@
                     },
                     "sc": {
                         "title": "Stroke Color",
-                        "$ref": "#/$defs/helpers/color"
+                        "$ref": "#/$defs/color"
                     },
                     "sw": {
                         "title": "Stroke Width",
@@ -5519,12 +5508,12 @@
                     },
                     "j": {
                         "title": "Justify",
-                        "$ref": "#/$defs/constants/text-justify",
+                        "$ref": "#/$defs/text-justify",
                         "default": 0
                     },
                     "ca": {
                         "title": "Text Caps",
-                        "$ref": "#/$defs/constants/text-caps"
+                        "$ref": "#/$defs/text-caps"
                     },
                     "tr": {
                         "title": "Tracking",
@@ -5556,20 +5545,20 @@
                                 "caniuse": "text-animators",
                                 "type": "array",
                                 "items": {
-                                    "$ref": "#/$defs/text/text-range"
+                                    "$ref": "#/$defs/text-range"
                                 }
                             },
                             "d": {
                                 "title": "Document",
-                                "$ref": "#/$defs/text/animated-text-document"
+                                "$ref": "#/$defs/animated-text-document"
                             },
                             "m": {
                                 "title": "Alignment",
-                                "$ref": "#/$defs/text/text-alignment-options"
+                                "$ref": "#/$defs/text-alignment-options"
                             },
                             "p": {
                                 "title": "Follow Path",
-                                "$ref": "#/$defs/text/text-follow-path"
+                                "$ref": "#/$defs/text-follow-path"
                             }
                         },
                         "required": [
@@ -5589,7 +5578,7 @@
                     "shapes": {
                         "title": "Shapes",
                         "description": "Shapes forming the character",
-                        "$ref": "#/$defs/shapes/shape-list"
+                        "$ref": "#/$defs/shape-list"
                     }
                 },
                 "required": [
@@ -5608,11 +5597,11 @@
                     },
                     "s": {
                         "title": "Selector",
-                        "$ref": "#/$defs/text/text-range-selector"
+                        "$ref": "#/$defs/text-range-selector"
                     },
                     "a": {
                         "title": "Style",
-                        "$ref": "#/$defs/text/text-style"
+                        "$ref": "#/$defs/text-style"
                     }
                 }
             },
@@ -5628,7 +5617,7 @@
                                 "title": "List",
                                 "type": "array",
                                 "items": {
-                                    "$ref": "#/$defs/text/font"
+                                    "$ref": "#/$defs/font"
                                 }
                             }
                         },
@@ -5652,23 +5641,23 @@
                             },
                             "f": {
                                 "title": "First Margin",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "l": {
                                 "title": "Last Margin",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "r": {
                                 "title": "Reverse Path",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "a": {
                                 "title": "Force Alignment",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "p": {
                                 "title": "Perpendicular To Path",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": []
@@ -5684,7 +5673,7 @@
                         "title": "Keyframes",
                         "type": "array",
                         "items": {
-                            "$ref": "#/$defs/text/text-document-keyframe"
+                            "$ref": "#/$defs/text-document-keyframe"
                         }
                     },
                     "x": {
@@ -5702,67 +5691,67 @@
                 "description": "",
                 "allOf": [
                     {
-                        "$ref": "#/$defs/helpers/transform"
+                        "$ref": "#/$defs/transform"
                     },
                     {
                         "type": "object",
                         "properties": {
                             "sw": {
                                 "title": "Stroke Width",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "sc": {
                                 "title": "Stroke Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             },
                             "sh": {
                                 "title": "Stroke Hue",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "ss": {
                                 "title": "Stroke Saturation",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "sb": {
                                 "title": "Stroke Brightness",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "so": {
                                 "title": "Stroke Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "fc": {
                                 "title": "Fill Color",
-                                "$ref": "#/$defs/animated-properties/color-value"
+                                "$ref": "#/$defs/color-value"
                             },
                             "fh": {
                                 "title": "Fill Hue",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "fs": {
                                 "title": "Fill Saturation",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "fb": {
                                 "title": "Fill Brightness",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "fo": {
                                 "title": "Fill Opacity",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "t": {
                                 "title": "Letter Spacing",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "bl": {
                                 "title": "Blur",
                                 "caniuse": "text-animators-blur",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             },
                             "ls": {
                                 "title": "Line Spacing",
-                                "$ref": "#/$defs/animated-properties/value"
+                                "$ref": "#/$defs/value"
                             }
                         },
                         "required": []
@@ -5776,7 +5765,7 @@
                 "properties": {
                     "s": {
                         "title": "Start",
-                        "$ref": "#/$defs/text/text-document"
+                        "$ref": "#/$defs/text-document"
                     },
                     "t": {
                         "title": "Time",
@@ -5833,7 +5822,7 @@
                             },
                             "origin": {
                                 "title": "Origin",
-                                "$ref": "#/$defs/constants/font-path-origin"
+                                "$ref": "#/$defs/font-path-origin"
                             },
                             "fClass": {
                                 "type": "string",
@@ -5849,6 +5838,5 @@
                     }
                 ]
             }
-        }
     }
 }
