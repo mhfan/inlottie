@@ -1,11 +1,8 @@
-#![allow(clippy::redundant_closure_call)]
-#![allow(clippy::needless_lifetimes)]
-#![allow(clippy::match_single_binding)]
-#![allow(clippy::clone_on_copy)]
+
+#![allow(clippy::enum_variant_names)]
 
 use serde::{Deserialize, Serialize};
 
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Angle {
     #[serde(flatten)]
@@ -262,7 +259,6 @@ pub struct CharacterShapes {
     #[doc = "Shapes forming the character"]
     pub shapes: ShapeList,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Checkbox {
     #[serde(flatten)]
@@ -347,7 +343,6 @@ pub struct DataSource {
     pub file_asset: FileAsset,
     pub t: u32,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DisplacementMapEffect {
     #[serde(flatten)]
@@ -355,7 +350,6 @@ pub struct DisplacementMapEffect {
     pub ef: Vec<serde_json::Value>,
     pub ty: u32,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DropDown {
     #[serde(flatten)]
@@ -417,7 +411,6 @@ pub struct Effect {
     #[doc = "Effect type"]
     pub ty: u32,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EffectColor {
     #[serde(flatten)]
@@ -426,7 +419,6 @@ pub struct EffectColor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub v: Option<ColorValue>,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EffectLayer {
     #[serde(flatten)]
@@ -559,7 +551,6 @@ pub struct FontList {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub list: Vec<Font>,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum FontPathOrigin {
@@ -674,7 +665,6 @@ pub struct Group {
     pub np: Option<f32>,
     pub ty: String,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Ignored {
     #[serde(flatten)]
@@ -757,7 +747,7 @@ pub struct InnerShadowStyle {
 }
 #[doc = "Represents boolean values as an integer. 0 is false, 1 is true."]
 #[derive(Clone, Debug, Serialize)]
-pub struct IntBoolean(IntegerBoolean);
+pub struct IntBoolean(IntegerBoolean); // TODO:
 impl Default for IntBoolean {
     fn default() -> Self {
         IntBoolean(IntegerBoolean::True(
@@ -790,7 +780,7 @@ impl<'de> serde::Deserialize<'de> for IntBoolean {
     }
 }
 #[doc = "Represents boolean values as an integer. 0 is false, 1 is true."]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum IntegerBoolean {
     True(serde_json::Value),
@@ -856,7 +846,6 @@ pub struct KeyframeSubtype2 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub o: Option<KeyframeBezierHandle>,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Layer {
     #[serde(flatten)]
@@ -1007,7 +996,6 @@ pub enum MergeMode {
     Intersect(serde_json::Value),
     ExcludeIntersections(serde_json::Value),
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MeshWarpEffect {
     #[serde(flatten)]
@@ -1033,7 +1021,6 @@ pub struct MetadataSubtype1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub k: Option<String>,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Modifier(pub ShapeElement);
 impl From<ShapeElement> for Modifier {
@@ -1131,7 +1118,6 @@ pub struct Path {
     pub ks: ShapeProperty,
     pub ty: String,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Point {
     #[serde(flatten)]
@@ -1255,7 +1241,6 @@ pub struct PrecompositionLayer {
     #[doc = "Width of the clipping rect"]
     pub w: u32,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ProLevelsEffect {
     #[serde(flatten)]
@@ -1274,7 +1259,6 @@ pub struct PuckerBloat {
     pub a: Option<Value>,
     pub ty: String,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PuppetEffect {
     #[serde(flatten)]
@@ -1512,7 +1496,6 @@ pub enum ShapeType {
     Repeater(serde_json::Value),
     Trim(serde_json::Value),
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Slider {
     #[serde(flatten)]
@@ -1544,7 +1527,6 @@ impl From<FileAsset> for Sound {
         Self(value)
     }
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SpherizeEffect {
     #[serde(flatten)]
@@ -1599,7 +1581,6 @@ pub enum StrokeDashType {
     Gap(serde_json::Value),
     Offset(serde_json::Value),
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StrokeEffect {
     #[serde(flatten)]
@@ -1629,7 +1610,6 @@ pub struct TextAlignmentOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub g: Option<TextGrouping>,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum TextBased {
@@ -1657,7 +1637,6 @@ pub struct TextData {
     pub m: TextAlignmentOptions,
     pub p: TextFollowPath,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TextDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1711,7 +1690,6 @@ pub struct TextFollowPath {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub r: Option<Value>,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum TextGrouping {
@@ -1792,7 +1770,6 @@ pub enum TextShape {
     Round(serde_json::Value),
     Smooth(serde_json::Value),
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TextStyle {
     #[serde(flatten)]
@@ -1934,7 +1911,6 @@ pub struct TritoneEffect {
     pub ef: Vec<serde_json::Value>,
     pub ty: u32,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TwirlEffect {
     #[serde(flatten)]
@@ -1942,7 +1918,6 @@ pub struct TwirlEffect {
     pub ef: Vec<serde_json::Value>,
     pub ty: u32,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Twist {
     #[serde(flatten)]
@@ -2063,7 +2038,6 @@ pub struct VisualObject {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nm: Option<String>,
 }
-#[doc = ""]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WavyEffect {
     #[serde(flatten)]
@@ -2102,13 +2076,6 @@ pub struct ZigZag {
     pub ty: String,
 }
 pub mod defaults {
-    pub(super) fn default_u64<T, const V: u64>() -> T
-    where
-        T: std::convert::TryFrom<u64>,
-        <T as std::convert::TryFrom<u64>>::Error: std::fmt::Debug,
-    {
-        T::try_from(V).unwrap()
-    }
     pub(super) fn animated_property_subtype0_a() -> super::IntBoolean {
         super::IntBoolean(super::IntegerBoolean::True(
             serde_json::from_str::<serde_json::Value>("0").unwrap(),
