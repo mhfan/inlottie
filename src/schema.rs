@@ -1,5 +1,6 @@
 
 #![allow(clippy::enum_variant_names)]
+#![allow(clippy::large_enum_variant)]
 
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +23,7 @@ pub struct AnimatedProperty {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AnimatedPropertySubtype0 {
     #[doc = "Whether the property is animated"]
-    #[serde(default = "defaults::animated_property_subtype0_a")]
+    #[serde(default)]
     pub a: IntBoolean,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ix: Option<u32>,
@@ -62,7 +63,7 @@ pub struct Animation {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comps: Vec<Precomposition>,
     #[doc = "Whether the animation has 3D layers"]
-    #[serde(default = "defaults::animation_ddd")]
+    #[serde(default)]
     pub ddd: IntBoolean,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fonts: Option<FontList>,
@@ -489,7 +490,7 @@ pub struct FileAsset {
     #[serde(flatten)]
     pub asset: Asset,
     #[doc = "Whether the file is embedded"]
-    #[serde(default = "defaults::file_asset_e")]
+    #[serde(default)]
     pub e: IntBoolean,
     #[doc = "Filename or data url"]
     pub p: String,
@@ -746,46 +747,8 @@ pub struct InnerShadowStyle {
     pub ty: u32,
 }
 #[doc = "Represents boolean values as an integer. 0 is false, 1 is true."]
-#[derive(Clone, Debug, Serialize)]
-pub struct IntBoolean(IntegerBoolean); // TODO:
-impl Default for IntBoolean {
-    fn default() -> Self {
-        IntBoolean(IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("0").unwrap(),
-        ))
-    }
-}
-impl std::convert::TryFrom<IntegerBoolean> for IntBoolean {
-    type Error = &'static str;
-    fn try_from(value: IntegerBoolean) -> Result<Self, &'static str> {
-        if ![
-            IntegerBoolean::True(serde_json::from_str::<serde_json::Value>("0").unwrap()),
-            IntegerBoolean::True(serde_json::from_str::<serde_json::Value>("1").unwrap()),
-        ]
-        .contains(&value)
-        {
-            Err("invalid value")
-        } else {
-            Ok(Self(value))
-        }
-    }
-}
-impl<'de> serde::Deserialize<'de> for IntBoolean {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Self::try_from(<IntegerBoolean>::deserialize(deserializer)?)
-            .map_err(|e| <D::Error as serde::de::Error>::custom(e.to_string()))
-    }
-}
-#[doc = "Represents boolean values as an integer. 0 is false, 1 is true."]
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum IntegerBoolean {
-    True(serde_json::Value),
-    False(serde_json::Value),
-}
+type IntBoolean = crate::IntBool;
+
 #[doc = "A Keyframes specifies the value at a specific time and the interpolation function to reach the next keyframe."]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Keyframe {
@@ -806,7 +769,7 @@ pub struct KeyframeBase {
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct KeyframeBaseSubtype0 {
-    #[serde(default = "defaults::keyframe_base_subtype0_h")]
+    #[serde(default)]
     pub h: IntBoolean,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub t: Option<f32>,
@@ -851,7 +814,7 @@ pub struct Layer {
     #[serde(flatten)]
     pub visual_object: VisualObject,
     #[doc = "Whether the layer is threedimensional"]
-    #[serde(default = "defaults::layer_ddd")]
+    #[serde(default)]
     pub ddd: IntBoolean,
     #[doc = "Whether the layer is hidden"]
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1183,7 +1146,7 @@ pub struct PositionKeyframeSubtype1 {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PositionSubtype0 {
     #[doc = "Whether the property is animated"]
-    #[serde(default = "defaults::position_subtype0_a")]
+    #[serde(default)]
     pub a: IntBoolean,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ix: Option<u32>,
@@ -1221,7 +1184,7 @@ pub struct Precomposition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fr: Option<f32>,
     #[doc = "Extra composition"]
-    #[serde(default = "defaults::precomposition_xt")]
+    #[serde(default)]
     pub xt: IntBoolean,
 }
 #[doc = "Layer that renders a Precomposition asset"]
@@ -1439,7 +1402,7 @@ pub struct ShapeProperty {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ShapePropertySubtype0 {
     #[doc = "Whether the property is animated"]
-    #[serde(default = "defaults::shape_property_subtype0_a")]
+    #[serde(default)]
     pub a: IntBoolean,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ix: Option<u32>,
@@ -1980,7 +1943,7 @@ pub struct VisualLayer {
     #[serde(flatten)]
     pub layer: Layer,
     #[doc = "If 1, The layer will rotate itself to match its animated position path"]
-    #[serde(default = "defaults::visual_layer_ao")]
+    #[serde(default)]
     pub ao: IntBoolean,
     #[serde(default = "defaults::visual_layer_bm")]
     pub bm: BlendMode,
@@ -1991,7 +1954,7 @@ pub struct VisualLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cp: Option<bool>,
     #[doc = "Marks that transforms should be applied before masks"]
-    #[serde(default = "defaults::visual_layer_ct")]
+    #[serde(default)]
     pub ct: IntBoolean,
     #[doc = "List of layer effects"]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2076,16 +2039,6 @@ pub struct ZigZag {
     pub ty: String,
 }
 pub mod defaults {
-    pub(super) fn animated_property_subtype0_a() -> super::IntBoolean {
-        super::IntBoolean(super::IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("0").unwrap(),
-        ))
-    }
-    pub(super) fn animation_ddd() -> super::IntBoolean {
-        super::IntBoolean(super::IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("0").unwrap(),
-        ))
-    }
     pub(super) fn animation_v() -> String {
         "5.5.2".to_string()
     }
@@ -2095,28 +2048,9 @@ pub mod defaults {
     pub(super) fn base_stroke_lj() -> super::LineJoin {
         super::LineJoin::Miter(serde_json::from_str::<serde_json::Value>("2").unwrap())
     }
-    pub(super) fn effect_en() -> super::IntBoolean {
-        super::IntBoolean(super::IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("1").unwrap(),
-        ))
-    }
-    pub(super) fn file_asset_e() -> super::IntBoolean {
-        super::IntBoolean(super::IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("0").unwrap(),
-        ))
-    }
+    pub(super) fn effect_en() -> super::IntBoolean { true.into() } // XXX:
     pub(super) fn gradient_t() -> super::GradientType {
         super::GradientType::Linear(1_u32)
-    }
-    pub(super) fn keyframe_base_subtype0_h() -> super::IntBoolean {
-        super::IntBoolean(super::IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("0").unwrap(),
-        ))
-    }
-    pub(super) fn layer_ddd() -> super::IntBoolean {
-        super::IntBoolean(super::IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("0").unwrap(),
-        ))
     }
     pub(super) fn mask_mode() -> super::MaskMode {
         super::MaskMode::None(serde_json::from_str::<serde_json::Value>("\"i\"").unwrap())
@@ -2130,23 +2064,8 @@ pub mod defaults {
     pub(super) fn polystar_subtype1_sy() -> super::StarType {
         super::StarType::Star(serde_json::from_str::<serde_json::Value>("1").unwrap())
     }
-    pub(super) fn position_subtype0_a() -> super::IntBoolean {
-        super::IntBoolean(super::IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("0").unwrap(),
-        ))
-    }
-    pub(super) fn precomposition_xt() -> super::IntBoolean {
-        super::IntBoolean(super::IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("0").unwrap(),
-        ))
-    }
     pub(super) fn repeater_m() -> super::Composite {
         super::Composite::Above(serde_json::from_str::<serde_json::Value>("1").unwrap())
-    }
-    pub(super) fn shape_property_subtype0_a() -> super::IntBoolean {
-        super::IntBoolean(super::IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("0").unwrap(),
-        ))
     }
     pub(super) fn stroke_dash_n() -> super::StrokeDashType {
         super::StrokeDashType::Dash(serde_json::from_str::<serde_json::Value>("\"d\"").unwrap())
@@ -2154,17 +2073,7 @@ pub mod defaults {
     pub(super) fn text_document_j() -> super::TextJustify {
         super::TextJustify::Left(serde_json::from_str::<serde_json::Value>("0").unwrap())
     }
-    pub(super) fn visual_layer_ao() -> super::IntBoolean {
-        super::IntBoolean(super::IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("0").unwrap(),
-        ))
-    }
     pub(super) fn visual_layer_bm() -> super::BlendMode {
         super::BlendMode::Normal(serde_json::from_str::<serde_json::Value>("0").unwrap())
-    }
-    pub(super) fn visual_layer_ct() -> super::IntBoolean {
-        super::IntBoolean(super::IntegerBoolean::True(
-            serde_json::from_str::<serde_json::Value>("0").unwrap(),
-        ))
     }
 }
