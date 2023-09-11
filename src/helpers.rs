@@ -19,16 +19,11 @@ impl Value {
     }
 }
 
-pub fn bool_from_int<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
-    match u8::deserialize(deserializer)? { 0 => Ok(false), 1 => Ok(true),
-        other => Err(Error::invalid_value(
-            serde::de::Unexpected::Unsigned(other as u64), &"zero or one")),
-    }
-}
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(transparent)] pub struct IntBool(u8);
 
-pub fn int_from_bool<S: Serializer>(b: &bool, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_u8(if *b { 1 } else { 0 })
-}
+impl From<bool> for IntBool { fn from(value: bool) -> Self { Self(if value { 1 } else { 0 }) } }
+impl From<IntBool> for bool { fn from(value: IntBool) -> Self { value.0 != 0 } }
 
 pub fn array_to_rgba<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Rgba, D::Error> {
     Ok(<Rgba as FromTo<Value>>::from(Value::deserialize(deserializer)?))
@@ -125,13 +120,13 @@ pub fn array_from_keyframes<S: Serializer, T>(_b: &[KeyFrame<T>], _serializer: S
 }
 
 pub fn default_vec2_100() -> Animated<Vector2D> {
-    Animated { animated: false,
+    Animated { animated: false.into(),
         keyframes: vec![KeyFrame::from_value(Vector2D::new(100.0, 100.0))],
     }
 }
 
 pub fn default_number_100() -> Animated<f32> {
-    Animated { animated: false, keyframes: vec![KeyFrame::from_value(100.0)] }
+    Animated { animated: false.into(), keyframes: vec![KeyFrame::from_value(100.0)] }
 }
 
 struct NumberVistor;
@@ -362,7 +357,7 @@ fn default_none<T>() -> Option<T> { None }
     #[serde(skip)] end_frame: f32,
     #[serde(rename = "o", default)] easing_out: Option<Easing>,
     #[serde(rename = "i", default)] easing_in:  Option<Easing>,
-    #[serde(rename = "h", default, deserialize_with = "super::bool_from_int")] hold: bool,
+    #[serde(rename = "h", default)] hold: IntBool,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -392,7 +387,7 @@ impl<T: FromTo<Value>> From<AnimatedHelper> for Vec<KeyFrame<T>> {
                             if let Some(prev) = result.last_mut() {
                                 prev.end_frame = k.start_frame;
                             }
-                            if k.hold { k.end_value = Some(k.start_value.clone()); }
+                            if k.hold.into() { k.end_value = Some(k.start_value.clone()); }
                             result.push(k)
                         }
                         LegacyTolerantKeyFrame::TOnly { t } => {

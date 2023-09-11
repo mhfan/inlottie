@@ -34,8 +34,7 @@ pub type Vector2D = euclid::default::Vector2D<f32>;
     #[serde(rename =  "w")] pub  width: u32,
     #[serde(rename =  "h")] pub height: u32,
 
-    #[serde(rename = "ddd", default, deserialize_with = "bool_from_int",
-        serialize_with = "int_from_bool")] is_3d: bool,
+    #[serde(rename = "ddd", default)] is_3d: IntBool,
 
     pub layers: Vec<Layer>, // array of Precomposition, Solid Color, Image,
                             // Null, Shape, Text, Audio, Camera or Data Layer
@@ -72,8 +71,7 @@ impl Model {
     #[serde(rename = "nm")] name: Option<String>,
     //#[serde(rename = "mn")] match_name: Option<String>, // used in expressions
 
-    #[serde(rename = "ddd", default, deserialize_with = "bool_from_int",
-        serialize_with = "int_from_bool")] is_3d: bool,
+    #[serde(rename = "ddd", default)] is_3d: IntBool,
     #[serde(rename =  "hd", default)] pub hidden: bool,
     //#[serde(rename =  "ty")] ltype: u8, // XXX:
     #[serde(rename = "ind", default)] pub index: Option<u32>,
@@ -85,13 +83,11 @@ impl Model {
     #[serde(rename = "st")] pub  start_time: f32,
 
     #[serde(rename = "tt", default)] pub matte_mode: Option<MatteMode>,
-    //#[serde(rename = "td", default, deserialize_with = "bool_from_int",
-    //    serialize_with = "int_from_bool")] target: bool,
+    //#[serde(rename = "td", default)] target: IntBool,
 
     // "masksProperties", "ef", "sy" // XXX:
     #[serde(rename = "ks", default)] pub transform: Option<Transform>,
-    #[serde(rename = "ao", default, deserialize_with = "bool_from_int",
-        serialize_with = "int_from_bool")] pub auto_orient: bool,
+    #[serde(rename = "ao", default)] pub auto_orient: IntBool,
     //#[serde(rename = "tp", default)] matte_index: u32,
 
     //#[serde(rename = "hasMask")] has_mask: bool,
@@ -99,8 +95,7 @@ impl Model {
     #[serde(rename = "bm", default)] pub blend_mode: Option<BlendMode>,
 
     // "cl", "ln", "tg" // XXX: for SVG
-    //#[serde(rename = "ct", default, deserialize_with = "bool_from_int",
-    //    serialize_with = "int_from_bool")] apply_tr: bool,
+    //#[serde(rename = "ct", default)] apply_tr: IntBool,
 
     #[serde(flatten)] pub content: LayerContent,
     //#[serde(skip)] pub id: u32, // XXX:
@@ -114,8 +109,8 @@ impl Layer {
     }
 
     pub fn new(content: LayerContent, start_frame: f32, end_frame: f32, start_time: f32) -> Self {
-        Layer { is_3d: false, hidden: false, index: None, parent_index: None, //id: 0,
-            auto_orient: false, start_frame, end_frame, start_time, name: None,
+        Layer { is_3d: false.into(), hidden: false, index: None, parent_index: None, //id: 0,
+            auto_orient: false.into(), start_frame, end_frame, start_time, name: None,
             transform: None, content, matte_mode: None, blend_mode: None,
         }
     }
@@ -221,8 +216,7 @@ impl<T: Clone> KeyFrame<T> {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)] pub struct Animated<T> {
-    #[serde(rename = "a", default, deserialize_with = "bool_from_int",
-        serialize_with = "int_from_bool")] pub animated: bool,
+    #[serde(rename = "a", default)] pub animated: IntBool,
     #[serde(rename = "k", bound = "T: FromTo<helpers::Value>",
         deserialize_with = "keyframes_from_array", serialize_with = "array_from_keyframes",
     )] pub keyframes: Vec<KeyFrame<T>>,
@@ -230,7 +224,7 @@ impl<T: Clone> KeyFrame<T> {
 
 impl<T: Clone> Animated<T> {
     pub fn from_value(value: T) -> Self {
-        Animated { animated: false,
+        Animated { animated: false.into(),
             keyframes: vec![KeyFrame { start_value: value.clone(), end_value: value,
                 start_frame: 0.0, end_frame: 0.0, easing_out: None, easing_in: None }],
         }
@@ -238,7 +232,7 @@ impl<T: Clone> Animated<T> {
 }
 
 impl<T: Default> Default for Animated<T> {
-    fn default() -> Self { Self { animated: false, keyframes: vec![KeyFrame::default()] } }
+    fn default() -> Self { Self { animated: false.into(), keyframes: vec![KeyFrame::default()] } }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -390,10 +384,10 @@ pub enum MatteMode { Normal = 0, Alpha = 1, InvertedAlpha = 2, Luma = 3, Inverte
 impl Fill {
     pub fn transparent() -> Fill {
         Fill { fill_rule: FillRule::NonZero,
-            opacity: Animated { animated: false,
+            opacity: Animated { animated: false.into(),
                 keyframes: vec![KeyFrame::from_value(0.0)],
             },
-              color: Animated { animated: false,
+              color: Animated { animated: false.into(),
                 keyframes: vec![KeyFrame::from_value(Rgb::new_u8(0, 0, 0))],
             },
         }
@@ -403,10 +397,10 @@ impl Fill {
 impl From<Rgba> for Fill {
     fn from(color: Rgba) -> Self {
         Fill { fill_rule: FillRule::NonZero,
-            opacity: Animated { animated: false,
+            opacity: Animated { animated: false.into(),
                 keyframes: vec![KeyFrame::from_value(color.a as f32 / 255.0)],
             },
-              color: Animated { animated: false,
+              color: Animated { animated: false.into(),
                 keyframes: vec![KeyFrame::from_value(Rgb::new_u8(color.r, color.g, color.b))],
             },
         }
@@ -494,8 +488,7 @@ impl Asset {
     #[serde(rename = "nm", default)] name: Option<String>,
     #[serde(rename = "u", default)] pwd: String,
     #[serde(rename = "p")] pub filename: String, id: String,
-    #[serde(rename = "e", default, deserialize_with = "bool_from_int",
-        serialize_with = "int_from_bool")] pub embedded: bool,
+    #[serde(rename = "e", default)] pub embedded: IntBool,
     #[serde(rename = "w", default)] pub  width: Option<u32>,
     #[serde(rename = "h", default)] pub height: Option<u32>,
 }
@@ -560,12 +553,12 @@ pub enum TextSelectorOrProperty { Data(TextStyle), Selector(TextSelector), }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)] pub struct TextRangeSelector {
-    #[serde(rename = "t", deserialize_with = "bool_from_int")] expressible: bool,
+    #[serde(rename = "t")] expressible: IntBool,
     #[serde(rename = "xe")] max_ease: Animated<f32>,
     #[serde(rename = "ne")] min_ease: Animated<f32>,
     #[serde(rename = "a")] max_amount: Animated<f32>,
     #[serde(rename = "b")] based_on: TextBased,
-    #[serde(rename = "rn", deserialize_with = "bool_from_int")] randomize: bool,
+    #[serde(rename = "rn")] randomize: IntBool,
     #[serde(rename = "sh")] shape: TextShape,
     #[serde(rename = "o", default)] offset: Option<Animated<f32>>,
     #[serde(rename = "r")] range_units: TextBased,
