@@ -3108,7 +3108,7 @@
                             },
                             "ty": {
                                 "title": "Type",
-                                "description": "Layer Type",
+                                "description": "Layer type",
                                 "type": "integer",
                                 "oneOf": [
                                     {
@@ -4748,7 +4748,7 @@
                         "properties": {
                             "ty": {
                                 "title": "Type",
-                                "description": "Layer Type",
+                                "description": "Style type",
                                 "type": "integer",
                                 "const": 6
                             },
@@ -4800,7 +4800,7 @@
                         "properties": {
                             "ty": {
                                 "title": "Type",
-                                "description": "Layer Type",
+                                "description": "Style type",
                                 "type": "integer",
                                 "const": 8
                             },
@@ -4865,7 +4865,7 @@
                         "properties": {
                             "ty": {
                                 "title": "Type",
-                                "description": "Layer Type",
+                                "description": "Style type",
                                 "type": "integer",
                                 "const": 7
                             },
@@ -4901,7 +4901,7 @@
                         "properties": {
                             "ty": {
                                 "title": "Type",
-                                "description": "Layer Type",
+                                "description": "Style type",
                                 "type": "integer",
                                 "const": 3
                             },
@@ -4953,7 +4953,7 @@
                         "properties": {
                             "ty": {
                                 "title": "Type",
-                                "description": "Layer Type",
+                                "description": "Style type",
                                 "type": "integer",
                                 "const": 5
                             },
@@ -5036,7 +5036,7 @@
                         "properties": {
                             "ty": {
                                 "title": "Type",
-                                "description": "Layer Type",
+                                "description": "Style type",
                                 "type": "integer",
                                 "const": 4
                             },
@@ -5093,7 +5093,7 @@
                         "properties": {
                             "ty": {
                                 "title": "Type",
-                                "description": "Layer Type",
+                                "description": "Style type",
                                 "type": "integer",
                                 "const": 0
                             },
@@ -5125,7 +5125,7 @@
                         "properties": {
                             "ty": {
                                 "title": "Type",
-                                "description": "Layer Type",
+                                "description": "Style type",
                                 "type": "integer",
                                 "const": 1
                             },
@@ -5188,7 +5188,7 @@
                         "properties": {
                             "ty": {
                                 "title": "Type",
-                                "description": "Layer Type",
+                                "description": "Style type",
                                 "type": "integer",
                                 "const": 2
                             },
