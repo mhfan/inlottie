@@ -15,13 +15,6 @@ pub struct Angle {
 #[doc = "An animatable property that holds an array of numbers"]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AnimatedProperty {
-    #[serde(flatten)]
-    pub subtype_0: AnimatedPropertySubtype0,
-    #[serde(flatten)]
-    pub subtype_1: AnimatedPropertySubtype1,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AnimatedPropertySubtype0 {
     #[doc = "Whether the property is animated"]
     #[serde(default)]
     pub a: IntBoolean,
@@ -32,10 +25,8 @@ pub struct AnimatedPropertySubtype0 {
     pub sid: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x: Option<String>,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AnimatedPropertySubtype1 {
-    #[doc = "Array of keyframes"]
+
+    #[doc = "Array of keyframes"] // XXX: if a == 1
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub k: Vec<Keyframe>,
 }
@@ -294,13 +285,9 @@ pub struct ColorOverlayStyle {
 pub struct ColorValue {
     #[serde(flatten)]
     pub subtype_0: AnimatedProperty,
-    #[serde(flatten)]
-    pub subtype_1: ColorValueSubtype1,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ColorValueSubtype1 {
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub k: Option<Color>,
+    pub k: Option<Color>, // XXX: if subtype_0.a == 0
 }
 #[doc = "How to stack copies in a repeater"]
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -754,28 +741,31 @@ type IntBoolean = crate::IntBool;
 pub struct Keyframe {
     #[serde(flatten)]
     pub subtype_0: KeyframeBase,
-    #[serde(flatten)]
-    pub subtype_1: KeyframeSubtype1,
-    #[serde(flatten)]
-    pub subtype_2: KeyframeSubtype2,
+
+    #[doc = "Value at the end of the keyframe, note that this is deprecated and you should use `s` from the next keyframe to get this value"]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub e: Vec<f32>,
+    #[doc = "Value at this keyframe. Note the if the property is a scalar, keyframe values are still represented as arrays"]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub s: Vec<f32>,
+
+    // XXX: if subtype_0.h == 0
+    #[doc = "Easing tangent going into the next keyframe"]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub i: Option<KeyframeBezierHandle>,
+    #[doc = "Easing tangent leaving the current keyframe"]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub o: Option<KeyframeBezierHandle>,
 }
 #[doc = "A Keyframes specifies the value at a specific time and the interpolation function to reach the next keyframe."]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct KeyframeBase {
-    #[serde(flatten)]
-    pub subtype_0: KeyframeBaseSubtype0,
-    #[serde(flatten)]
-    pub subtype_1: KeyframeBaseSubtype1,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct KeyframeBaseSubtype0 {
     #[serde(default)]
     pub h: IntBoolean,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub t: Option<f32>,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct KeyframeBaseSubtype1 {
+
+    // XXX: if h == 0
     #[doc = "Easing tangent going into the next keyframe"]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub i: Option<KeyframeBezierHandle>,
@@ -787,27 +777,9 @@ pub struct KeyframeBaseSubtype1 {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct KeyframeBezierHandle {
     #[doc = "Time component:\n0 means start time of the keyframe,\n1 means time of the next keyframe."]
-    pub x: X,
+    pub x: XorY,
     #[doc = "Value interpolation component:\n0 means start value of the keyframe,\n1 means value at the next keyframe."]
-    pub y: Y,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct KeyframeSubtype1 {
-    #[doc = "Value at the end of the keyframe, note that this is deprecated and you should use `s` from the next keyframe to get this value"]
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub e: Vec<f32>,
-    #[doc = "Value at this keyframe. Note the if the property is a scalar, keyframe values are still represented as arrays"]
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub s: Vec<f32>,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct KeyframeSubtype2 {
-    #[doc = "Easing tangent going into the next keyframe"]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub i: Option<KeyframeBezierHandle>,
-    #[doc = "Easing tangent leaving the current keyframe"]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub o: Option<KeyframeBezierHandle>,
+    pub y: XorY,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Layer {
@@ -969,20 +941,8 @@ pub struct MeshWarpEffect {
 #[doc = "Document metadata"]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Metadata {
-    #[serde(flatten, default, skip_serializing_if = "Option::is_none")]
-    pub subtype_0: Option<MetadataSubtype0>,
-    #[serde(flatten, default, skip_serializing_if = "Option::is_none")]
-    pub subtype_1: Option<MetadataSubtype1>,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MetadataSubtype0 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub k: Vec<String>,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MetadataSubtype1 {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub k: Option<String>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Modifier(pub ShapeElement);
@@ -1008,13 +968,12 @@ pub struct MotionBlur {
 pub struct MultiDimensional {
     #[serde(flatten)]
     pub subtype_0: AnimatedProperty,
-    #[serde(flatten)]
-    pub subtype_1: MultiDimensionalSubtype1,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MultiDimensionalSubtype1 {
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub k: Vec<f32>,
+    pub k: Vec<f32>, // XXX: if subtype_0.a == 0
+
+    #[doc = "Number of components in the value arrays.\nIf present values will be truncated or expanded to match this length when accessed from expressions."]
+    pub l: u32,
 }
 #[doc = "Represents a style for shapes without fill or stroke"]
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1094,13 +1053,7 @@ pub struct Point {
 pub struct Polystar {
     #[serde(flatten)]
     pub subtype_0: Shape,
-    #[serde(flatten)]
-    pub subtype_1: PolystarSubtype1,
-    #[serde(flatten)]
-    pub subtype_2: PolystarSubtype2,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct PolystarSubtype1 {
+
     pub or: Value,
     #[doc = "Outer Roundness as a percentage"]
     pub os: Value,
@@ -1112,39 +1065,14 @@ pub struct PolystarSubtype1 {
     #[serde(default = "defaults::polystar_subtype1_sy")]
     pub sy: StarType,
     pub ty: String,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct PolystarSubtype2 {
-    pub ir: Value,
+
+    pub ir: Value, // XXX: if sy == 1
     #[doc = "Inner Roundness as a percentage"]
     pub is: Value,
 }
 #[doc = "An animatable property to represent a position in space"]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Position {
-    #[serde(flatten)]
-    pub subtype_0: PositionSubtype0,
-    #[serde(flatten)]
-    pub subtype_1: PositionSubtype1,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct PositionKeyframe {
-    #[serde(flatten)]
-    pub subtype_0: Keyframe,
-    #[serde(flatten)]
-    pub subtype_1: PositionKeyframeSubtype1,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct PositionKeyframeSubtype1 {
-    #[doc = "Tangent for values (eg: moving position around a curved path)"]
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ti: Vec<f32>,
-    #[doc = "Tangent for values (eg: moving position around a curved path)"]
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub to: Vec<f32>,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct PositionSubtype0 {
     #[doc = "Whether the property is animated"]
     #[serde(default)]
     pub a: IntBoolean,
@@ -1155,13 +1083,23 @@ pub struct PositionSubtype0 {
     pub l: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x: Option<String>,
+
+    #[serde(flatten)] // XXX: if a == 1
+    pub subtype_0: PositionSubtype1Subtype0,
+    #[serde(flatten)] // XXX: if a != 1
+    pub subtype_1: PositionSubtype1Subtype1,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct PositionSubtype1 {
+pub struct PositionKeyframe {
     #[serde(flatten)]
-    pub subtype_0: PositionSubtype1Subtype0,
-    #[serde(flatten)]
-    pub subtype_1: PositionSubtype1Subtype1,
+    pub subtype_0: Keyframe,
+
+    #[doc = "Tangent for values (eg: moving position around a curved path)"]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ti: Vec<f32>,
+    #[doc = "Tangent for values (eg: moving position around a curved path)"]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub to: Vec<f32>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PositionSubtype1Subtype0 {
@@ -1394,13 +1332,6 @@ pub enum ShapeListItem {
 #[doc = "An animatable property that holds a Bezier"]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ShapeProperty {
-    #[serde(flatten)]
-    pub subtype_0: ShapePropertySubtype0,
-    #[serde(flatten)]
-    pub subtype_1: ShapePropertySubtype1,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ShapePropertySubtype0 {
     #[doc = "Whether the property is animated"]
     #[serde(default)]
     pub a: IntBoolean,
@@ -1408,12 +1339,10 @@ pub struct ShapePropertySubtype0 {
     pub ix: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x: Option<String>,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ShapePropertySubtype1 {
-    #[serde(flatten)]
+
+    #[serde(flatten)] // XXX: if a == 1
     pub subtype_0: ShapePropertySubtype1Subtype0,
-    #[serde(flatten)]
+    #[serde(flatten)] // XXX: if a != 1
     pub subtype_1: ShapePropertySubtype1Subtype1,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1778,13 +1707,6 @@ pub struct TintEffect {
 #[doc = "Layer transform"]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Transform {
-    #[serde(flatten)]
-    pub subtype_0: TransformSubtype0,
-    #[serde(flatten)]
-    pub subtype_1: TransformSubtype1,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TransformSubtype0 {
     #[doc = "Anchor point: a position (relative to its parent) around which transformations are applied (ie: center for rotation / scale)"]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub a: Option<Position>,
@@ -1799,9 +1721,7 @@ pub struct TransformSubtype0 {
     #[doc = "Skew amount as an angle in degrees"]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sk: Option<Value>,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TransformSubtype1 {
+
     #[serde(flatten, default, skip_serializing_if = "Option::is_none")]
     pub subtype_0: Option<TransformSubtype1Subtype0>,
     #[serde(flatten, default, skip_serializing_if = "Option::is_none")]
@@ -1929,13 +1849,9 @@ pub struct UserMetadata {
 pub struct Value {
     #[serde(flatten)]
     pub subtype_0: AnimatedProperty,
-    #[serde(flatten)]
-    pub subtype_1: ValueSubtype1,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ValueSubtype1 {
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub k: Option<f32>,
+    pub k: Option<f32>, // XXX: if subtype_0.a == 0
 }
 #[doc = "Layer used to affect visual elements"]
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2009,16 +1925,10 @@ pub struct WavyEffect {
     pub ty: u32,
 }
 #[doc = "Time component:\n0 means start time of the keyframe,\n1 means time of the next keyframe."]
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum X {
-    Variant0(Vec<f32>),
-    Variant1(f32),
-}
 #[doc = "Value interpolation component:\n0 means start value of the keyframe,\n1 means value at the next keyframe."]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
-pub enum Y {
+pub enum XorY {
     Variant0(Vec<f32>),
     Variant1(f32),
 }
