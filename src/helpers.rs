@@ -120,42 +120,218 @@ impl Serialize for ColorList {
     }
 }
 
-/* use crate::schema::{LayersItem, PrecompositionLayer};
+use crate::schema::*;
 
 impl<'de> Deserialize<'de> for LayersItem {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
-
         Ok( match value.get("ty").and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| D::Error::missing_field("ty"))? {
-            0 => Self::PrecompositionLayer(
-                PrecompositionLayer::deserialize(value).map_err(D::Error::custom)?),
+            .ok_or_else(|| D::Error::missing_field("ty"))? as u32 {
+
+            0 => Self::Precomposition(PrecompositionLayer::
+                deserialize(value).map_err(D::Error::custom)?),
+            1 => Self::SolidColor(SolidColorLayer::deserialize(value).map_err(D::Error::custom)?),
+            2 | 15 => Self::Image(ImageLayer::deserialize(value).map_err(D::Error::custom)?),
+            3 => Self::Null(VisualLayer::deserialize(value).map_err(D::Error::custom)?),
+            4 => Self::Shape(ShapeLayer::deserialize(value).map_err(D::Error::custom)?),
+            5 => Self::Text ( TextLayer::deserialize(value).map_err(D::Error::custom)?),
+            6 => Self::Audio(AudioLayer::deserialize(value).map_err(D::Error::custom)?),
+           13 => Self::Camera(CameraLayer::deserialize(value).map_err(D::Error::custom)?),
 
             _ => unreachable!()
         })
     }
 }
 
-impl Serialize for LayersItem {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::PrecompositionLayer(layer) =>
-                serializer.serialize_newtype_variant("ty", 0, "", layer),
+/* impl<'de, T, K> Deserialize<'de> for AnimatedValue<T, K>
+    where T: Deserialize<'de>, K: Deserialize<'de> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(d)?;     //dbg!(&value);
+        // "a" is in the same level as "k", but value is sub-level of "k"
+        // XXX: Note some old animations might not have this
+        Ok( match value.get("a").and_then(serde_json::Value::as_u64).unwrap_or(0) {
+            1 => Self::Animated(Vec::<K>::deserialize(value).map_err(D::Error::custom)?),
+            0 => Self::Static(T::deserialize(value).map_err(D::Error::custom)?),
+            _ => unreachable!()
+        })
+    }
+}
+
+pub(crate) fn serialize_animated<S, T, K>(av: &AnimatedValue<T, K>, serializer: S) ->
+    Result<S::Ok, S::Error> where S: Serializer, T: Serialize, K: Serialize {
+    #[derive(Serialize)] struct AnimatedHelper<'a, T, K> { a: u8,
+        #[serde(flatten)] content: &'a AnimatedValue<T, K>,
+    }
+
+    let item = match av {
+        AnimatedValue::Animated(_) => AnimatedHelper { a: 1, content: av, },
+        AnimatedValue::Static(_)   => AnimatedHelper { a: 0, content: av, },
+    };  item.serialize(serializer)
+} */
+
+impl<'de> Deserialize<'de> for EffectsItem {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(d)?;
+        let ty = value.get("ty").and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| D::Error::missing_field("ty"))? as u32;
+        let effect = Effect::deserialize(value).map_err(D::Error::custom)?;
+        Ok( match ty {
+
+             5 => Self::Custom(effect),
+            20 => Self::Tint(effect),
+            21 => Self::Fill(effect),
+            22 => Self::Stroke(effect),
+            23 => Self::Tritone(effect),
+            24 => Self::ProLevels(effect),
+            25 => Self::DropShadow(effect),
+            26 => Self::RadialWipe(effect),
+            27 => Self::DisplacementMap(effect),
+            28 => Self::Matte3(effect),
+            29 => Self::GaussianBlur(effect),
+            30 => Self::Twirl(effect),
+            31 => Self::MeshWarp(effect),
+            32 => Self::Wavy(effect),
+            33 => Self::Spherize(effect),
+            34 => Self::Puppet(effect),
 
             _ => unreachable!()
-        }
-
-        //let mut state = serializer.serialize_struct("", 2)?;
-        //state.serialize_field("ty", 0)?; state.serialize_field("", layer)?; state.end()
-
-        //#[derive(Serialize)] #[serde(untagged)] enum LayersItemRef<'a> {
-        //    SolidColor(&'a SolidColor),
-        //}
-        //#[derive(Serialize)] struct TypedLayersItem<'a> {
-        //    ty: u32, #[serde(flatten)] content: LayersItemRef<'a>,
-        //}
-
-        //serializer.serialize_str("ty: ")?; serializer.serialize_u32(0)?;
-        //layer.serialize(serializer)
+        })
     }
-} */
+}
+
+impl<'de> Deserialize<'de> for EffectValuesItem {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(d)?;
+        Ok( match value.get("ty").and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| D::Error::missing_field("ty"))? as u32 {
+
+            0 => Self::Slider(EffectValue::<Value>::
+                deserialize(value).map_err(D::Error::custom)?),
+            1 => Self::Angle (EffectValue::<Value>::
+                deserialize(value).map_err(D::Error::custom)?),
+            2 => Self::EffectColor(EffectValue::<ColorValue>::
+                deserialize(value).map_err(D::Error::custom)?),
+            3 => Self::Point(EffectValue::<Animated2D>::
+                deserialize(value).map_err(D::Error::custom)?),
+            4 => Self::Checkbox(EffectValue::<Value>::
+                deserialize(value).map_err(D::Error::custom)?),
+
+            6 => Self::Ignored (EffectValue::<f32>::
+                deserialize(value).map_err(D::Error::custom)?),
+            7 => Self::DropDown(EffectValue::<Value>::
+                deserialize(value).map_err(D::Error::custom)?),
+           10 => Self::EffectLayer(EffectValue::<Value>::
+                deserialize(value).map_err(D::Error::custom)?),
+
+            _ => unreachable!()
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for LayerStyleItem {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(d)?;
+        Ok( match value.get("ty").and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| D::Error::missing_field("ty"))? as u32 {
+
+            0 => Self::Stroke(StrokeStyle::deserialize(value).map_err(D::Error::custom)?),
+            1 => Self::DropShadow (DropShadowStyle::
+                deserialize(value).map_err(D::Error::custom)?),
+            2 => Self::InnerShadow(InnerShadowStyle::
+                deserialize(value).map_err(D::Error::custom)?),
+            3 => Self::OuterGlow(OuterGlowStyle::deserialize(value).map_err(D::Error::custom)?),
+            4 => Self::InnerGlow(InnerGlowStyle::deserialize(value).map_err(D::Error::custom)?),
+            5 => Self::BevelEmboss(BevelEmbossStyle::
+                deserialize(value).map_err(D::Error::custom)?),
+            6 => Self::Satin(SatinStyle::deserialize(value).map_err(D::Error::custom)?),
+            7 => Self::ColorOverlay(ColorOverlayStyle::
+                deserialize(value).map_err(D::Error::custom)?),
+            8 => Self::GradientOverlay(GradientOverlayStyle::
+                deserialize(value).map_err(D::Error::custom)?),
+
+            _ => unreachable!()
+        })
+    }
+}
+
+#[cfg(test)] mod test { use super::*;
+    use serde_test::{Token, assert_tokens/*, assert_de_tokens, assert_ser_tokens*/};
+
+    #[test] fn test_enum_type() {
+        let tokens = [
+            Token::Struct { name: "Container", len: 1 },
+            Token::Str("layers"),
+            Token::Seq { len: Some(1) },
+                Token::Map { len: None, },
+                //Token::NewtypeVariant { name: "TestLayersItem", variant: "SomeLayer" },
+                    //Token::Struct { name: "SomeLayer", len: 3 },
+                    Token::Str("ty"),  Token::U32(0),
+                    Token::Str("ind"), Token::U32(1),
+                    Token::Str("nm"),  Token::String("name"),
+                    //Token::StructEnd,
+                Token::MapEnd,
+            Token::SeqEnd,
+            Token::StructEnd,
+        ];
+
+        let cont = Container { layers: vec![
+            TestLayersItem::SomeLayer( SomeLayer { ind: 1, nm: "name".to_owned() }),
+        ] };
+
+        assert_tokens(&cont, &tokens);
+        //assert_de_tokens (&cont, &tokens);
+        //assert_ser_tokens(&cont, &tokens);
+    }
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)] struct Container {
+    #[serde(serialize_with = "serialize_with_type")] layers: Vec<TestLayersItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)] enum TestLayersItem { SomeLayer(SomeLayer),
+    //Color(Rgba), //IntBool(IntBool), //Vector2D(Vector2D),
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)] struct SomeLayer {
+    ind: u32, nm: String,
+}
+
+impl<'de> Deserialize<'de> for TestLayersItem {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(d)?;
+
+        Ok( match value.get("ty").and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| D::Error::missing_field("ty"))? as u32 {
+            0 => Self::SomeLayer(SomeLayer::deserialize(value).map_err(D::Error::custom)?),
+
+            _ => unreachable!()
+        })
+    }
+}
+
+fn serialize_with_type<S: Serializer>(layers: &[TestLayersItem],
+    serializer: S) -> Result<S::Ok, S::Error> {
+    #[derive(Serialize)] struct TypedLayersItem<'a> { ty: u32,
+        #[serde(flatten)] content: &'a TestLayersItem,
+    }
+
+    use serde::ser::SerializeSeq;
+    let mut state = serializer.serialize_seq(Some(layers.len()))?;
+    for layer in layers {
+        let item = match layer {
+            TestLayersItem::SomeLayer(_) => TypedLayersItem { ty: 0, content: layer, },
+                //serializer.serialize_newtype_variant("ty", 0, "", layer),
+
+            //_ => unreachable!()
+        };  //item.serialize(serializer)
+        state.serialize_element(&item)?;
+    }   state.end()
+
+    //let mut state = serializer.serialize_struct("Struct of Layer", fields_of_layer + 1)?;
+    //state.serialize_field("ty", 0)?; state.serialize_fields_of(layer)?;   state.end()
+
+    //serializer.serialize_str("ty: ")?; serializer.serialize_u32(0)?;
+    //layer.serialize(serializer)   // flatten layer serialization
+}
+
+}

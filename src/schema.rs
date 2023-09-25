@@ -25,7 +25,7 @@ pub struct Animation {  // Top level object, describing the animation
     pub fr: f32, // Framerate in frames per second
     pub ip: f32, // In  Point, which frame the animation starts at (usually 0)
     #[serde(default = "defaults::animation_fr_op")]
-    pub op: f32, // Out Point, which frame the animation stops/loops at, 
+    pub op: f32, // Out Point, which frame the animation stops/loops at,
                  // which makes this the duration in frames when ip is 0
     #[serde(default = "defaults::animation_wh")]
     pub  w: u32, // Width  of the animation
@@ -62,25 +62,24 @@ pub struct Animation {  // Top level object, describing the animation
 
 //  FIXME: value of ty should be number rather than string,
 //  and so are hereafter EffectsItem/EffectValuesItem/LayerStyleItem/AnimatedValue
-#[derive(Clone, Debug, Deserialize, Serialize)] //#[serde(tag = "ty")]
-#[serde(untagged)] pub enum LayersItem {
-    /*#[serde(rename =  "0")] */PrecompositionLayer(PrecompositionLayer),
-    /*#[serde(rename =  "1")] */SolidColorLayer(SolidColorLayer),
-    /*#[serde(rename =  "2")] */ImageLayer(ImageLayer),
-    /*#[serde(rename =  "4")] */ShapeLayer(ShapeLayer),
-    /*#[serde(rename =  "6")] */AudioLayer(AudioLayer),
-    /*#[serde(rename =  "3")] */NullLayer(NullLayer),
-    /*#[serde(rename =  "5")] */TextLayer(TextLayer),
+#[derive(Clone, Debug, Serialize)] #[serde(untagged)] pub enum LayersItem {
+    /*  0 */Precomposition(PrecompositionLayer),
+    /*  1 */SolidColor(SolidColorLayer),
+    /*  2 */Image(ImageLayer),
+    /*  4 */Shape(ShapeLayer),
+    /*  6 */Audio(AudioLayer),
+    /*  3 */Null(NullLayer),
+    /*  5 */Text(TextLayer),
 
-    //#[serde(rename =  "7")] VideoPlaceholder,
-    //#[serde(rename =  "8")] ImageSequence,
-    //#[serde(rename =  "9")] VideoLayer,
-    //#[serde(rename = "11")] GuideLayer,
-    //#[serde(rename = "12")] AdjustmentLayer,
-    //#[serde(rename = "10")] ImagePlaceholder,
+    //  7 */VideoPlaceholder,
+    //  8 */ImageSequence,
+    //  9 */Video,
+    // 11 */Guide,
+    // 12 */Adjustment,
+    // 10 */ImagePlaceholder,
 
-    /*#[serde(rename = "13")] */CameraLayer(CameraLayer),
-    /*#[serde(rename = "15")] */DataLayer(DataLayer),
+    /* 13 */Camera(CameraLayer),
+    /* 15 */Data(DataLayer),
 }
 
 type NullLayer = VisualLayer;   // Layer with no data, useful to group layers together
@@ -257,11 +256,11 @@ pub enum TransformExtra { // XXX:
     pub s: bool, // Split, const true
 }
 
-type Value = AnimatedProperty<f32, KeyframeBase<Vec<f32>>>;
-type Position = AnimatedProperty<Vector2D, PositionKeyframe>;
+pub type Value = AnimatedProperty<f32, KeyframeBase<Vec<f32>>>;
+pub type Position = AnimatedProperty<Vector2D, PositionKeyframe>;
 type MultiDimensional = AnimatedProperty<Vec<f32>>;
-type Animated2D = AnimatedProperty<Vector2D>;
-type ColorValue = AnimatedProperty<Color>;
+pub type Animated2D = AnimatedProperty<Vector2D>;
+pub type ColorValue = AnimatedProperty<Color>;
 
 type Color = Rgba; // Vec<f32>; // Color as a [r, g, b] array with values in [0, 1]
 //  Note sometimes you might find color values with 4 components
@@ -269,7 +268,7 @@ type Color = Rgba; // Vec<f32>; // Color as a [r, g, b] array with values in [0,
 
 // An animatable property that holds an array of numbers
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AnimatedProperty<T, U = KeyframeBase<T>> {
+pub struct AnimatedProperty<T, K = KeyframeBase<T>> where T: Serialize, K: Serialize {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub  ix: Option<u32>,    // Property Index
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -287,14 +286,14 @@ pub struct AnimatedProperty<T, U = KeyframeBase<T>> {
     //  be truncated or expanded to match this length when accessed from expressions.
     #[serde(default, skip_serializing_if = "Option::is_none")] pub l: Option<u32>, // Length
 
-    #[serde(default)] pub a: Option<IntBool>,
-    #[serde(flatten)] ak: AnimatedValue<T, U>,
+    #[serde(default)] pub a: Option<IntBool>, // Note some old animations might not have this
+    //#[serde(serialize_with = "crate::helpers::serialize_animated")]
+    pub k: AnimatedValue<T, K>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] //#[serde(tag = "a")]
-#[serde(untagged)] pub enum AnimatedValue<T, U> {  // Whether the property is animated
-    #[serde(rename = "1")] Animated { k: Vec<U> },  // Array of keyframes, if a == 1
-    #[serde(rename = "0")] Static   { k: T },
+#[serde(untagged)] pub enum AnimatedValue<T, K> { // Whether the property is animated.
+    /* 0 */Static(T), /* 1 */Animated(Vec<K>), // Array of keyframes, if a == 1
 }
 
 //  A Keyframes specifies the value at a specific time and
@@ -960,42 +959,37 @@ pub struct Slots {} // XXX: Available property overrides
     #[serde(default = "defaults::effect_en")] pub en: IntBool, // Enabled
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] //#[serde(tag = "ty")]
-#[serde(untagged)] pub enum EffectsItem {
-    //  Some lottie files use `ty` = 5 for many different effects
-    #[serde(rename =  "5")] CustomEffect(Effect),
-
-    #[serde(rename = "20")] TintEffect(Effect), // Colorizes the layer
-    #[serde(rename = "21")] FillEffect(Effect), // Replaces the whole layer with the given color
-    #[serde(rename = "22")] StrokeEffect(Effect),
-    //  Maps layers colors based on bright/mid/dark colors
-    #[serde(rename = "23")] TritoneEffect(Effect),
-    #[serde(rename = "24")] ProLevelsEffect(Effect),
-    #[serde(rename = "25")] DropShadowEffect(Effect),   // Adds a shadow to the layer
-    #[serde(rename = "26")] RadialWipeEffect(Effect),
-    #[serde(rename = "27")] DisplacementMapEffect(Effect),
-    #[serde(rename = "29")] GaussianBlurEffect(Effect),
-    #[serde(rename = "28")] Matte3Effect(Effect),       // Uses a layer as a mask
-    #[serde(rename = "30")] TwirlEffect(Effect),
-    #[serde(rename = "32")] WavyEffect(Effect),
-    #[serde(rename = "31")] MeshWarpEffect(Effect),
-    #[serde(rename = "33")] SpherizeEffect(Effect),
-    #[serde(rename = "34")] PuppetEffect(Effect),
+#[derive(Clone, Debug, Serialize)] #[serde(untagged)] pub enum EffectsItem {
+    /*  5 */Custom(Effect), // Some lottie files use `ty` = 5 for many different effects
+    /* 20 */Tint(Effect),   // Colorizes the layer
+    /* 21 */Fill(Effect),   // Replaces the whole layer with the given color
+    /* 22 */Stroke(Effect),
+    /* 23 */Tritone(Effect),    // Maps layers colors based on bright/mid/dark colors
+    /* 24 */ProLevels(Effect),
+    /* 25 */DropShadow(Effect), // Adds a shadow to the layer
+    /* 26 */RadialWipe(Effect),
+    /* 27 */DisplacementMap(Effect),
+    /* 29 */GaussianBlur(Effect),
+    /* 28 */Matte3(Effect),     // Uses a layer as a mask
+    /* 30 */Twirl(Effect),
+    /* 32 */Wavy(Effect),
+    /* 31 */MeshWarp(Effect),
+    /* 33 */Spherize(Effect),
+    /* 34 */Puppet(Effect),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] //#[serde(tag = "ty")]
-#[serde(untagged)] pub enum EffectValuesItem {
-    //#[serde(rename =   "")] NoValue(()), // XXX:
-    #[serde(rename =  "0")] Slider(EffectValue<Value>),
-    #[serde(rename =  "1")] Angle(EffectValue<Value>),
-    #[serde(rename =  "3")] Point(EffectValue<Animated2D>),
-    #[serde(rename =  "2")] EffectColor(EffectValue<ColorValue>),
-    #[serde(rename =  "4")] Checkbox(EffectValue<Value>),
-    //#[serde(rename =  "5")] CustomEffect(Effect),
-    #[serde(rename =  "6")] Ignored (EffectValue<f32>),
-    #[serde(rename =  "7")] DropDown(EffectValue<Value>),
+#[derive(Clone, Debug, Serialize)] #[serde(untagged)] pub enum EffectValuesItem {
+    // "" */NoValue(()), // XXX:
+    /*  0 */Slider(EffectValue<Value>),
+    /*  1 */Angle (EffectValue<Value>),
+    /*  3 */Point (EffectValue<Animated2D>),
+    /*  2 */EffectColor(EffectValue<ColorValue>),
+    /*  4 */Checkbox(EffectValue<Value>),
+    //  5 */CustomEffect(Effect),
+    /*  6 */Ignored (EffectValue<f32>),
+    /*  7 */DropDown(EffectValue<Value>),
 
-    #[serde(rename = "10")] EffectLayer(EffectValue<Value>),
+    /* 10 */EffectLayer(EffectValue<Value>),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct EffectValue<T> {
@@ -1007,17 +1001,16 @@ pub struct Slots {} // XXX: Available property overrides
     pub v: Option<T>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] //#[serde(tag = "ty")]
-#[serde(untagged)] pub enum LayerStyleItem {
-    #[serde(rename = "0")] StrokeStyle(StrokeStyle),
-    #[serde(rename = "1")] DropShadowStyle(DropShadowStyle),
-    #[serde(rename = "2")] InnerShadowStyle(InnerShadowStyle),
-    #[serde(rename = "3")] OuterGlowStyle(OuterGlowStyle),
-    #[serde(rename = "4")] InnerGlowStyle(InnerGlowStyle),
-    #[serde(rename = "5")] BevelEmbossStyle(BevelEmbossStyle),
-    #[serde(rename = "6")] SatinStyle(SatinStyle),
-    #[serde(rename = "7")] ColorOverlayStyle(ColorOverlayStyle),
-    #[serde(rename = "8")] GradientOverlayStyle(GradientOverlayStyle),
+#[derive(Clone, Debug, Serialize)] #[serde(untagged)] pub enum LayerStyleItem {
+    /* 2 */InnerShadow(InnerShadowStyle),
+    /* 1 */DropShadow(DropShadowStyle),
+    /* 3 */OuterGlow(OuterGlowStyle),
+    /* 4 */InnerGlow(InnerGlowStyle),
+    /* 0 */Stroke(StrokeStyle),
+    /* 6 */Satin(SatinStyle),
+    /* 5 */BevelEmboss(BevelEmbossStyle),
+    /* 7 */ColorOverlay(ColorOverlayStyle),
+    /* 8 */GradientOverlay(GradientOverlayStyle),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct StrokeStyle { // Stroke / frame
