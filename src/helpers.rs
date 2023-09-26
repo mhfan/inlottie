@@ -74,7 +74,7 @@ pub(crate) fn str_from_rgba<S: Serializer>(c: &Rgba, serializer: S) -> Result<S:
 impl<'de> Deserialize<'de> for Vector2D {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let v = Vec::<f32>::deserialize(deserializer)?;
-        assert!(!v.is_empty() && v.len() < 4); // XXX: just ignore extra 3rd value?
+        assert!(!v.is_empty() && v.len() < 4); // XXX: ignore extra 3rd value?
         Ok(Self { x: v[0], y: v.get(1).cloned().unwrap_or(0.0) })
     }
 }
@@ -120,6 +120,11 @@ impl Serialize for ColorList {
     }
 }
 
+// default_animated(100.0), default_animated(Vector2D { x: 100.0, y: 100.0, })
+#[allow(dead_code)] pub(crate) fn default_animated<T, K>(val: T) -> AnimatedProperty<T, K> {
+    AnimatedProperty { a: Some(false.into()), k: AnimatedValue::Static(val) }
+}
+
 use crate::schema::*;
 
 impl<'de> Deserialize<'de> for LayersItem {
@@ -128,7 +133,7 @@ impl<'de> Deserialize<'de> for LayersItem {
         Ok( match value.get("ty").and_then(serde_json::Value::as_u64)
             .ok_or_else(|| D::Error::missing_field("ty"))? as u32 {
 
-            0 => Self::Precomposition(PrecompositionLayer::
+            0 => Self::Precomposition(PrecompLayer::
                 deserialize(value).map_err(D::Error::custom)?),
             1 => Self::SolidColor(SolidColorLayer::deserialize(value).map_err(D::Error::custom)?),
             2 | 15 => Self::Image(ImageLayer::deserialize(value).map_err(D::Error::custom)?),
@@ -169,36 +174,6 @@ pub(crate) fn serialize_animated<S, T, K>(av: &AnimatedValue<T, K>, serializer: 
     };  item.serialize(serializer)
 } */
 
-impl<'de> Deserialize<'de> for EffectsItem {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(d)?;
-        let ty = value.get("ty").and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| D::Error::missing_field("ty"))? as u32;
-        let effect = Effect::deserialize(value).map_err(D::Error::custom)?;
-        Ok( match ty {
-
-             5 => Self::Custom(effect),
-            20 => Self::Tint(effect),
-            21 => Self::Fill(effect),
-            22 => Self::Stroke(effect),
-            23 => Self::Tritone(effect),
-            24 => Self::ProLevels(effect),
-            25 => Self::DropShadow(effect),
-            26 => Self::RadialWipe(effect),
-            27 => Self::DisplacementMap(effect),
-            28 => Self::Matte3(effect),
-            29 => Self::GaussianBlur(effect),
-            30 => Self::Twirl(effect),
-            31 => Self::MeshWarp(effect),
-            32 => Self::Wavy(effect),
-            33 => Self::Spherize(effect),
-            34 => Self::Puppet(effect),
-
-            _ => unreachable!()
-        })
-    }
-}
-
 impl<'de> Deserialize<'de> for EffectValuesItem {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
@@ -215,14 +190,14 @@ impl<'de> Deserialize<'de> for EffectValuesItem {
                 deserialize(value).map_err(D::Error::custom)?),
             4 => Self::Checkbox(EffectValue::<Value>::
                 deserialize(value).map_err(D::Error::custom)?),
-
+            //   Self::CustomEffect
             6 => Self::Ignored (EffectValue::<f32>::
                 deserialize(value).map_err(D::Error::custom)?),
             7 => Self::DropDown(EffectValue::<Value>::
                 deserialize(value).map_err(D::Error::custom)?),
            10 => Self::EffectLayer(EffectValue::<Value>::
                 deserialize(value).map_err(D::Error::custom)?),
-
+            //   Self::NoValue
             _ => unreachable!()
         })
     }

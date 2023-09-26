@@ -1,44 +1,32 @@
 
-#![allow(clippy::enum_variant_names)]
-#![allow(clippy::large_enum_variant)]
-
 use serde::{Deserialize, Serialize};
 use serde_repr::{Serialize_repr, Deserialize_repr}; // for the underlying repr of a C-like enum
 use crate::helpers::{IntBool, Rgba, Vector2D, ColorList};
 
 //  https://lottiefiles.github.io/lottie-docs/schema/
-//  https://github.com/oxidecomputer/typify
-//  https://transform.tools/json-to-rust-serde
 
-//  https://lottiefiles.github.io/lottie-docs/animation/
-//  https://github.com/zimond/lottie-rs/blob/main/crates/model
-//  https://github.com/angular-rust/ux-animate/tree/main/src/runtime/lottie
-//  https://github.com/Samsung/rlottie/tree/master/src/lottie
-//  https://github.com/servo/pathfinder/tree/master/lottie
-
-//  https://github.com/msrd0/rlottie-rs
-//  https://github.com/thorvg/thorvg
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Animation {  // Top level object, describing the animation
-    #[serde(default = "defaults::animation_fr_op")]
+//  Top level object, describing the animation
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Animation {
+    #[serde(default = "defaults::animation_fr")]
     pub fr: f32, // Framerate in frames per second
     pub ip: f32, // In  Point, which frame the animation starts at (usually 0)
-    #[serde(default = "defaults::animation_fr_op")]
+    #[serde(default = "defaults::animation_fr")]
     pub op: f32, // Out Point, which frame the animation stops/loops at,
                  // which makes this the duration in frames when ip is 0
     #[serde(default = "defaults::animation_wh")]
     pub  w: u32, // Width  of the animation
     #[serde(default = "defaults::animation_wh")]
     pub  h: u32, // Height of the animation
-    pub layers: Vec<LayersItem>, //#[serde(flatten)] pub composition: Composition,
+    pub layers: Vec<LayersItem>,
 
     #[serde(flatten)] pub vo: VisualObject,
     #[serde(default = "defaults::animation_v")] pub v: String,
+    #[serde(default)] pub ddd: IntBool, // Whether the animation has 3D layers
 
     #[serde(default, skip_serializing_if =   "Vec::is_empty")]
     pub assets: Vec<AssetsItem>,    // List of assets that can be referenced by layers
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub fonts: Option<FontList>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fonts: Option<FontList>,    // how to skip serializing on fonts.list.is_empty?
     #[serde(default, skip_serializing_if =   "Vec::is_empty")]
     pub chars: Vec<CharacterData>,  // Data defining text characters as lottie shapes.
     //  If present a player might only render characters defined here and nothing else.
@@ -46,25 +34,23 @@ pub struct Animation {  // Top level object, describing the animation
     pub comps: Vec<Precomposition>, // List of Extra compositions not referenced by anything
 
     #[serde(default, skip_serializing_if =   "Vec::is_empty")]
-    pub markers: Vec<Marker>,       // Markers defining named sections of the composition.
-    #[serde(default)] pub ddd: IntBool,  // Whether the animation has 3D layers
+    pub markers: Vec<Marker>, // Markers defining named sections of the composition.
     #[serde(default, skip_serializing_if = "Option::is_none")] pub mb: Option<MotionBlur>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub  meta: Option<Metadata>,    // Document metadata
+    pub meta: Option<Box<Metadata>>, // Document metadata
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<UserMetadata>,     // User-defined metadata
+    pub metadata: Option<Box<UserMetadata>>, // User-defined metadata
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slots: Option<Slots>,       // Available property overrides
 }
 
-//#[derive(Clone, Debug, Deserialize, Serialize)]
-//pub struct Composition { pub layers: Vec<LayersItem>, } // Base class for layer holders
-
-//  FIXME: value of ty should be number rather than string,
-//  and so are hereafter EffectsItem/EffectValuesItem/LayerStyleItem/AnimatedValue
-#[derive(Clone, Debug, Serialize)] #[serde(untagged)] pub enum LayersItem {
-    /*  0 */Precomposition(PrecompositionLayer),
-    /*  1 */SolidColor(SolidColorLayer),
+#[allow(clippy::large_enum_variant)]
+//  value of ty should be number rather than string,
+//  and so are hereafter EffectValuesItem/LayerStyleItem/AnimatedValue
+#[derive(Clone, Debug, Serialize)] #[serde(untagged)]
+pub enum LayersItem { // Base class for layer holders
+    /*  0 */Precomposition(PrecompLayer),
+    /*  1 */SolidColor (SolidColorLayer),
     /*  2 */Image(ImageLayer),
     /*  4 */Shape(ShapeLayer),
     /*  6 */Audio(AudioLayer),
@@ -92,7 +78,7 @@ pub struct ImageLayer { // Layer that shows an image asset
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct PrecompositionLayer { // Layer that renders a Precomposition asset
+pub struct PrecompLayer { // Layer that renders a Precomposition asset
     #[serde(flatten)] pub vl: VisualLayer,
     #[serde(rename = "refId")] pub rid: String, // ID of the precomp as specified in the assets
     pub w: u32, //  Width of the clipping rect
@@ -140,35 +126,37 @@ pub struct VisualLayer { // Layer used to affect visual elements
     //pub cp: Option<bool>, // This is deprecated in favour of `ct`
     //  Marks that transforms should be applied before masks
     #[serde(default)] pub ct: IntBool, // Collapse Transform
+    //  If 1, The layer will rotate itself to match its animated position path
+    #[serde(default)] pub ao: IntBool, // Auto Orient
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mb: Option<bool>, // Whether motion blur is enabled for the layer
     #[serde(default)] pub bm: BlendMode,
-
-    //  If 1, The layer will rotate itself to match its animated position path
-    #[serde(default)] pub ao: IntBool, // Auto Orient
-    //  If set to 1, it means a layer is using this layer as a track matte
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub td: Option<IntBool>,
-    //  Index of the layer used as matte, if omitted assume the layer above the current one
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub tp: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tt: Option<MatteMode>,  // Defines the track matte mode for the layer
-
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "hasMask")]
     pub has_mask: Option<bool>, // Whether the layer has masks applied
+
+    //  If set to 1, it means a layer is using this layer as a track matte
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub td: Option<IntBool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tt: Option<MatteMode>,  // Defines the track matte mode for the layer
+    //  Index of the layer used as matte, if omitted assume the layer above the current one
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub tp: Option<u32>,
+
     #[serde(default, skip_serializing_if =   "Vec::is_empty", rename = "masksProperties")]
     pub masks_prop: Vec<Mask>,
 
     #[serde(default, skip_serializing_if =   "Vec::is_empty")]
-    pub ef: Vec<EffectsItem>,   // List of layer effects
+    pub ef: Vec<Effect>, // List of layer effects
     #[serde(default, skip_serializing_if =   "Vec::is_empty")]
-    pub sy: Vec<LayerStyleItem>,// Styling effects for this layer
+    pub sy: Vec<LayerStyleItem>, // Styling effects for this layer
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tg: Option<String>, //       tag name used by the SVG renderer
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ln: Option<String>, // `id` attribute used by the SVG renderer
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cl: Option<String>, // CSS class list used by the SVG renderer
+    #[serde(flatten, skip_serializing_if = "Option::is_none")] extra: Option<Box<SVGProp>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct SVGProp {
+    //  (tag name, `id` attribute, CSS class list) used by the SVG renderer
+    #[serde(default, skip_serializing_if = "String::is_empty")] pub tg: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")] pub ln: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")] pub cl: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Layer {
@@ -181,61 +169,74 @@ pub struct VisualLayer { // Layer used to affect visual elements
     #[serde(default)] pub ddd: IntBool, // Whether the layer is threedimensional
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hd: Option<bool>, // Whether the layer is hidden
+    #[serde(default = "defaults::time_stretch")] pub sr: f32,  // Time Stretch
+
     //  Index that can be used for parenting and referenced in expressions
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub    ind: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub ind: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<u32>, // Must be the `ind` property of another layer
-    #[serde(default = "defaults::layer_sr", skip_serializing_if = "Option::is_none")]
-    pub sr: Option<f32>,  // Time Stretch
+    /* Within a list of layers, the ind attribute (if present) must be unique.
+     * Layers having a parent attribute matching another layer will inherit their parent's
+     * transform (except for opacity).  Basically you need multiply the transform matrix
+     * by the parent's transform matrix to get a child layer's final transform.
+     * The flat layer structure and flexible parenting allows more flexibility but it's
+     * different from the more traditional approach of nesting child layers inside the
+     * parent layer (like a folder structure).  One of the advantages of flexible parenting
+     * is you can have children of the same layer be intermixed with unrelated layers. */
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct VisualObject {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nm: Option<String>, // Name, as seen from editors and the like
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mn: Option<String>, // Match name, used in expressions
+    #[cfg(feature = "expression")] pub mn: Option<String>, // Match name, used in expressions
 }
 
 //  It has the properties from Visual Object and its own properties are all animated
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Transform { // Layer transform
-    //  To make the anchor point properly line up with the center of location,
-    //  p and a should have the same value.  // a, p, s are 2D Vector
     //  Anchor point: a position (relative to its parent) around which
     //  transformations are applied (ie: center for rotation / scale)
     #[serde(default, skip_serializing_if = "Option::is_none")] pub  a: Option<Position>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub  p: Option<PositionTranslation>,
+
+    //  XXX: Transform for 3D layers (ddd == 1) will have a and p specified as 3D components.
+    //  To make the anchor point properly line up with the center of location,
+    //  p and a should have the same value.  // a, p, s are 2D Vector
+
+    // = "default_animated(Vector2D { x: 100.0, y: 100.0 })" // = "default_animated(100.0)"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub  s: Option<Animated2D>, // Scale factor, `[100, 100]` for no scaling
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub  o: Option<Value>, // Opacity, 0~100 `100` for fully opaque
+
     //  Skew Axis, Direction along which skew is applied,
     //  in degrees (`0` skews along the X axis, `90` along the Y axis)
     #[serde(default, skip_serializing_if = "Option::is_none")] pub sa: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sk: Option<Value>, // Skew amount as an angle in degrees
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub p: Option<PositionTranslation>,
     #[serde(default, skip_serializing_if = "Option::is_none", flatten)]
-    pub extra: Option<TransformExtra>,
+    pub extra: Option<Box<TransformExtra>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
 pub enum PositionTranslation { Normal(Position), // Position / Translation
-    Split(SplitVector), // Position / Translation with split components
+    Split(Box<SplitVector>), // Position / Translation with split components
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
-pub enum TransformExtra { // XXX:
+pub enum TransformExtra {
     Rotation { // Rotation in degrees (0~360), clockwise
         #[serde(default, skip_serializing_if = "Option::is_none")]  r: Option<Value>,
     },
-    Split { // Split rotation component, X/Y/Z Rotation and Orientation
+    Split { // XXX: Split rotation component, X/Y/Z (3D) Rotation and Orientation
         #[serde(default, skip_serializing_if = "Option::is_none")] rx: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")] ry: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rz: Option<Value>, // equivalent to `r` when not split
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        or: Option<Animated2D>, // Orientation
+        or: Option<Animated2D>, // Orientation, MultiDimentional
     },
 }
 
@@ -243,9 +244,9 @@ pub enum TransformExtra { // XXX:
     #[serde(flatten)] pub kf: KeyframeBase<Vector2D>,
 
     //  Tangent for values (eg: moving position around a curved path)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if =   "Vec::is_empty")]
     pub ti: Vec<f32>, // Value  In Tangent
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if =   "Vec::is_empty")]
     pub to: Vec<f32>, // Value Out Tangent
 }
 
@@ -253,7 +254,7 @@ pub enum TransformExtra { // XXX:
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct SplitVector {
     pub x: Value, pub y: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")] pub z: Option<Value>,
-    pub s: bool, // Split, const true
+    pub s: bool, // Split, default true const
 }
 
 pub type Value = AnimatedProperty<f32, KeyframeBase<Vec<f32>>>;
@@ -266,25 +267,10 @@ type Color = Rgba; // Vec<f32>; // Color as a [r, g, b] array with values in [0,
 //  Note sometimes you might find color values with 4 components
 //  (the 4th being alpha) but most player ignore the last component.
 
-// An animatable property that holds an array of numbers
+//  An animatable property that holds an array of numbers
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AnimatedProperty<T, K = KeyframeBase<T>> where T: Serialize, K: Serialize {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub  ix: Option<u32>,    // Property Index
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub   x: Option<String>, // Expression
-/*  Properties can have expressions associated with them, when this is the case
-    the value of such properties can be modified by using the expression.
-
-    The expression language is based on JavaScript / ECMAScript.
-    https://lottiefiles.github.io/lottie-docs/expressions/
- */
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sid: Option<String>, // Slot ID, One of the ID in the file's slots
-    //  Number of components in the value arrays. If present values will
-    //  be truncated or expanded to match this length when accessed from expressions.
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub l: Option<u32>, // Length
+pub struct AnimatedProperty<T, K = KeyframeBase<T>> {
+    #[cfg(feature = "expression")] #[serde(flatten)] expr: Option<Box<Expression>>,
 
     #[serde(default)] pub a: Option<IntBool>, // Note some old animations might not have this
     //#[serde(serialize_with = "crate::helpers::serialize_animated")]
@@ -294,6 +280,25 @@ pub struct AnimatedProperty<T, K = KeyframeBase<T>> where T: Serialize, K: Seria
 #[derive(Clone, Debug, Deserialize, Serialize)] //#[serde(tag = "a")]
 #[serde(untagged)] pub enum AnimatedValue<T, K> { // Whether the property is animated.
     /* 0 */Static(T), /* 1 */Animated(Vec<K>), // Array of keyframes, if a == 1
+}
+
+/*  Properties can have expressions associated with them, when this is the case
+    the value of such properties can be modified by using the expression.
+    The expression language is based on JavaScript / ECMAScript.
+    https://lottiefiles.github.io/lottie-docs/expressions/
+ */
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Expression {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub   x: Option<String>, // Expression
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sid: Option<String>, // Slot ID, One of the ID in the file's slots
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub  ix: Option<u32>,    // Property Index
+    //  Number of components in the value arrays. If present values will
+    //  be truncated or expanded to match this length when accessed from expressions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub   l: Option<u32>,   // Length, for Position and MultiDimentional
 }
 
 //  A Keyframes specifies the value at a specific time and
@@ -377,15 +382,14 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
     pub p: Position,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Rectangle { // A simple rectangle shape
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Rectangle { // Simple rectangle shape
     #[serde(flatten)] pub base: ShapeBase,
     pub s: Animated2D, // Size
     pub p: Position, // Center of the rectangle
     pub r: Value,    // Rounded corners radius
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Polystar { // Star or regular polygon
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Polystar { // Star or regular polygon
     #[serde(flatten)] pub base: ShapeBase,
 
     pub  p: Position,
@@ -467,10 +471,10 @@ pub struct Polystar { // Star or regular polygon
 
     #[serde(default)] pub lc: LineCap,
     #[serde(default)] pub lj: LineJoin,
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub ml : Option<f32>,
+    #[serde(default)] pub ml: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ml2: Option<Value>, // Animatable alternative to ml (Miter Limit)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if =   "Vec::is_empty")]
     pub d: Vec<StrokeDash>, // Dashed line definition
 }
 
@@ -506,7 +510,7 @@ type NoStyle = ShapeElement; // Represents a style for shapes without fill or st
 
 //  Base class for all elements of ShapeLayer and Group
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct ShapeElement {
-    //pub ty: u32, // Shape type
+    //pub ty: String, // Shape type, handle in enum tag
     #[serde(flatten)] pub vo: VisualObject,
     #[serde(default, skip_serializing_if = "Option::is_none")] pub bm: Option<BlendMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -591,8 +595,7 @@ pub struct Group { // Shape Element that can contain other shapes
     pub cix: Option<u32>, // Index used in expressions
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub  np: Option<f32>, // Number Of Properties
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub  it: Option<ShapeList>, // Shapes
+    #[serde(default, skip_serializing_if =   "Vec::is_empty")] pub it: ShapeList, // Shapes
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Trim { // Trims shapes into a segment
@@ -694,14 +697,15 @@ pub struct TextRange { // Range of text with custom animations and style
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextRangeSelector {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rn: Option<IntBool>, // Randomize
+
     #[serde(rename = "t")] pub expressible: IntBool, // Expressible
-    #[serde(rename = "a")] pub  max_amount: Value, // Max Amount
+    #[serde(rename = "a")] pub  max_amount: Value,   // Max Amount
     #[serde(rename = "b")] pub based: TextBased,
     pub sh: TextShape,
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rn: Option<IntBool>,     // Randomize
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub  o: Option<Value>, // Offset
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub o: Option<Value>, // Offset
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub  r: Option<TextRangeUnits>, // Range Units
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -735,12 +739,11 @@ pub struct TextRange { // Range of text with custom animations and style
     pub  t: String, // Text, note that newlines are encoded with \r
     pub  f: String, // Font Family
     pub fc: Color,  // Fill Color
-    pub  s: f32,    // Font Size, default 10
+    #[serde(default = "defaults::font_size")] pub  s: f32,    // Font Size
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sc: Option<Color>,  // Stroke Color
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sw: Option<f32>,    // Stroke Width
+    #[serde(default)] pub sw: f32,    // Stroke Width
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub of: Option<bool>,   // Render stroke above the fill
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -767,8 +770,8 @@ pub struct TextRange { // Range of text with custom animations and style
 #[derive(Clone, Debug, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum TextCaps { Regular = 0, AllCaps, SmallCaps, }
 
-//  Used to change the origin point for transformations, such as Rotation,
-//  that may be applied to the text string.
+//  Used to change the origin point for transformations,
+//  such as Rotation, that may be applied to the text string.
 //  The origin point for each character, word, or line can be changed.
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextAlignmentOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -809,61 +812,56 @@ pub enum AssetsItem { Image(Image), Sound(Sound),
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Image { // External image
     #[serde(flatten)] pub file: FileAsset,
+    #[serde(default)] pub w: f32, //  Width of the image
+    #[serde(default)] pub h: f32, // Height of the image
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub w: Option<f32>,     //  Width of the image, default 0
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub h: Option<f32>,     // Height of the image, default 0
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub t: Option<String>,  // Marks as part of an image sequence if present, default "seq"
+    pub t: Option<String>,  // Marks as part of an image sequence if present, default "seq" const
 }
 
 //  External data source, usually a JSON file
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct DataSource {
-    #[serde(flatten)] pub file: FileAsset, pub t: u32, // XXX: default 3 const
+    #[serde(flatten)] pub file: FileAsset, pub t: u32, // default 3 const
 }
 
 type Sound = FileAsset; // External sound
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct FileAsset {
     #[serde(rename = "p")] pub url: String, // Filename or data url
-    #[serde(flatten)] pub asset: Asset,
+    #[serde(flatten)] pub asset: AssetBase,
     #[serde(rename = "u", default)] pub path: String, // Path to the directory containing a file
     #[serde(rename = "e", default)] pub embedded: IntBool, // Whether the file is embedded
 }
 
-//  Asset containing an animation that can be referenced by layers.
+//  Asset containing an animation that can be referenced by (precomp) layers.
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Precomposition {
-    #[serde(flatten)] pub asset: Asset,
-    pub layers: Vec<LayersItem>, //#[serde(flatten)] pub composition: Composition,
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub fr: Option<f32>,
+    #[serde(flatten)] pub asset: AssetBase,
+    pub layers: Vec<LayersItem>,
+    #[serde(default = "defaults::animation_fr")] pub fr: f32,
     #[serde(default, rename = "xt")] pub extra: IntBool, // Extra composition
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Asset {
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct AssetBase {
     pub id: String, // Unique identifier used by layers when referencing this asset
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nm: Option<String>, // Human readable name
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct FontList {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")] pub list: Vec<Font>,
-}
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct FontList { pub list: Vec<Font>, }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Font { // Describes how a font with given settings should be loaded
+//  Describes how a font with given settings should be loaded
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Font {
     //  Name used by text documents to reference this font,
     //  usually it's `fFamily` followed by `fStyle`
     #[serde(rename = "fName")]   pub   name: String, // default "sans-Regular"
     #[serde(rename = "fFamily")] pub family: String, // default "sans"
     #[serde(rename = "fStyle")]  pub  style: String, // default "Regular"
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ascent: Option<f32>,    // Text will be moved down based on this value
     #[serde(rename = "fClass",  default, skip_serializing_if = "Option::is_none")]
     pub  class: Option<String>, // CSS Class applied to text objects using this font
     #[serde(rename = "fPath",   default, skip_serializing_if = "Option::is_none")]
     pub   path: Option<String>,
     #[serde(rename = "fWeight", default, skip_serializing_if = "Option::is_none")]
     pub weight: Option<String>,
+    #[serde(default)] pub ascent: f32, // Text will be moved down based on this value
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<FontPathOrigin>,
 }
@@ -875,53 +873,43 @@ pub struct Font { // Describes how a font with given settings should be loaded
 pub struct CharacterData { // Defines character shapes
     #[serde(rename = "fFamily")] pub family: String,
     pub style: String,
-    pub ch: String,
-    pub data: Data,
-    pub size: f32,
+    pub    ch: String,
+    pub  data: ShapePrecomp,
     #[serde(rename = "w")] pub width: f32,
+    pub  size: f32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
-pub enum Data { Shapes(CharacterShapes), Precomp(CharacterPrecomp), }
+pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>), }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CharacterShapes { // Shapes forming the character
-    #[serde(default, skip_serializing_if = "Vec::is_empty")] pub shapes: ShapeList,
+    #[serde(default, skip_serializing_if =   "Vec::is_empty")] pub shapes: ShapeList,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CharacterPrecomp { // Defines a character as a precomp layer
     #[serde(rename = "refId")] pub rid: String, // ID of the precomp as specified in the assets
     #[serde(default, skip_serializing_if = "Option::is_none")] pub ks: Option<Transform>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ip: Option<f32>, // Frame when the layer becomes visible
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub op: Option<f32>, // Out Point when the layer becomes invisible, default 99999
-    #[serde(default = "defaults::layer_sr", skip_serializing_if = "Option::is_none")]
-    pub sr: Option<f32>, // Time Stretch
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub st: Option<f32>, // Start Time
+    #[serde(default)] pub ip: f32, // Frame when the layer becomes visible
+    #[serde(default = "defaults::precomp_op")]
+    pub op: f32, // Out Point when the layer becomes invisible
+    #[serde(default = "defaults::time_stretch")] pub sr: f32, // Time Stretch
+    #[serde(default)] pub st: f32, // Start Time
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Marker { // Defines named portions of the composition.
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "cm")]
-    pub  comment: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "tm")]
-    pub     time: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "dr")]
-    pub duration: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub cm: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub tm: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub dr: Option<f32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct MotionBlur { // Motion blur settings
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub  sa: Option<f32>, // Shutter Angle in degrees
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub  sp: Option<f32>, // Shutter Phase in degrees
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub spf: Option<f32>, // Samples per Frame
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asl: Option<f32>, // Adaptive Sample Limit
+    #[serde(default)] pub  sa: f32, // Shutter Angle in degrees
+    #[serde(default)] pub  sp: f32, // Shutter Phase in degrees
+    #[serde(default)] pub spf: f32, // Samples per Frame
+    #[serde(default)] pub asl: f32, // Adaptive Sample Limit
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Metadata {
@@ -944,42 +932,40 @@ pub struct Marker { // Defines named portions of the composition.
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Slots {} // XXX: Available property overrides
-// patternProperties: MultiDimensional, ColorValue, Position, ShapeProperty, Value
-
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Effect { // Layer effect
-    pub ty: u32, // Effect type
-    pub ef: Vec<EffectValuesItem>,
-
-    #[serde(flatten)] pub vo: VisualObject,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub np: Option<u32>, // Property Count, Number of values in `ef`
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ix: Option<u32>, // Effect Index
-    #[serde(default = "defaults::effect_en")] pub en: IntBool, // Enabled
+pub struct Slots { // XXX: Available property overrides
+    // patternProperties: any of MultiDimensional/ColorValue/Position/ShapeProperty/Value
 }
 
-#[derive(Clone, Debug, Serialize)] #[serde(untagged)] pub enum EffectsItem {
-    /*  5 */Custom(Effect), // Some lottie files use `ty` = 5 for many different effects
-    /* 20 */Tint(Effect),   // Colorizes the layer
-    /* 21 */Fill(Effect),   // Replaces the whole layer with the given color
-    /* 22 */Stroke(Effect),
-    /* 23 */Tritone(Effect),    // Maps layers colors based on bright/mid/dark colors
-    /* 24 */ProLevels(Effect),
-    /* 25 */DropShadow(Effect), // Adds a shadow to the layer
-    /* 26 */RadialWipe(Effect),
-    /* 27 */DisplacementMap(Effect),
-    /* 29 */GaussianBlur(Effect),
-    /* 28 */Matte3(Effect),     // Uses a layer as a mask
-    /* 30 */Twirl(Effect),
-    /* 32 */Wavy(Effect),
-    /* 31 */MeshWarp(Effect),
-    /* 33 */Spherize(Effect),
-    /* 34 */Puppet(Effect),
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Effect { // Layer effect
+    pub ef: Vec<EffectValuesItem>,
+    pub ty: EffectType,
+    #[serde(default = "defaults::effect_en")] pub en: IntBool, // Enabled
+
+    #[serde(flatten)] pub vo: VisualObject,
+    #[serde(default)] pub np: u32, // Property Count, Number of values in `ef`
+    #[serde(default)] pub ix: u32, // Effect Index
+}
+
+#[derive(Clone, Debug, Deserialize_repr, Serialize_repr)] #[repr(u8)] pub enum EffectType {
+    /*  5 */Custom = 5, // Some lottie files use `ty` = 5 for many different effects
+    /* 20 */Tint = 20,  // Colorizes the layer
+    /* 21 */Fill,       // Replaces the whole layer with the given color
+    /* 22 */Stroke,
+    /* 23 */Tritone,    // Maps layers colors based on bright/mid/dark colors
+    /* 24 */ProLevels,
+    /* 25 */DropShadow, // Adds a shadow to the layer
+    /* 26 */RadialWipe,
+    /* 27 */DisplacementMap,
+    /* 28 */Matte3,     // Uses a layer as a mask
+    /* 29 */GaussianBlur,
+    /* 30 */Twirl,
+    /* 31 */MeshWarp,
+    /* 32 */Wavy,
+    /* 33 */Spherize,
+    /* 34 */Puppet,
 }
 
 #[derive(Clone, Debug, Serialize)] #[serde(untagged)] pub enum EffectValuesItem {
-    // "" */NoValue(()), // XXX:
     /*  0 */Slider(EffectValue<Value>),
     /*  1 */Angle (EffectValue<Value>),
     /*  3 */Point (EffectValue<Animated2D>),
@@ -988,27 +974,26 @@ pub struct Slots {} // XXX: Available property overrides
     //  5 */CustomEffect(Effect),
     /*  6 */Ignored (EffectValue<f32>),
     /*  7 */DropDown(EffectValue<Value>),
-
+    NoValue, // XXX:
     /* 10 */EffectLayer(EffectValue<Value>),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct EffectValue<T> {
-    pub ty: u32, // Effect type
+    pub ty: u32, // Effect (value) type
+    #[serde(default)] pub ix: u32, // Effect Index
+    #[serde(default = "defaults::default_none",
+        skip_serializing_if = "Option::is_none")] pub v: Option<T>,
     #[serde(flatten)] pub vo: VisualObject,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ix: Option<u32>, // Effect Index
-    #[serde(default = "defaults::default_none", skip_serializing_if = "Option::is_none")]
-    pub v: Option<T>,
 }
 
 #[derive(Clone, Debug, Serialize)] #[serde(untagged)] pub enum LayerStyleItem {
     /* 2 */InnerShadow(InnerShadowStyle),
-    /* 1 */DropShadow(DropShadowStyle),
+    /* 1 */DropShadow  (DropShadowStyle),
     /* 3 */OuterGlow(OuterGlowStyle),
     /* 4 */InnerGlow(InnerGlowStyle),
     /* 0 */Stroke(StrokeStyle),
-    /* 6 */Satin(SatinStyle),
-    /* 5 */BevelEmboss(BevelEmbossStyle),
+    /* 6 */Satin  (SatinStyle),
+    /* 5 */BevelEmboss  (BevelEmbossStyle),
     /* 7 */ColorOverlay(ColorOverlayStyle),
     /* 8 */GradientOverlay(GradientOverlayStyle),
 }
@@ -1017,8 +1002,7 @@ pub struct Slots {} // XXX: Available property overrides
     #[serde(flatten)] pub ls: LayerStyle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub c: Option<ColorValue>,  // Color
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub s: Option<Value>,       // Size
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub s: Option<Value>, // Size
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct DropShadowStyle {
@@ -1220,11 +1204,16 @@ pub struct Mask { // Bezier shape used to mask/clip a layer
     #[serde(rename = "f")] Difference,
 }
 
-pub mod defaults {
+pub(crate) mod defaults {
     pub(super) fn animation_wh() -> u32 { 512 }
-    pub(super) fn animation_fr_op() -> f32 { 60.0 }
-    pub(super) fn animation_v() -> String { "5.5.2".to_string() }
+    pub(super) fn animation_fr() -> f32 { 60.0 }
+    pub(super) fn animation_v() -> String { "5.5.2".to_owned() }
     pub(super) fn effect_en() -> super::IntBool { true.into() }
-    pub(super) fn layer_sr() -> Option<f32> { Some(1.0) }
     pub(super) fn default_none<T>() -> Option<T> { None }
+    pub(super) fn time_stretch() -> f32 { 1.0 }
+    pub(super) fn precomp_op() -> f32 { 99999.0 }
+    pub(super) fn font_size()  -> f32 { 10.0 }
+    //pub(super) fn font_family() -> String { "sans".to_owned() }
+    //pub(super) fn font_name()   -> String { "sans-Regular".to_owned() }
+    //pub(super) fn font_style()  -> String { "Regular".to_owned() }
 }
