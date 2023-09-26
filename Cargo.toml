@@ -6,7 +6,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = [ "MeiHui FAN <mhfan@ustc.edu>" ]
  repository = "https://github.com/mhfan/inlottie"
-description = "lib/tool in Rust to load/save/parse/render lottie files"
+description = "lib/tool in Rust to load/save/parse/render lottie animation files"
 categories  = [ "parser-implementations", "rendering::data-formats", "graphics",
      "multimedia::images" ]     # https://crates.io/category_slugs
 keywords = [ "Lottie", "Animation", "vector-graphic" ]
