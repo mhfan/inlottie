@@ -103,7 +103,7 @@ impl<'de> Deserialize<'de> for ColorList {
             data[0..cnt].chunks(4).zip(data[cnt..].chunks(2))
                 .map(|(chunk, opacity)| (chunk[0], // == opacity[0]
                 Rgba::new_f32(chunk[1], chunk[2], chunk[3], opacity[1]))).collect()
-        } else { unreachable!() }))
+        } else { unreachable!() })) // issue_1732.json
     }
 }
 
@@ -118,11 +118,6 @@ impl Serialize for ColorList {
                 vec![*offset, color.a as f32 / 255.0]));
         }   data.serialize(serializer)
     }
-}
-
-// default_animated(100.0), default_animated(Vector2D { x: 100.0, y: 100.0, })
-#[allow(dead_code)] pub(crate) fn default_animated<T, K>(val: T) -> AnimatedProperty<T, K> {
-    AnimatedProperty { a: Some(false.into()), k: AnimatedValue::Static(val) }
 }
 
 use crate::schema::*;
@@ -146,6 +141,11 @@ impl<'de> Deserialize<'de> for LayersItem {
             _ => unreachable!()
         })
     }
+}
+
+// default_animated(100.0), default_animated(Vector2D { x: 100.0, y: 100.0, })
+#[allow(dead_code)] pub(crate) fn default_animated<T, K>(val: T) -> AnimatedProperty<T, K> {
+    AnimatedProperty { a: Some(false.into()), k: AnimatedValue::Static(val) }
 }
 
 /* impl<'de, T, K> Deserialize<'de> for AnimatedValue<T, K>
@@ -173,6 +173,14 @@ pub(crate) fn serialize_animated<S, T, K>(av: &AnimatedValue<T, K>, serializer: 
         AnimatedValue::Static(_)   => AnimatedHelper { a: 0, content: av, },
     };  item.serialize(serializer)
 } */
+
+pub(crate) fn deserialize_strarray<'de, D: Deserializer<'de>>(d: D)
+    -> Result<Vec<String>, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    if let Ok(v) = String::deserialize(&value) { Ok(vec![v]) } else {
+        Vec::<String>::deserialize(value).map_err(D::Error::custom)
+    }
+}
 
 impl<'de> Deserialize<'de> for EffectValuesItem {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {

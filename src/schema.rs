@@ -87,7 +87,7 @@ pub struct PrecompLayer { // Layer that renders a Precomposition asset
     pub tm: Option<Value>, // Time Remapping
 }
 
-use crate::helpers::{str_to_rgba, str_from_rgba};
+use crate::helpers::{str_to_rgba, str_from_rgba, deserialize_strarray};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SolidColorLayer { // Layer with a solid color rectangle
@@ -104,7 +104,7 @@ pub struct AudioLayer { // A layer playing sounds
     #[serde(flatten)] pub layer: Layer,
     #[serde(rename = "refId", default, skip_serializing_if = "Option::is_none")]
     pub rid: Option<String>, // ID of the sound as specified in the assets
-    pub  au: AudioSettings,
+    #[serde(default)] pub  au: Option<AudioSettings>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -285,8 +285,7 @@ pub struct AnimatedProperty<T, K = KeyframeBase<T>> {
 /*  Properties can have expressions associated with them, when this is the case
     the value of such properties can be modified by using the expression.
     The expression language is based on JavaScript / ECMAScript.
-    https://lottiefiles.github.io/lottie-docs/expressions/
- */
+    https://lottiefiles.github.io/lottie-docs/expressions/ */
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Expression {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub   x: Option<String>, // Expression
@@ -309,13 +308,13 @@ pub struct AnimatedProperty<T, K = KeyframeBase<T>> {
     //  you need to determine its value based on the s value of the previous keyframe.
     //#[serde(skip)] pub final_frame: f32, // XXX:
 
-    //#[serde(skip)] pub n: Option<ArrayOne<String>>,
+    //#[serde(skip, deserialize_with = "deserialize_strarray")] pub n: Vec<String>,
     //  Value at the end of the keyframe, note that this is deprecated and
     //  you should use `s` from the next keyframe to get this value.
     //#[serde(default = "defaults::default_none", skip_serializing)] pub e: Option<T>,
 
     //  Value at this keyframe. Note the if the property is a scalar,
-    //  keyframe values are still represented as arrays.
+    //  keyframe values are still represented as arrays. // XXX: also support ArrayOne?
     #[serde(rename = "s", default = "defaults::default_none")] pub start: Option<T>,
 
     #[serde(rename = "h", default)] pub hold: IntBool,
@@ -527,9 +526,10 @@ type NoStyle = ShapeElement; // Represents a style for shapes without fill or st
 #[derive(Clone, Debug, Deserialize_repr, Serialize_repr)] #[repr(u8)] pub enum ShapeDirection {
     Normal   = 1, // Usually clockwise
     Reversed = 3, // Usually counter clockwise
+    Unknown2 = 2, Unknown0 = 0, // XXX: issue_1732.json, precomposition.json
 }
 
-type ShapeProperty = AnimatedProperty<Bezier, KeyframeBase<Bezier>>; // ShapeKeyframe
+type ShapeProperty = AnimatedProperty<Bezier, KeyframeBase<Vec<Bezier>>>; // ShapeKeyframe
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Bezier { // Single bezier curve
     #[serde(default)] pub c: bool, // Closed
@@ -815,7 +815,7 @@ pub enum AssetsItem { Image(Image), Sound(Sound),
     #[serde(default)] pub w: f32, //  Width of the image
     #[serde(default)] pub h: f32, // Height of the image
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub t: Option<String>,  // Marks as part of an image sequence if present, default "seq" const
+    pub t: Option<String>, // Marks as part of an image sequence if present, default "seq" const
 }
 
 //  External data source, usually a JSON file
@@ -921,20 +921,19 @@ pub struct Marker { // Defines named portions of the composition.
     pub  tc: Option<String>, // Theme Color
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "g")]
     pub gen: Option<String>, // Software used to generate the file
-    #[serde(default, skip_serializing_if =   "Vec::is_empty", rename = "k")]
-    pub keywords: Vec<String>,
+    #[serde(default, skip_serializing_if =   "Vec::is_empty", rename = "k",
+        deserialize_with = "deserialize_strarray")] pub keywords: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct UserMetadata {
-    #[serde(rename = "customProps", default, skip_serializing_if = "serde_json::Map::is_empty")]
-    pub custom_props: serde_json::Map<String, serde_json::Value>,   // XXX:
+    #[serde(rename = "customProps", default)] pub cprops: serde_json::Value, // XXX:
     #[serde(default, skip_serializing_if = "Option::is_none")] pub filename: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Slots { // XXX: Available property overrides
+type Slots = serde_json::Value; // XXX: Available property overrides
+/* #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Slots {
     // patternProperties: any of MultiDimensional/ColorValue/Position/ShapeProperty/Value
-}
+} */
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Effect { // Layer effect
     pub ef: Vec<EffectValuesItem>,
