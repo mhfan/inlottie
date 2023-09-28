@@ -237,6 +237,25 @@ impl<'de> Deserialize<'de> for LayerStyleItem {
     }
 }
 
+#[derive(Clone, Debug, Serialize)] pub struct AnyAsset(AssetBase); //serde_json::Value
+impl<'de> Deserialize<'de> for AnyAsset {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(d)?;
+        //panic!("{}", value.to_string().get(0..20).unwrap());
+        //let _ = Precomposition::deserialize(&value).unwrap();
+        let value = AssetBase::deserialize(value).unwrap();
+        panic!("Failed on asset: {{ id: {}, nm: {} }}",
+            value.id, value.nm.unwrap_or("None".to_owned()));
+    }
+}
+
+#[derive(Clone, Debug, Serialize)] pub struct AnyValue(serde_json::Value);
+impl<'de> Deserialize<'de> for AnyValue {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        panic!("{}", serde_json::Value::deserialize(d)?);
+    }
+}
+
 #[cfg(test)] mod test { use super::*;
     use serde_test::{Token, assert_tokens/*, assert_de_tokens, assert_ser_tokens*/};
 

@@ -1,7 +1,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_repr::{Serialize_repr, Deserialize_repr}; // for the underlying repr of a C-like enum
-use crate::helpers::{IntBool, Rgba, Vector2D, ColorList};
+use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset};
 
 //  https://lottiefiles.github.io/lottie-docs/schema/
 
@@ -44,10 +44,7 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList};
     pub slots: Option<Slots>,       // Available property overrides
 }
 
-#[allow(clippy::large_enum_variant)]
-//  value of ty should be number rather than string,
-//  and so are hereafter EffectValuesItem/LayerStyleItem/AnimatedValue
-#[derive(Clone, Debug, Serialize)] #[serde(untagged)]
+#[derive(Clone, Debug, Serialize)] #[serde(untagged)] #[allow(clippy::large_enum_variant)]
 pub enum LayersItem { // Base class for layer holders
     /*  0 */Precomposition(PrecompLayer),
     /*  1 */SolidColor (SolidColorLayer),
@@ -95,8 +92,8 @@ pub struct SolidColorLayer { // Layer with a solid color rectangle
     //  Color of the layer, unlike most other places, the color is a `#rrggbb` hex string
     #[serde(deserialize_with = "str_to_rgba", serialize_with = "str_from_rgba")]
     pub sc: Rgba,
-    pub sh: f32, // Height
     pub sw: f32, // Width
+    pub sh: f32, // Height
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -272,14 +269,15 @@ type Color = Rgba; // Vec<f32>; // Color as a [r, g, b] array with values in [0,
 pub struct AnimatedProperty<T, K = KeyframeBase<T>> {
     #[cfg(feature = "expression")] #[serde(flatten)] expr: Option<Box<Expression>>,
 
-    #[serde(default)] pub a: Option<IntBool>, // Note some old animations might not have this
+    //  Whether the property is animated. Note some old animations might not have this
+    #[serde(default)] pub a: Option<IntBool>,
     //#[serde(serialize_with = "crate::helpers::serialize_animated")]
     pub k: AnimatedValue<T, K>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] //#[serde(tag = "a")]
-#[serde(untagged)] pub enum AnimatedValue<T, K> { // Whether the property is animated.
-    /* 0 */Static(T), /* 1 */Animated(Vec<K>), // Array of keyframes, if a == 1
+#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
+pub enum AnimatedValue<T, K> { /* a == 0 */Static(T),
+    /* a == 1 */Animated(Vec<K>), /* Array of keyframes */ DebugAny(AnyValue),
 }
 
 /*  Properties can have expressions associated with them, when this is the case
@@ -314,7 +312,8 @@ pub struct AnimatedProperty<T, K = KeyframeBase<T>> {
     //#[serde(default = "defaults::default_none", skip_serializing)] pub e: Option<T>,
 
     //  Value at this keyframe. Note the if the property is a scalar,
-    //  keyframe values are still represented as arrays. // XXX: also support ArrayOne?
+    //  keyframe values are still represented as arrays.
+    //  XXX: make it ArrayOne here and AnimatedValue? for compatibility concern
     #[serde(rename = "s", default = "defaults::default_none")] pub start: Option<T>,
 
     #[serde(rename = "h", default)] pub hold: IntBool,
@@ -509,7 +508,7 @@ type NoStyle = ShapeElement; // Represents a style for shapes without fill or st
 
 //  Base class for all elements of ShapeLayer and Group
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct ShapeElement {
-    //pub ty: String, // Shape type, handle in enum tag
+    //pub ty: String, // Shape type, handled via enum tag
     #[serde(flatten)] pub vo: VisualObject,
     #[serde(default, skip_serializing_if = "Option::is_none")] pub bm: Option<BlendMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -524,8 +523,7 @@ type NoStyle = ShapeElement; // Represents a style for shapes without fill or st
 
 //  Drawing direction of the shape curve, useful for trim path
 #[derive(Clone, Debug, Deserialize_repr, Serialize_repr)] #[repr(u8)] pub enum ShapeDirection {
-    Normal   = 1, // Usually clockwise
-    Reversed = 3, // Usually counter clockwise
+    /* Usually clockwise */Normal   = 1, /* counter clockwise */Reversed = 3,
     Unknown2 = 2, Unknown0 = 0, // XXX: issue_1732.json, precomposition.json
 }
 
@@ -626,8 +624,8 @@ pub struct Group { // Shape Element that can contain other shapes
 }
 
 #[derive(Clone, Debug, Default, Deserialize_repr, Serialize_repr)]
-#[repr(u8)] pub enum MergeMode {
-    #[default] Normal = 1, Add, Subtract, Intersect, ExcludeIntersections,
+#[repr(u8)] pub enum MergeMode { #[default] Normal = 1,
+    Add, Subtract, Intersect, ExcludeIntersections,
 }
 
 //  Changes the edges of affected shapes into a series of peaks and valleys of uniform size
@@ -743,7 +741,7 @@ pub struct TextRange { // Range of text with custom animations and style
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sc: Option<Color>,  // Stroke Color
-    #[serde(default)] pub sw: f32,    // Stroke Width
+    #[serde(default)] pub sw: f32, // Stroke Width
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub of: Option<bool>,   // Render stroke above the fill
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -806,8 +804,8 @@ pub struct TextRange { // Range of text with custom animations and style
 #[repr(u8)] pub enum TextShape { Square = 1, RampUp, RampDown, Triangle, Round, Smooth, }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
-pub enum AssetsItem { Image(Image), Sound(Sound),
-    DataSource(DataSource), Precomposition(Precomposition),
+pub enum AssetsItem { Image(Image), Sound(Sound), DataSource(DataSource),
+    Precomposition(Precomposition), DebugAny(AnyAsset),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Image { // External image
