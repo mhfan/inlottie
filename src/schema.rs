@@ -971,7 +971,7 @@ type Slots = serde_json::Value; // XXX: Available property overrides
     //  5 */CustomEffect(Effect),
     /*  6 */Ignored (EffectValue<f32>),
     /*  7 */DropDown(EffectValue<Value>),
-    NoValue, // XXX:
+    NoValue, // What use/purpose?
     /* 10 */EffectLayer(EffectValue<Value>),
 }
 

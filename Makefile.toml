@@ -33,7 +33,7 @@ args = [ "fuzz", "run", "calc24" ]
 
 [tasks.llvm-cov]    # https://doc.rust-lang.org/stable/rustc/instrument-coverage.html
 command = "cargo"
-#toolchain = "nightly"
+toolchain = "nightly"
 env = { CC  = "clang", CXX = "clang++" }
 # cargo +nightly llvm-cov --include-ffi --doctests #--lcov --output-path lcov.info #nextest
 # cargo tarpaulin --run-types 'Tests,Doctests' --out Lcov --exclude-files 'inperse/src/*'
