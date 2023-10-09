@@ -32,5 +32,19 @@ glob = "0.3"
 [build-dependencies]
 chrono = "0.4"
 
+[profile.dev]
+#incremental = false
+opt-level = 1   # Enable a small amount of optimization in debug mode
+
+[profile.dev.package."*"]
+opt-level = 3   # Enable high optimizations for dependencies, but not for own code.
+
+[profile.release]
+codegen-units = 1
+strip = 'debuginfo'
+panic = 'abort'
+#opt-level = 3   # default level
+lto = 'fat' # true
+
 [workspace]
 

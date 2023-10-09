@@ -18,6 +18,14 @@ TODO: development/implement a `renderer` based on [freetype2/ftgrays](https://gi
 * <https://transform.tools/json-to-rust-serde>
 * <https://airbnb.design/lottie/>
 
-* <https://github.com/msrd0/rlottie-rs>
 * <https://github.com/Samsung/rlottie>
+* <https://github.com/msrd0/rlottie-rs>
+* <https://github.com/sammycage/plutovg>
+* <https://github.com/micro-gl/micro-gl>
+* <https://github.com/tseli0s/Prisma2D>
+* <https://github.com/blend2d/blend2d>
+* <https://github.com/femtovg/femtovg>
 * <https://github.com/thorvg/thorvg>
+* <https://www.amanithvg.com>
+* <https://www.w3schools.com/tags/ref_canvas.asp>
+* <https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API>

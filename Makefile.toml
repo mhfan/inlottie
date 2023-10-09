@@ -33,7 +33,7 @@ args = [ "fuzz", "run", "calc24" ]
 
 [tasks.llvm-cov]    # https://doc.rust-lang.org/stable/rustc/instrument-coverage.html
 command = "cargo"
-#toolchain = "nightly"
+toolchain = "nightly"
 env = { CC  = "clang", CXX = "clang++" }
 # cargo +nightly llvm-cov --include-ffi --doctests #--lcov --output-path lcov.info #nextest
 # cargo tarpaulin --run-types 'Tests,Doctests' --out Lcov --exclude-files 'inperse/src/*'
@@ -54,12 +54,12 @@ env = { "CODECOV_TOKEN" = "b24b2436-512a-461e-9947-488213b27add" }
 script = [ "sudo cargo flamegraph --bench calc24_bench" ]
 
 [tasks.bench-mem]
-command = "cargo"   # cargo bench --features dhat-heap
-args = [ "bench", "--features", "dhat-heap", ]
+command = "cargo"   # cargo bench -F dhat-heap
+args = [ "bench", "-F", "dhat-heap", ]
 
 [tasks.bench-pprof]
-command = "cargo"   # cargo bench --features pprof
-args = [ "bench", "--features", "pprof", ]
+command = "cargo"   # cargo bench -F pprof
+args = [ "bench", "-F", "pprof", ]
 
 [tasks.publish]
 #command = "cargo"
