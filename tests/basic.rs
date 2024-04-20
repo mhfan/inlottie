@@ -1,37 +1,33 @@
 
 use std::fs::File;
-use inlottie::schema::{GradientFill, Stroke, Transform, Animation};
+use std::error::Error as StdErr;
+use inlottie::schema::Animation;
+use serde_json::Deserializer as json_des;
+use serde_path_to_error::deserialize as deserial_err;
 
-#[test] pub fn parse_simple() -> Result<(), Box<dyn std::error::Error>> {
-    for path in glob::glob("fixtures/unit/simple/*.json")?.filter_map(Result::ok) {
-        eprintln!("Parsing {}", path.display()); //let path = path?;
-        let _: Animation = serde_path_to_error::deserialize(
-            &mut serde_json::Deserializer::from_reader(File::open(path)?))?;
-    }
+// XXX: get resources from https://github.com/zimond/lottie-rs/tree/main/fixtures
+
+#[test] pub fn parse_ui_samples() -> Result<(), Box<dyn StdErr>> {  let mut cnt = 0u32;
     for path in glob::glob("fixtures/ui/**/*.json")?.filter_map(Result::ok) {
-        eprintln!("Parsing {}", path.display()); //let path = path?;
-        let _: Animation = serde_path_to_error::deserialize(
-            &mut serde_json::Deserializer::from_reader(File::open(path)?))?;
-    }   Ok(())
+                //.chain(glob::glob("fixtures/unit/simple/*.json")?)
+        let _: Animation = deserial_err(&mut json_des::from_reader(
+            File::open(&path)?)).map_err(|err| {
+                eprintln!("Failed parsing {}", path.display()); err })?;    cnt += 1;
+    }   println!("Succeed to parse {cnt} lottie json files!");  Ok(())
 }
 
-#[test] pub fn parse_segments() -> Result<(), Box<dyn std::error::Error>> {
-    let path_base = "fixtures/unit/segments";
+#[test] pub fn parse_segments() -> Result<(), Box<dyn StdErr>> {
+    fn segparse<'de, T: serde::de::Deserialize<'de>>(sfn: &str) -> Result<T, Box<dyn StdErr>> {
+        let path = format!("fixtures/segments/{}.json", sfn);
+        Ok(deserial_err(&mut json_des::from_reader(File::open(&path)?))
+            .map_err(|err| { eprintln!("Failed parsing {path}"); err })?)
+    }   use inlottie::schema::{GradientFill, Stroke, TextRange, Transform};
 
-    let file_path = format!("{}/transform_complex.json", path_base);
-    eprintln!("Parsing {file_path}");
-    let _: Transform = serde_path_to_error::deserialize(
-        &mut serde_json::Deserializer::from_reader(File::open(file_path)?))?;
-
-    let file_path = format!("{}/gradient_fill.json", path_base);
-    eprintln!("Parsing {file_path}");
-    let _: GradientFill = serde_path_to_error::deserialize(
-        &mut serde_json::Deserializer::from_reader(File::open(file_path)?))?;
-
-    let file_path = format!("{}/stroke.json", path_base);
-    eprintln!("Parsing {file_path}");
-    let _: Stroke = serde_path_to_error::deserialize(
-        &mut serde_json::Deserializer::from_reader(File::open(file_path)?))?;
+    segparse::<Animation>("animated_position_legacy")?;
+    segparse::<Transform>("transform_complex")?;
+    segparse::<GradientFill>("gradient_fill")?;
+    segparse::<TextRange>("text_range")?;
+    segparse::<Stroke>("stroke")?;
 
     Ok(())
 }

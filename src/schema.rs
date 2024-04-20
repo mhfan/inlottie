@@ -9,7 +9,7 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset};
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Animation {
     #[serde(default = "defaults::animation_fr")]
     pub fr: f32, // Framerate in frames per second
-    pub ip: f32, // In  Point, which frame the animation starts at (usually 0)
+    #[serde(default)] pub ip: f32, // In  Point, which frame the animation starts at (usually 0)
     #[serde(default = "defaults::animation_fr")]
     pub op: f32, // Out Point, which frame the animation stops/loops at,
                  // which makes this the duration in frames when ip is 0
@@ -17,7 +17,7 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset};
     pub  w: u32, // Width  of the animation
     #[serde(default = "defaults::animation_wh")]
     pub  h: u32, // Height of the animation
-    pub layers: Vec<LayersItem>,
+    #[serde(default)] pub layers: Vec<LayersItem>,
 
     #[serde(flatten)] pub vo: VisualObject,
     #[serde(default = "defaults::animation_v")] pub v: String,
