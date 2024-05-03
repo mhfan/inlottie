@@ -1,14 +1,14 @@
 
-# lib/tool in Rust for [Lottie Animation](https://lottiefiles.com) file
+# lib/tool in Rust for [Lottie (Bodymovin) Animation](https://lottiefiles.com) file
 
 The original [Lottie json shema](https://lottiefiles.github.io/lottie-docs/schema/) file was slightly modified so that the great [typify](https://github.com/oxidecomputer/typify) tool could run and convert it into Rust codebase. After much simplification and optimization work was done manually, finally, the `parser` seems to be very compatible to accept most of the [realword sample json files](https://github.com/zimond/lottie-rs/blob/main/fixtures) of [Lottie Animation](https://airbnb.design/lottie/) without too much compromise.
 
-TODO: development/implement a `renderer` based on [freetype2/ftgrays](https://gitlab.freedesktop.org/freetype/freetype/-/blob/master/src/smooth/ftgrays.c) and [gpac/evg](https://github.com/gpac/gpac/tree/master/src/evg), and a `viewer` based on [bevy engine](https://github.com/bevyengine/bevy)?
+TODO: refer to [intvg](https://github.com/mhfan/intvg), development/implement a `renderer` based on [freetype2/ftgrays](https://gitlab.freedesktop.org/freetype/freetype/-/blob/master/src/smooth/ftgrays.c), [gpac/evg](https://github.com/gpac/gpac/tree/master/src/evg), [blend2d](https://github.com/blend2d/blend2d), HTML5/Web Canvas API or [femtovg](https://github.com/femtovg/femtovg); and a `viewer` based on [bevy engine](https://github.com/bevyengine/bevy) or [Dioxus](https://github.com/DioxusLabs/dioxus)? Then, enhance capability to parse/handle [dotLottie](https://dotlottie.io/structure/#dotlottie-structure).
 
 ## References
 
-* <https://github.com/oxidecomputer/typify>
 * <https://lottiefiles.github.io/lottie-docs/schema/>
+* <https://github.com/LottieFiles/dotlottie-rs>
 
 * <https://github.com/zimond/lottie-rs/blob/main/crates/model>
 * <https://github.com/angular-rust/ux-animate/tree/main/src/runtime/lottie>
@@ -23,8 +23,6 @@ TODO: development/implement a `renderer` based on [freetype2/ftgrays](https://gi
 * <https://github.com/sammycage/plutovg>
 * <https://github.com/micro-gl/micro-gl>
 * <https://github.com/tseli0s/Prisma2D>
-* <https://github.com/blend2d/blend2d>
-* <https://github.com/femtovg/femtovg>
 * <https://github.com/thorvg/thorvg>
 * <https://www.amanithvg.com>
 * <https://www.w3schools.com/tags/ref_canvas.asp>

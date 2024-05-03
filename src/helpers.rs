@@ -11,7 +11,7 @@ impl From<bool> for IntBool { fn from(value: bool) -> Self { Self(if value { 1 }
 /* #[derive(Debug, Clone, Copy)] pub struct Rgb  { pub r: u8, pub g: u8, pub b: u8 }
 impl Rgb {  pub fn new_u8 (r:  u8, g:  u8, b:  u8) -> Self { Self { r, g, b } }
             pub fn new_f32(r: f32, g: f32, b: f32) -> Self { Self {
-        r: (r * 255.0) as u8, g: (g * 255.0) as u8, b: (b * 255.0) as u8
+        r: (r * 255.) as u8, g: (g * 255.) as u8, b: (b * 255.) as u8
     } }
 } */
 
@@ -21,7 +21,7 @@ impl Default for Rgba { fn default() -> Self { Self { r: 0, g: 0, b: 0, a: 255 }
 impl Rgba {
     pub fn new_u8 (r:  u8, g:  u8, b:  u8, a:  u8) -> Self { Self { r, g, b, a } }
     pub fn new_f32(r: f32, g: f32, b: f32, a: f32) -> Self { Self {
-        r: (r * 255.0) as u8, g: (g * 255.0) as u8, b: (b * 255.0) as u8, a: (a * 255.0) as u8
+        r: (r * 255.) as u8, g: (g * 255.) as u8, b: (b * 255.) as u8, a: (a * 255.) as u8
     } }
 }
 
@@ -29,15 +29,15 @@ impl<'de> Deserialize<'de> for Rgba {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let v = Vec::<f32>::deserialize(deserializer)?;
         assert!(2 < v.len() && v.len() < 5);
-        Ok(Self::new_f32(v[0], v[1], v[2], v.get(3).cloned().unwrap_or(1.0)))
+        Ok(Self::new_f32(v[0], v[1], v[2], v.get(3).cloned().unwrap_or(1.)))
     }
 }
 
 impl Serialize for Rgba {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut v = vec![self.r as f32 / 255.0,
-            self.g as f32 / 255.0, self.b as f32 / 255.0];
-        if  self.a < 255 {  v.push(self.a as f32 / 255.0); }    v.serialize(serializer)
+        let mut v = vec![self.r as f32 / 255.,
+            self.g as f32 / 255.0, self.b as f32 / 255.];
+        if  self.a < 255 {  v.push(self.a as f32 / 255.); }    v.serialize(serializer)
     }
 }
 
@@ -70,12 +70,15 @@ pub(crate) fn str_from_rgba<S: Serializer>(c: &Rgba, serializer: S) -> Result<S:
 
 //pub type Vector2D = Vec<f32>; // euclid::default::Vector2D<f32>; // XXX: Position/Scale
 #[derive(Debug, Clone)] pub struct Vector2D { pub x: f32, pub y: f32 } // Point/Size
+impl From<(f32, f32)> for Vector2D {
+    fn from(val: (f32, f32)) -> Self { Self { x: val.0, y: val.1 } }
+}
 
 impl<'de> Deserialize<'de> for Vector2D {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let v = Vec::<f32>::deserialize(deserializer)?;
         assert!(!v.is_empty() && v.len() < 4); // XXX: ignore extra 3rd value?
-        Ok(Self { x: v[0], y: v.get(1).cloned().unwrap_or(0.0) })
+        Ok(Self { x: v[0], y: v.get(1).cloned().unwrap_or(0.) })
     }
 }
 
@@ -98,7 +101,7 @@ impl<'de> Deserialize<'de> for ColorList {
 
         Ok(Self(if len == cnt * 4 { // Rgb color
             data.chunks(4).map(|chunk| (chunk[0],
-                Rgba::new_f32(chunk[1], chunk[2], chunk[3], 1.0))).collect()
+                Rgba::new_f32(chunk[1], chunk[2], chunk[3], 1.))).collect()
         } else  if len == cnt * 4 + cnt * 2 { let cnt = (cnt * 4) as usize; // Rgba color
             data[0..cnt].chunks(4).zip(data[cnt..].chunks(2))
                 .map(|(chunk, opacity)| (chunk[0], // == opacity[0]
@@ -110,17 +113,49 @@ impl<'de> Deserialize<'de> for ColorList {
 impl Serialize for ColorList {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut data = self.0.iter().flat_map(|(offset, color)|
-            vec![*offset, color.r as f32 / 255.0, color.g as f32 / 255.0,
-                          color.b as f32 / 255.0]).collect::<Vec<_>>();
+            vec![*offset, color.r as f32 / 255., color.g as f32 / 255.,
+                          color.b as f32 / 255.]).collect::<Vec<_>>();
 
         if  self.0.iter().any(|(_, color)| color.a < 255) {
             data.extend(self.0.iter().flat_map(|(offset, color)|
-                vec![*offset, color.a as f32 / 255.0]));
+                vec![*offset, color.a as f32 / 255.]));
         }   data.serialize(serializer)
     }
 }
 
 use crate::schema::*;
+
+pub(crate) mod defaults { #![allow(unused)]
+    pub fn time_stretch() -> f32 { 1.0 }
+    pub fn animation_wh() -> u32 { 512 }
+    pub fn animation_fr() -> f32 { 60. }
+    pub fn animation_vs() -> String { "5.5.2".to_owned() }
+
+    pub fn effect_en() -> super::IntBool { true.into() }
+    pub fn option_none<T>() -> Option<T> { None }
+    pub fn precomp_op() -> f32 { 99999. }
+
+    pub fn font_size()  -> f32 { 10. }
+    //pub fn font_family() -> String { "sans".to_owned() }
+    //pub fn font_style()  -> String { "Regular".to_owned() }
+    //pub fn font_name()   -> String { "sans-Regular".to_owned() }
+
+    use super::{Value, Animated2D};
+    pub fn opacity() -> Value { Value::default(100.) }
+    pub fn animated2d() -> Animated2D { Animated2D::default((100., 100.).into()) }
+}
+
+impl Animation {
+    pub fn from_reader<R: std::io::Read>(r: R) -> Result<Self, serde_json::Error> {
+        serde_json::from_reader(r)
+    }
+}
+
+impl<T, K> AnimatedProperty<T, K> { #[allow(unused)]
+    pub(crate) fn default(val: T) -> Self {
+        Self { animated: Some(false.into()), keyframe: AnimatedValue::Static(val) }
+    }
+}
 
 impl<'de> Deserialize<'de> for LayersItem {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -141,11 +176,6 @@ impl<'de> Deserialize<'de> for LayersItem {
             _ => unreachable!()
         })
     }
-}
-
-// default_animated(100.0), default_animated(Vector2D { x: 100.0, y: 100.0, })
-#[allow(dead_code)] pub(crate) fn default_animated<T, K>(val: T) -> AnimatedProperty<T, K> {
-    AnimatedProperty { a: Some(false.into()), k: AnimatedValue::Static(val) }
 }
 
 /* impl<'de, T, K> Deserialize<'de> for AnimatedValue<T, K>

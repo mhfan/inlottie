@@ -1,7 +1,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_repr::{Serialize_repr, Deserialize_repr}; // for the underlying repr of a C-like enum
-use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset};
+use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset, defaults};
 
 //  https://lottiefiles.github.io/lottie-docs/schema/
 
@@ -20,13 +20,13 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset};
     #[serde(default)] pub layers: Vec<LayersItem>,
 
     #[serde(flatten)] pub vo: VisualObject,
-    #[serde(default = "defaults::animation_v")] pub v: String,
+    #[serde(default = "defaults::animation_vs")] pub v: String, // Bodymovin version
     #[serde(default)] pub ddd: IntBool, // Whether the animation has 3D layers
 
     #[serde(default, skip_serializing_if =   "Vec::is_empty")]
     pub assets: Vec<AssetsItem>,    // List of assets that can be referenced by layers
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fonts: Option<FontList>,    // how to skip serializing on fonts.list.is_empty?
+    pub fonts: Option<FontList>,    // How to skip serializing on fonts.list.is_empty?
     #[serde(default, skip_serializing_if =   "Vec::is_empty")]
     pub chars: Vec<CharacterData>,  // Data defining text characters as lottie shapes.
     //  If present a player might only render characters defined here and nothing else.
@@ -98,7 +98,7 @@ pub struct SolidColorLayer { // Layer with a solid color rectangle
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AudioLayer { // A layer playing sounds
-    #[serde(flatten)] pub layer: Layer,
+    #[serde(flatten)] pub layer: LayerInfo,
     #[serde(rename = "refId", default, skip_serializing_if = "Option::is_none")]
     pub rid: Option<String>, // ID of the sound as specified in the assets
     #[serde(default)] pub  au: Option<AudioSettings>,
@@ -108,22 +108,22 @@ pub struct AudioLayer { // A layer playing sounds
 pub struct AudioSettings { pub lv: MultiDimensional } // Level
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct CameraLayer { // 3D Camera
-    #[serde(flatten)] pub layer: Layer,
+    #[serde(flatten)] pub layer: LayerInfo,
     pub ks: Transform, // Layer transform
-    //  Distance from the Z=0 plane. Small values yield a higher perspective effect.
+    //  Distance from the (Z=0) plane. Small values yield a higher perspective effect.
     pub pe: Value,     // Perspective
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VisualLayer { // Layer used to affect visual elements
-    #[serde(flatten)] pub layer: Layer,
+    #[serde(flatten)] pub layer: LayerInfo,
     pub ks: Transform, // Layer transform
 
     //#[serde(default, skip_serializing)]
     //pub cp: Option<bool>, // This is deprecated in favour of `ct`
     //  Marks that transforms should be applied before masks
     #[serde(default)] pub ct: IntBool, // Collapse Transform
-    //  If 1, The layer will rotate itself to match its animated position path
+    //  If `1`, The layer will rotate itself to match its animated position path
     #[serde(default)] pub ao: IntBool, // Auto Orient
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mb: Option<bool>, // Whether motion blur is enabled for the layer
@@ -131,7 +131,7 @@ pub struct VisualLayer { // Layer used to affect visual elements
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "hasMask")]
     pub has_mask: Option<bool>, // Whether the layer has masks applied
 
-    //  If set to 1, it means a layer is using this layer as a track matte
+    //  If set to `1`, it means a layer is using this layer as a track matte
     #[serde(default, skip_serializing_if = "Option::is_none")] pub td: Option<IntBool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tt: Option<MatteMode>,  // Defines the track matte mode for the layer
@@ -156,9 +156,9 @@ pub struct VisualLayer { // Layer used to affect visual elements
     #[serde(default, skip_serializing_if = "String::is_empty")] pub cl: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Layer {
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct LayerInfo {
     pub ty: u32, // Layer type
-    pub st: f32, // Start Time
+    pub st: f32, // Start Time  // XXX: can these be u32?
     pub ip: f32, //  In Point
     pub op: f32, // Out Point
 
@@ -193,25 +193,27 @@ pub struct VisualLayer { // Layer used to affect visual elements
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Transform { // Layer transform
     //  Anchor point: a position (relative to its parent) around which
     //  transformations are applied (ie: center for rotation / scale)
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub  a: Option<Position>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub  p: Option<PositionTranslation>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "a")]
+    pub anchor: Option<Position>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "p")]
+    pub position: Option<PositionTranslation>,  // XXX: translate = position - anchor?
 
-    //  XXX: Transform for 3D layers (ddd == 1) will have a and p specified as 3D components.
+    //  XXX: Transform for 3D layers (`ddd` == `1`)
+    //  will have `a` and `p` specified as 3D components.
     //  To make the anchor point properly line up with the center of location,
-    //  p and a should have the same value.  // a, p, s are 2D Vector
+    //  `p` and `a` should have the same value. // `a`, `p`, `s` are 2D Vector
 
-    // = "default_animated(Vector2D { x: 100.0, y: 100.0 })" // = "default_animated(100.0)"
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub  s: Option<Animated2D>, // Scale factor, `[100, 100]` for no scaling
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub  o: Option<Value>, // Opacity, 0~100 `100` for fully opaque
+    // "defaults::animated2d", "defaults::opacity"
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "s")]
+    pub scale: Option<Animated2D>,  // Scale factor, `[100, 100]` for no scaling
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "o")]
+    pub opacity: Option<Value>,     // Opacity, 0~100, `100` for fully opaque
 
-    //  Skew Axis, Direction along which skew is applied,
     //  in degrees (`0` skews along the X axis, `90` along the Y axis)
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub sa: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sk: Option<Value>, // Skew amount as an angle in degrees
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "sa")]
+    pub skew_axis: Option<Value>,  //  Skew Axis, Direction along which skew is applied,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "sk")]
+    pub skew: Option<Value>,       // Skew amount as an angle in degrees
 
     #[serde(default, skip_serializing_if = "Option::is_none", flatten)]
     pub extra: Option<Box<TransformExtra>>,
@@ -224,8 +226,9 @@ pub enum PositionTranslation { Normal(Position), // Position / Translation
 
 #[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
 pub enum TransformExtra {
-    Rotation { // Rotation in degrees (0~360), clockwise
-        #[serde(default, skip_serializing_if = "Option::is_none")]  r: Option<Value>,
+    Rotation {
+        #[serde(default, skip_serializing_if = "Option::is_none", rename = "r")]
+        rotation: Option<Value>,    // Rotation in degrees (0~360), clockwise
     },
     Split { // XXX: Split rotation component, X/Y/Z (3D) Rotation and Orientation
         #[serde(default, skip_serializing_if = "Option::is_none")] rx: Option<Value>,
@@ -251,33 +254,34 @@ pub enum TransformExtra {
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct SplitVector {
     pub x: Value, pub y: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")] pub z: Option<Value>,
-    pub s: bool, // Split, default true const
+    #[serde(rename = "s")] pub split: bool, // Split, default `true` const
 }
 
+//pub type Value1 = AnimatedProperty<f32>;
 pub type Value = AnimatedProperty<f32, KeyframeBase<Vec<f32>>>;
 pub type Position = AnimatedProperty<Vector2D, PositionKeyframe>;
 type MultiDimensional = AnimatedProperty<Vec<f32>>;
 pub type Animated2D = AnimatedProperty<Vector2D>;
 pub type ColorValue = AnimatedProperty<Color>;
 
-type Color = Rgba; // Vec<f32>; // Color as a [r, g, b] array with values in [0, 1]
+type Color = Rgba; // Vec<f32>; // Color as a [r, g, b] array with values in 0~1
 //  Note sometimes you might find color values with 4 components
 //  (the 4th being alpha) but most player ignore the last component.
 
 //  An animatable property that holds an array of numbers
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AnimatedProperty<T, K = KeyframeBase<T>> {
-    #[cfg(feature = "expression")] #[serde(flatten)] expr: Option<Box<Expression>>,
-
-    //  Whether the property is animated. Note some old animations might not have this
-    #[serde(default)] pub a: Option<IntBool>,
     //#[serde(serialize_with = "crate::helpers::serialize_animated")]
-    pub k: AnimatedValue<T, K>,
+    #[serde(rename = "k")] pub keyframe: AnimatedValue<T, K>,
+    //  Whether the property is animated. Note some old animations might not have this
+    #[serde(rename = "a", default)] pub animated: Option<IntBool>,
+    #[cfg(feature = "expression")] #[serde(flatten)] expr: Option<Box<Expression>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
-pub enum AnimatedValue<T, K> { /* a == 0 */Static(T),
-    /* a == 1 */Animated(Vec<K>), /* Array of keyframes */ DebugAny(AnyValue),
+pub enum AnimatedValue<T, K> {  Static(T), // `a` == `0`
+    Animated(Vec<K>), // `a` == `1`, Array of keyframes
+    DebugAny(Box<AnyValue>), // unexpected value
 }
 
 /*  Properties can have expressions associated with them, when this is the case
@@ -294,8 +298,8 @@ pub enum AnimatedValue<T, K> { /* a == 0 */Static(T),
     pub  ix: Option<u32>,    // Property Index
     //  Number of components in the value arrays. If present values will
     //  be truncated or expanded to match this length when accessed from expressions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub   l: Option<u32>,   // Length, for Position and MultiDimentional
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "l")]
+    pub len: Option<u32>,    // Length, for Position and MultiDimentional
 }
 
 //  A Keyframes specifies the value at a specific time and
@@ -309,26 +313,26 @@ pub enum AnimatedValue<T, K> { /* a == 0 */Static(T),
     //#[serde(skip, deserialize_with = "deserialize_strarray")] pub n: Vec<String>,
     //  Value at the end of the keyframe, note that this is deprecated and
     //  you should use `s` from the next keyframe to get this value.
-    //#[serde(default = "defaults::default_none", skip_serializing)] pub e: Option<T>,
+    //#[serde(default = "defaults::option_none", skip_serializing)] pub e: Option<T>,
 
     //  Value at this keyframe. Note the if the property is a scalar,
     //  keyframe values are still represented as arrays.
     //  XXX: make it ArrayOne here and AnimatedValue? for compatibility concern
-    #[serde(rename = "s", default = "defaults::default_none")] pub start: Option<T>,
+    #[serde(rename = "s", default = "defaults::option_none")] pub start: Option<T>,
 
-    #[serde(rename = "h", default)] pub hold: IntBool,
-    #[serde(default, skip_serializing_if = "Option::is_none")] // XXX: if h != 1 or missing
-    pub i: Option<KeyframeBezierHandle>, // Easing tangent going into the next keyframe
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub o: Option<KeyframeBezierHandle>, // Easing tangent leaving the current keyframe
+    #[serde(rename = "h", default)] pub hold: IntBool,  // XXX: if `h` != `1` or missing
+    #[serde(rename = "i", default, skip_serializing_if = "Option::is_none")]
+    pub tani: Option<BezierHandle>, // Easing tangent going into the next keyframe
+    #[serde(rename = "o", default, skip_serializing_if = "Option::is_none")]
+    pub tano: Option<BezierHandle>, // Easing tangent leaving the current keyframe
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct KeyframeBezierHandle { // Easing Handles, Bezier handle for keyframe interpolation
-    //  Time component: 0 means time of the current keyframe,
-    pub x: ArrayOne, // 1 means time of the    next keyframe.
-    //  Value interpolation factor component: 0 means value at the current keyframe,
-    pub y: ArrayOne,                       // 1 means value at the    next keyframe.
+pub struct BezierHandle { // Easing Handles, Bezier handle for keyframe interpolation
+    //  Time component: `0` means time of the current keyframe,
+    #[serde(rename = "x")] pub  time: ArrayOne, // `1` means  time of the next keyframe.
+    //  Value interpolation factor component:   `0` means value at the current keyframe,
+    #[serde(rename = "y")] pub value: ArrayOne, // `1` means value at the next keyframe.
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
@@ -361,6 +365,7 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
     #[serde(rename = "st")] Stroke(Stroke),
     #[serde(rename = "gf")] GradientFill(GradientFill),
     #[serde(rename = "gs")] GradientStroke(GradientStroke),
+
     #[serde(rename = "tr")] ShapeTransform(ShapeTransform),
     #[serde(rename = "rd")] RoundedCorners(RoundedCorners),
     #[serde(rename = "pb")] PuckerBloat(PuckerBloat),
@@ -398,7 +403,7 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
 
     #[serde(default)] pub sy: StarType, // Star type, `1` for Star, `2` for Polygon
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ir: Option<Value>, // Inner Radius // XXX: if sy == 1
+    pub ir: Option<Value>, // Inner Radius // XXX: if `sy` == `1`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is: Option<Value>, // Inner Roundness as a percentage
 }
@@ -413,8 +418,10 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Fill { // Solid fill color
     #[serde(flatten)] pub elem: ShapeElement,
-    pub c: ColorValue, pub o: Value, // Opacity, 100 means fully opaque
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub r: Option<FillRule>,
+    #[serde(rename = "c")] pub color: ColorValue,
+    #[serde(rename = "o")] pub opacity: Value, // Opacity
+    #[serde(rename = "r", default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<FillRule>,
 }
 
 //  Rule used to handle multiple shapes rendered with the same fill object
@@ -426,25 +433,27 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Stroke { // Solid stroke
     #[serde(flatten)] pub elem: ShapeElement,
     #[serde(flatten)] pub base: BaseStroke,
-    pub c: ColorValue, // Stroke color
+    #[serde(rename = "c")] pub color: ColorValue, // Stroke color
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct GradientFill {
     #[serde(flatten)] pub elem: ShapeElement,
-    #[serde(flatten)] pub gradient: Gradient, pub o: Value, // Opacity
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub r: Option<FillRule>,
+    #[serde(flatten)] pub grad: Gradient,
+    #[serde(rename = "o")] pub opacity: Value, // Opacity
+    #[serde(rename = "r", default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<FillRule>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Gradient {
     pub s: Animated2D, // Start point for the gradient
     pub e: Animated2D, // End   point for the gradient
-    pub g: GradientColors,   // Gradient colors
+    pub g: GradientColors,  // Gradient colors
 
-    #[serde(default)] pub t: GradientType, // Type of the gradient
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub h: Option<Value>,    // Highlight Length, as a percentage between `s` and `e`
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub a: Option<Value>,    // Highlight Angle, relative to the direction from `s` to `e`
+    #[serde(rename = "t", default)] pub r#type: GradientType, // Type of the gradient
+    #[serde(rename = "h", default, skip_serializing_if = "Option::is_none")]
+    pub hl: Option<Value>,  // Highlight Length, as a percentage between `s` and `e`
+    #[serde(rename = "a", default, skip_serializing_if = "Option::is_none")]
+    pub ha: Option<Value>,  // Highlight Angle, relative to the direction from `s` to `e`
 }
 
 /*  Represents colors and offsets in a gradient. Colors are represented as a flat list
@@ -453,41 +462,41 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
     With alpha, same as above but at the end of the list there is a sequence of 'offset, alpha'.
  */
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct GradientColors {
-    #[serde(rename = "p")] pub count: u32, // Number of colors in `k`
-    pub k: AnimatedProperty<ColorList>, // MultiDimensional,
+    #[serde(rename = "p")] pub cnt: u32, // Number of colors in `k`
+    #[serde(rename = "k")] pub cl: AnimatedProperty<ColorList>, // MultiDimensional,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct GradientStroke {
     #[serde(flatten)] pub elem: ShapeElement,
     #[serde(flatten)] pub base: BaseStroke,
-    #[serde(flatten)] pub gradient: Gradient,
+    #[serde(flatten)] pub grad: Gradient,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct BaseStroke {
-    pub o: Value, // Opacity, 100 means fully opaque
-    pub w: Value, // Stroke width
+    #[serde(rename = "o")] pub opacity: Value, // Opacity
+    #[serde(rename = "w")] pub   width: Value, // Stroke width
 
     #[serde(default)] pub lc: LineCap,
     #[serde(default)] pub lj: LineJoin,
     #[serde(default)] pub ml: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ml2: Option<Value>, // Animatable alternative to ml (Miter Limit)
-    #[serde(default, skip_serializing_if =   "Vec::is_empty")]
-    pub d: Vec<StrokeDash>, // Dashed line definition
+    #[serde(default, skip_serializing_if =   "Vec::is_empty", rename = "d")]
+    pub dash: Vec<StrokeDash>, // Dashed line definition
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StrokeDash { // An item used to described the dashe pattern in a stroked path
-    #[serde(flatten)] pub vo: VisualObject,
-    #[serde(default)] pub n: StrokeDashType, // Type of a dash item in a stroked line
+    #[serde(flatten)] pub vo: VisualObject,     // Type of a dash item in a stroked line
+    #[serde(default, rename = "n")] pub r#type: StrokeDashType,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "v")]
-    pub length: Option<Value>, // Length of the dash
+    pub len: Option<Value>, // Length of the dash
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)] pub enum StrokeDashType {
     #[serde(rename = "d")] #[default] Dash,
-    #[serde(rename = "g")] Gap,
     #[serde(rename = "o")] Offset,
+    #[serde(rename = "g")] Gap,
 }
 
 //  Style at the end of a stoked line
@@ -530,44 +539,46 @@ type NoStyle = ShapeElement; // Represents a style for shapes without fill or st
 type ShapeProperty = AnimatedProperty<Bezier, KeyframeBase<Vec<Bezier>>>; // ShapeKeyframe
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Bezier { // Single bezier curve
-    #[serde(default)] pub c: bool, // Closed
+    #[serde(rename = "c", default)] pub closed: bool, // Closed
     //  All are array of points, each point is an array of coordinates.
-    pub v: Vec<Vector2D>, // These points are along the bezier path.
+    #[serde(rename = "v")] pub vp: Vec<Vector2D>, // These points are along the bezier path.
     //  These points are along the `in`  tangents relative to the corresponding `v`.
-    pub i: Vec<Vector2D>, // In  Tangent
+    #[serde(rename = "i")] pub it: Vec<Vector2D>, // In  Tangent
     //  These points are along the `out` tangents relative to the corresponding `v`.
-    pub o: Vec<Vector2D>, // Out Tangent // v, i, o are array of 2D Vector
-}
+    #[serde(rename = "o")] pub ot: Vec<Vector2D>, // Out Tangent
+}   //  `v`, `i`, `o` are array of 2D Vector
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct ShapeTransform { // Group transform
     #[serde(flatten)] pub elem: ShapeElement,
-    #[serde(flatten)] pub transform: Transform,
+    #[serde(flatten)] pub trfm: Transform,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct RoundedCorners {
-    #[serde(flatten)] pub elem: ShapeElement,
-    pub r: Value, // Rounded // Rounds corners of other shapes
+    #[serde(flatten)] pub elem: ShapeElement, // Rounds corners of other shapes
+    #[serde(rename = "r")] pub radius: Value, // Radius
 }
 
 //  Interpolates the shape with its center point and bezier tangents with the opposite direction
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct PuckerBloat {
     #[serde(flatten)] pub elem: ShapeElement,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub a: Option<Value>, // Amount as a percentage
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "a")]
+    pub amount: Option<Value>, // Amount as a percentage
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct OffsetPath { //
     #[serde(flatten)] pub elem: ShapeElement,
     #[serde(default)] pub lj: LineJoin,
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub  a: Option<Value>, // Amount
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub ml: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "a")]
+    pub amount: Option<Value>, // Amount
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ml: Option<Value>, // Miter Limit
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Repeater { // Duplicates previous shapes in a group
     #[serde(flatten)] pub elem: ShapeElement,
-    #[serde(rename = "c")] pub copies: Value, // Number of copies
-    #[serde(rename = "m", default)] pub stacking: Composite, // Stacking order
+    #[serde(rename = "c")] pub cnt: Value, // Number of copies
+    #[serde(rename = "m", default)] pub order: Composite, // Stacking order
     #[serde(rename = "o", default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<Value>,
     pub tr: RepeaterTransform, // Transform applied to each copy
@@ -579,21 +590,22 @@ pub struct Repeater { // Duplicates previous shapes in a group
 
 //  Transform used by a repeater, the transform is applied to each subsequent repeated object.
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct RepeaterTransform {
-    #[serde(flatten)] pub transform: Transform,
+    #[serde(flatten)] pub trfm: Transform,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub so: Option<Value>, // Opacity of the first repeated object.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub eo: Option<Value>, // Opacity of the last repeated object.
+    pub eo: Option<Value>, // Opacity of the  last repeated object.
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Group { // Shape Element that can contain other shapes
     #[serde(flatten)] pub elem: ShapeElement,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "cix")]
+    pub ix: Option<u32>, // Index used in expressions
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cix: Option<u32>, // Index used in expressions
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub  np: Option<f32>, // Number Of Properties
-    #[serde(default, skip_serializing_if =   "Vec::is_empty")] pub it: ShapeList, // Shapes
+    pub np: Option<f32>, // Number Of Properties
+    #[serde(default, skip_serializing_if =   "Vec::is_empty", rename =  "it")]
+    pub shapes: ShapeList, // Shapes
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Trim { // Trims shapes into a segment
@@ -631,12 +643,12 @@ pub struct Group { // Shape Element that can contain other shapes
 //  Changes the edges of affected shapes into a series of peaks and valleys of uniform size
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct ZigZag {
     #[serde(flatten)] pub elem: ShapeElement,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "r")]
+    pub freq: Option<Value>, // Frequency, Number of ridges per segment
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "s")]
+    pub ampl: Option<Value>, // Amplitude, Distance between peaks and troughs
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub  r: Option<Value>, // Frequency, Number of ridges per segment
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub  s: Option<Value>, // Amplitude, Distance between peaks and troughs
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pt: Option<Value>, // Point type (1 = corner, 2 = smooth)
+    pub   pt: Option<Value>, // Point type (`1` = corner, `2` = smooth)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextLayer { // Layer with some text
@@ -661,7 +673,7 @@ pub struct TextRange { // Range of text with custom animations and style
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextStyle {
-    #[serde(flatten)] pub transform: Transform,
+    #[serde(flatten)] pub trfm: Transform,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "t")]
     pub spacing: Option<Value>, // Letter Spacing
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -812,13 +824,14 @@ pub enum AssetsItem { Image(Image), Sound(Sound), DataSource(DataSource),
     #[serde(flatten)] pub file: FileAsset,
     #[serde(default)] pub w: f32, //  Width of the image
     #[serde(default)] pub h: f32, // Height of the image
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub t: Option<String>, // Marks as part of an image sequence if present, default "seq" const
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "t")]
+    //  Marks as part of an image sequence if present, default "seq" const
+    pub seq: Option<String>,
 }
 
 //  External data source, usually a JSON file
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct DataSource {
-    #[serde(flatten)] pub file: FileAsset, pub t: u32, // default 3 const
+    #[serde(flatten)] pub file: FileAsset, pub t: u32, // default `3` const
 }
 
 type Sound = FileAsset; // External sound
@@ -978,7 +991,7 @@ type Slots = serde_json::Value; // XXX: Available property overrides
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct EffectValue<T> {
     pub ty: u32, // Effect (value) type
     #[serde(default)] pub ix: u32, // Effect Index
-    #[serde(default = "defaults::default_none",
+    #[serde(default = "defaults::option_none",
         skip_serializing_if = "Option::is_none")] pub v: Option<T>,
     #[serde(flatten)] pub vo: VisualObject,
 }
@@ -1201,16 +1214,3 @@ pub struct Mask { // Bezier shape used to mask/clip a layer
     #[serde(rename = "f")] Difference,
 }
 
-pub(crate) mod defaults {
-    pub(super) fn animation_wh() -> u32 { 512 }
-    pub(super) fn animation_fr() -> f32 { 60.0 }
-    pub(super) fn animation_v() -> String { "5.5.2".to_owned() }
-    pub(super) fn effect_en() -> super::IntBool { true.into() }
-    pub(super) fn default_none<T>() -> Option<T> { None }
-    pub(super) fn time_stretch() -> f32 { 1.0 }
-    pub(super) fn precomp_op() -> f32 { 99999.0 }
-    pub(super) fn font_size()  -> f32 { 10.0 }
-    //pub(super) fn font_family() -> String { "sans".to_owned() }
-    //pub(super) fn font_name()   -> String { "sans-Regular".to_owned() }
-    //pub(super) fn font_style()  -> String { "Regular".to_owned() }
-}
