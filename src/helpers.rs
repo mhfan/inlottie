@@ -1,11 +1,12 @@
 
-use serde::{de::Error, Serialize, Deserialize, Deserializer, Serializer};
+use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
 //  Represents boolean values as an integer. 0 is false, 1 is true.
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
 #[serde(transparent)] pub struct IntBool(u8);
 
-impl From<IntBool> for bool { fn from(value: IntBool) -> Self { value.0 != 0 } }
+impl IntBool { #[inline] pub fn as_bool(&self) -> bool { (*self).into() } }
+impl From<IntBool> for bool { #[inline] fn from(value: IntBool) -> Self { value.0 != 0 } }
 impl From<bool> for IntBool { fn from(value: bool) -> Self { Self(if value { 1 } else { 0 }) } }
 
 /* #[derive(Debug, Clone, Copy)] pub struct Rgb  { pub r: u8, pub g: u8, pub b: u8 }
@@ -69,7 +70,7 @@ pub(crate) fn str_from_rgba<S: Serializer>(c: &Rgba, serializer: S) -> Result<S:
 }
 
 //pub type Vector2D = Vec<f32>; // euclid::default::Vector2D<f32>; // XXX: Position/Scale
-#[derive(Debug, Clone)] pub struct Vector2D { pub x: f32, pub y: f32 } // Point/Size
+#[derive(Debug, Clone, Copy)] pub struct Vector2D { pub x: f32, pub y: f32 } // Point/Size
 impl From<(f32, f32)> for Vector2D {
     fn from(val: (f32, f32)) -> Self { Self { x: val.0, y: val.1 } }
 }
@@ -132,7 +133,6 @@ pub(crate) mod defaults { #![allow(unused)]
     pub fn animation_vs() -> String { "5.5.2".to_owned() }
 
     pub fn effect_en() -> super::IntBool { true.into() }
-    pub fn option_none<T>() -> Option<T> { None }
     pub fn precomp_op() -> f32 { 99999. }
 
     pub fn font_size()  -> f32 { 10. }
@@ -141,19 +141,129 @@ pub(crate) mod defaults { #![allow(unused)]
     //pub fn font_name()   -> String { "sans-Regular".to_owned() }
 
     use super::{Value, Animated2D};
-    pub fn opacity() -> Value { Value::default(100.) }
-    pub fn animated2d() -> Animated2D { Animated2D::default((100., 100.).into()) }
+    pub fn opacity() -> Value { Value::from_value(100.) }
+    pub fn animated2d() -> Animated2D { Animated2D::from_value((100., 100.).into()) }
+
+    pub fn is_default<T: Default + PartialEq>(v: &T) -> bool { *v == T::default() }
 }
 
-impl Animation {
-    pub fn from_reader<R: std::io::Read>(r: R) -> Result<Self, serde_json::Error> {
-        serde_json::from_reader(r)
+impl FontList { pub fn is_empty(&self) -> bool { self.list.is_empty() } }
+
+pub trait Lerp { fn lerp(&self, other: &Self, t: f32) -> Self; }    // Linear intERPolation
+
+impl Lerp for f32 {
+    fn lerp(&self, other: &Self, t: f32) -> Self { self + (other - self) * t }
+}
+
+impl Lerp for Vector2D {
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        Self {  x: self.x + (other.x - self.x) * t,
+                y: self.y + (other.y - self.y) * t, }
     }
 }
 
-impl<T, K> AnimatedProperty<T, K> { #[allow(unused)]
-    pub(crate) fn default(val: T) -> Self {
-        Self { animated: Some(false.into()), keyframe: AnimatedValue::Static(val) }
+impl Lerp for Rgba {
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        Self {  r: self.r + ((other.r - self.r) as f32 * t) as u8,
+                g: self.g + ((other.g - self.g) as f32 * t) as u8,
+                b: self.b + ((other.b - self.b) as f32 * t) as u8,
+                a: self.a + ((other.a - self.a) as f32 * t) as u8,
+        }
+    }
+}
+
+impl Lerp for Bezier {
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        let closure =
+            |val: (&Vector2D, &Vector2D)| val.0.lerp(val.1, t);
+        Self { closed: self.closed,
+            vp: self.vp.iter().zip(other.vp.iter()).map(closure).collect(),
+            it: self.it.iter().zip(other.it.iter()).map(closure).collect(),
+            ot: self.ot.iter().zip(other.it.iter()).map(closure).collect(),
+        }
+    }
+}
+
+/* impl Lerp for Vec<Bezier> {
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        self.iter().zip(other.iter())
+            .map(|val| val.0.lerp(val.1, t)).collect()
+    }
+} */
+
+impl Lerp for ColorList {
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        Self(self.0.iter().zip(other.0.iter()).map(|val|
+            (val.0.0 + (val.1.0 - val.0.0) * t, val.0.1.lerp(&val.1.1, t))).collect())
+    }
+}
+
+impl Lerp for Vec<f32> {    // aka MultiDimensional
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        self.iter().zip(other.iter()).map(|val| val.0.lerp(val.1, t)).collect()
+    }
+}
+
+impl<T> KeyframeBase<T> {
+    #[inline] pub fn as_array(&self) -> &[T] {
+        if let Some(ArrayScalar::Array(val)) = &self.value { val } else {
+            unreachable!("Expected array, encountered scalar or none") }
+    }
+
+    #[inline] pub fn as_scalar(&self) -> &T { // can be frequently called
+        match &self.value { None => unreachable!(),
+            Some(ArrayScalar::Scalar(val)) => val,
+            Some(ArrayScalar::Array(val)) => { // Expected single-element array
+                debug_assert!(val.len() == 1);  &val[0]
+            }
+        }
+    }
+}
+
+impl Animation {
+    pub fn from_reader<R: std::io::Read>(r: R) -> // TODO: print out summary here?
+        Result<Self, serde_json::Error> { serde_json::from_reader(r) }
+}
+
+impl<T: Clone + Lerp> AnimatedProperty<T> { #[allow(unused)]
+    pub fn from_value(val: T) -> Self {
+        Self { animated: false.into(), keyframes: AnimatedValue::Static(val) }
+    }
+
+    // XXX: wrapped in Some, and use Cow<&T> to avoid unnecessary clone?
+    pub fn get_value(&self, fnth: f32) -> T {
+        match &self.keyframes {
+            AnimatedValue::Static(val) => {
+                debug_assert!(!self.animated.as_bool());    val.clone()
+            }
+            AnimatedValue::Animated(coll) => {
+                debug_assert!(/* self.animated.as_bool() && */!coll.is_empty());
+                if fnth <= coll[0].start { return coll[0].as_scalar().clone() }
+
+                let mut len = coll.len() - 1;
+                if coll[len].value.is_none() { if 0 < len { len -= 1; } else { unreachable!() } }
+                if coll[len].start <= fnth { return coll[len].as_scalar().clone() }
+                while 0 < len { len -= 1; if coll[len].start <= fnth { break } }
+                // assert `coll` is sorted by `start` as well
+                fn get_scalar(val: &ArrayScalar<f32>) -> f32 { match val {
+                    ArrayScalar::Array(val) => val[0],
+                    ArrayScalar::Scalar(val) => *val,
+                } } // XXX: handle multiple dimention? https://lib.rs/keywords/cubic
+
+                let kf =  &coll[len];
+                let time = (fnth - kf.start) / (coll[len + 1].start - kf.start);
+                use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
+
+                let ctrl = kf.easing.as_ref().map_or(
+                    (Coord2(0., 0.), Coord2(1., 1.)), |eh|
+                    (Coord2(get_scalar(&eh.to.time) as _, get_scalar(&eh.to.factor) as _),
+                     Coord2(get_scalar(&eh.ti.time) as _, get_scalar(&eh.ti.factor) as _)));
+
+                let curve = Curve::from_points(Coord2(0., 0.), ctrl, Coord2(1., 1.));
+                let time = curve.point_at_pos(time as _).1 as _;
+                kf.as_scalar().lerp(coll[len + 1].as_scalar(), time)
+            }   _ => unreachable!(),
+        }
     }
 }
 
@@ -163,9 +273,9 @@ impl<'de> Deserialize<'de> for LayersItem {
         Ok( match value.get("ty").and_then(serde_json::Value::as_u64)
             .ok_or_else(|| D::Error::missing_field("ty"))? as u32 {
 
-            0 => Self::Precomposition(PrecompLayer::
+            0 => Self::PrecompLayer(PrecompLayer::
                 deserialize(value).map_err(D::Error::custom)?),
-            1 => Self::SolidColor(SolidColorLayer::deserialize(value).map_err(D::Error::custom)?),
+            1 => Self::SolidColor(SolidLayer::deserialize(value).map_err(D::Error::custom)?),
             2 | 15 => Self::Image(ImageLayer::deserialize(value).map_err(D::Error::custom)?),
             3 => Self::Null(VisualLayer::deserialize(value).map_err(D::Error::custom)?),
             4 => Self::Shape(ShapeLayer::deserialize(value).map_err(D::Error::custom)?),
@@ -274,8 +384,7 @@ impl<'de> Deserialize<'de> for AnyAsset {
         //panic!("{}", value.to_string().get(0..20).unwrap());
         //let _ = Precomposition::deserialize(&value).unwrap();
         let value = AssetBase::deserialize(value).unwrap();
-        panic!("Failed on asset: {{ id: {}, nm: {} }}",
-            value.id, value.nm.unwrap_or("None".to_owned()));
+        panic!("Failed on asset: {{ id: {}, nm: {} }}", value.id, value.nm);
     }
 }
 
