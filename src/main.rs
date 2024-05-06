@@ -7,7 +7,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use std::{collections::VecDeque, time::Instant, error::Error};
+use std::{collections::VecDeque, time::Instant, error::Error, fs};
 use femtovg::{renderer::OpenGl, Canvas, Path, Paint, Color};
 
 /* fn render_offs() -> Result<(), Box<dyn Error>> {   // FIXME: offscreen not work
@@ -32,7 +32,7 @@ dbg!();
         (width * height * 4) as _) };
 
     let mut encoder = png::Encoder::new(
-        std::io::BufWriter::new(std::fs::File::create("target/foo.png")?), width, height);
+        std::io::BufWriter::new(fs::File::create("target/foo.png")?), width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
 
@@ -131,15 +131,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut viewport = rive_rs::Viewport::default();
     let mut scene = None;
-    use inlottie::rive::NanoVG;
+    use inlottie::{rive::NanoVG, schema::Animation};
 
     let mut fontdb = usvg::fontdb::Database::new(); fontdb.load_system_fonts();
     let path = std::env::args().nth(1).unwrap_or("data/tiger.svg".to_owned());
-    let file = std::fs::read(&path)?;   let mut tree = None;
+    let file = fs::read(&path)?;   let mut tree = None;
+    let mut lottie = None;
 
     match path.rfind('.').map_or("", |i| &path[1 + i..]) {
-        "svg" => tree = usvg::Tree::from_data(&file, &usvg::Options::default(), &fontdb).ok(),
-        "riv" => scene = NanoVG::new_scene(&file),
+        "json" => lottie = Animation::from_reader(fs::File::open(&path).unwrap()).ok(),
+        "svg"  => tree  = usvg::Tree::from_data(&file, &usvg::Options::default(), &fontdb).ok(),
+        "riv"  => scene = NanoVG::new_scene(&file),
         _ => eprintln!("File format is not supported: {path}"),
     }
 
@@ -148,12 +150,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     event_loop.run(|event, target| {
         let mut resize_canvas =
-            |size: PhysicalSize<u32>, orig: usvg::Size| {
+            |size: PhysicalSize<u32>, orig_w: f32, orig_h: f32| {
             canvas.reset();     mouse = (0., 0.);
-            let scale = (size.width  as f32 / orig.width())
-                         .min(size.height as f32 / orig.height()) * 0.95;
-            canvas.translate((size.width  as f32 - scale * orig.width())  / 2.,
-                             (size.height as f32 - scale * orig.height()) / 2.);
+            let scale = (size.width  as f32 / orig_w)
+                         .min(size.height as f32 / orig_h) * 0.95;
+            canvas.translate((size.width  as f32 - scale * orig_w)  / 2.,
+                             (size.height as f32 - scale * orig_h) / 2.);
             canvas.set_size  (size.width, size.height, 1.); // window.scale_factor() as _
             canvas.scale(scale, scale);
         };
@@ -166,7 +168,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 WindowEvent::Resized(size) => {
                     surface.resize(&glctx,  size.width .try_into().unwrap(),
                                             size.height.try_into().unwrap());
-                    if let Some(tree) = &tree { resize_canvas(size, tree.size()); }
+                    if let Some(tree) = &tree {
+                        resize_canvas(size, tree.size().width(), tree.size().height());
+                    }
+
+                    if let Some(lottie) = &lottie {
+                        resize_canvas(size, lottie.w as _, lottie.h as _);
+                    }
 
                     if scene.is_some() {    //mouse = (0., 0.);
                         viewport.resize(size.width, size.height);
@@ -174,6 +182,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                 }
 
+                // TODO: keyinput, space to pause, 'n' to advance a frame
                 WindowEvent::MouseInput { button: MouseButton::Left,
                     state, .. } => match state {
                     ElementState::Pressed  => { dragging = true;
@@ -214,14 +223,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 WindowEvent::DroppedFile(path) => {
-                    tree = None;    scene = None;
-                    let file = std::fs::read(&path).unwrap_or(vec![]);
+                    tree = None;    scene = None;   lottie = None;
+                    let file = fs::read(&path).unwrap_or(vec![]);
                     match path.extension().and_then(|ext| ext.to_str()) {
-                        Some("svg") => tree = usvg::Tree::from_data(&file,
+                        Some("svg") => tree  = usvg::Tree::from_data(&file,
                             &usvg::Options::default(), &fontdb).ok().map(|tree| {
-                            resize_canvas(window.inner_size(), tree.size()); tree }),
+                                resize_canvas(window.inner_size(),
+                                    tree.size().width(), tree.size().height()); tree }),
 
                         Some("riv") => scene = NanoVG::new_scene(&file),
+                        Some("json") => lottie = Animation::from_reader(
+                            fs::File::open(&path).unwrap()).ok().map(|lottie| {
+                                resize_canvas(window.inner_size(),
+                                    lottie.w as _, lottie.h as _); lottie }),
                         _ => eprintln!("File format is not supported: {}", path.display()),
                     }
 
@@ -236,6 +250,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if let Some(scene) = &mut scene {
                         if !scene.advance_and_maybe_draw(&mut NanoVG::new(&mut canvas),
                             elapsed, &mut viewport) { return }
+                    }
+
+                    if let Some(lottie) = &mut lottie {
+                        if !(lottie.render_next_frame(&mut canvas,
+                            elapsed.as_secs_f32())) { return }
                     }
 
                     if let Some(tree) = &tree {

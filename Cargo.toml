@@ -25,6 +25,7 @@ serde_repr = "0.1"
 #euclid = "0.22" # { version = "0.22", features = [ "serde" ] }
 
 flo_curves = "0.7"
+kurbo = "0.11"
 usvg  = "0.41"
 
 winit = "0.29"

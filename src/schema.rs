@@ -6,6 +6,9 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset, def
 /// Top level object, describing the animation.
 /// https://lottiefiles.github.io/lottie-docs/schema/
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Animation {
+    #[serde(skip)] pub elapsed: f32,    // for rendering
+    #[serde(skip)] pub fnth: f32,
+
     #[serde(default = "defaults::animation_fr")] /** Framerate in FPS */ pub fr: f32,
     /// Whether the animation has 3D layers.
     /// Lottie doesn't actually support 3D stuff so this should always be `0`.
