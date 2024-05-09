@@ -28,8 +28,8 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset, def
     /// If present a player might only render characters defined here and nothing else.
     #[serde(default, skip_serializing_if = "Vec::is_empty")] pub chars: Vec<CharacterData>,
 
-    #[serde(flatten)] pub vo: VisualObject,     /// Bodymovin/Lottie version
-    #[serde(default = "defaults::animation_vs")] pub v: String,
+    //#[serde(flatten)] pub vo: VisualObject,
+    //#[serde(default = "defaults::animation_vs")] /** Bodymovin/Lottie version */ pub v: String,
 
     /*/ List of Extra compositions not referenced by anything
     #[serde(default, skip_serializing_if = "Vec::is_empty")] pub comps: Vec<Precomp>,
@@ -170,12 +170,12 @@ pub struct VisualLayer {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct LayerInfo {
-    /** Layer type */ pub ty: u32,
+    //* Layer type */ pub ty: u32
     /** Start Time */ pub st: f32, // XXX: what is `st` used for?
     /**  In Point  */ pub ip: f32,
     /** Out Point  */ pub op: f32,
 
-    #[serde(flatten)] pub vo: VisualObject,
+    //#[serde(flatten)] pub vo: VisualObject,
     #[serde(default)] pub ddd: IntBool, // Whether the layer is 3D threedimensional
     #[serde(default, skip_serializing_if = "defaults::is_default")]
     /** Whether the layer is hidden */ pub hd: bool,
@@ -197,8 +197,8 @@ pub struct VisualLayer {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct VisualObject {
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    /** Name, as seen from editors and the like */ pub nm: String,
+    //#[serde(default, skip_serializing_if = "String::is_empty")]
+    //* Name, as seen from editors and the like */ pub nm: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     #[cfg(feature = "expression")] /** Match name, used in expressions */ pub mn: String,
 }
@@ -505,7 +505,7 @@ pub enum ColorGradEnum { Color(ColorWrapper), Gradient(Box<Gradient>), }
 
 /// An item used to described the dash pattern in a stroked path
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct StrokeDash {
-    #[serde(flatten)] pub vo: VisualObject,     // Type of a dash item in a stroked line
+    //#[serde(flatten)] pub vo: VisualObject,     // Type of a dash item in a stroked line
     #[serde(rename = "n")] pub r#type: StrokeDashType,  /// Length of the dash
     #[serde(rename = "v")] pub  value: Value,
 }
@@ -536,17 +536,17 @@ pub enum ColorGradEnum { Color(ColorWrapper), Gradient(Box<Gradient>), }
 /// Base class for all elements of ShapeLayer and Group
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct ShapeElement {
     //pub ty: String, // Shape type, handled via enum tag
-    #[serde(flatten)] pub vo: VisualObject,
+    //#[serde(flatten)] pub vo: VisualObject,
     #[serde(default, skip_serializing_if = "defaults::is_default")] pub bm: Option<BlendMode>,
     #[serde(default, skip_serializing_if = "defaults::is_default")]
     /** Whether the shape is hidden */ pub hd: bool,
 
     #[serde(skip_serializing_if = "Option::is_none")] /// Index used in expressions
     #[cfg(feature = "expression")] pub ix: Option<u32>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    /** `id` attribute used by the SVG renderer */ pub ln: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    /** CSS class list used by the SVG renderer */ pub cl: String,
+    //#[serde(default, skip_serializing_if = "String::is_empty")]
+    //* `id` attribute used by the SVG renderer */ pub ln: String,
+    //#[serde(default, skip_serializing_if = "String::is_empty")]
+    //* CSS class list used by the SVG renderer */ pub cl: String,
 }
 
 /// Drawing direction of the shape curve, useful for trim path
@@ -692,7 +692,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 
 /// Range of text with custom animations and style
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextRange {
-    #[serde(default, skip_serializing_if = "String::is_empty")] pub nm: String, // Name
+    //#[serde(default, skip_serializing_if = "String::is_empty")] /** Name */ pub nm: String,
     #[serde(skip_serializing_if = "Option::is_none", rename = "s")]
     pub select: Option<TextRangeSelector>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")]
@@ -882,8 +882,7 @@ type Sound = FileAsset; // External sound
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct AssetBase {
     /** Unique identifier used by layers when referencing this asset */ pub id: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    /** Human readable name */ pub nm: String,
+    //#[serde(default, skip_serializing_if = "String::is_empty")] /** Name */ pub nm: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -984,7 +983,7 @@ pub struct CharacterShapes {
     pub ty: EffectType,
     #[serde(default = "defaults::effect_en")] /** Enabled */ pub en: IntBool,
 
-    #[serde(flatten)] pub vo: VisualObject,
+    //#[serde(flatten)] pub vo: VisualObject,
     /** Property Count, Number of values in `ef` */ #[serde(default)] pub np: u32,
     /** Effect Index */ #[serde(default)] pub ix: u32,
 }
@@ -1037,10 +1036,10 @@ pub struct CharacterShapes {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct EffectValue<T> {
-    /** Effect (value) type */ pub ty: u32,
+    //* Effect (value) type */ pub ty: u32,
     /** Effect Index */ pub ix: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "v")] pub value: Option<T>,
-    #[serde(flatten)] pub vo: VisualObject,
+    //#[serde(flatten)] pub vo: VisualObject,
 }
 
 #[derive(Clone, Debug, Serialize)] #[serde(untagged)] pub enum LayerStyleItem {
@@ -1056,7 +1055,7 @@ pub struct CharacterShapes {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct StrokeStyle { // Stroke / frame
-    #[serde(flatten)] pub ls: LayerStyle,
+    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "s")] pub size: Option<Value>,
@@ -1069,7 +1068,7 @@ pub struct CharacterShapes {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct InnerShadowStyle {
-    #[serde(flatten)] pub ls: LayerStyle,
+    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "o")] pub opacity: Option<Value>,
@@ -1086,7 +1085,7 @@ pub struct CharacterShapes {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct OuterGlowStyle {
-    #[serde(flatten)] pub ls: LayerStyle,
+    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
      pub color: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "o")] pub opacity: Option<Value>,
@@ -1105,7 +1104,7 @@ pub struct CharacterShapes {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct BevelEmbossStyle {
-    #[serde(flatten)] pub ls: LayerStyle,
+    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")] /// Local light angle
     pub angle: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "s")] pub size: Option<Value>,
@@ -1135,7 +1134,7 @@ pub struct CharacterShapes {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct SatinStyle {
-    #[serde(flatten)] pub ls: LayerStyle,
+    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "o")] pub opacity: Option<Value>,
@@ -1150,7 +1149,7 @@ pub struct CharacterShapes {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct ColorOverlayStyle {
-    #[serde(flatten)] pub ls: LayerStyle,
+    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "so")] pub opacity: Option<Value>,
@@ -1158,7 +1157,7 @@ pub struct CharacterShapes {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct GradientOverlayStyle {
-    #[serde(flatten)] pub ls: LayerStyle,
+    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "o")] pub opacity: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")] /// Local light angle
     pub angle: Option<Value>,
@@ -1180,14 +1179,14 @@ pub struct CharacterShapes {
 
 //type LayerStyle = VisualObject; // Style applied to a layer
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct LayerStyle {
-    /** Style type */ pub ty: u32,
-    #[serde(flatten)] pub vo: VisualObject,
+    //* Style type */ pub ty: u32
+    //#[serde(flatten)] pub vo: VisualObject,
 }
 
 /// Bezier shape used to mask/clip a layer
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Mask {
-    #[serde(flatten)] pub vo: VisualObject,     /// Inverted
-    #[serde(default)] pub inv: bool,
+    //#[serde(flatten)] pub vo: VisualObject,
+    #[serde(default)] /** Inverted */ pub inv: bool,
     #[serde(default)] pub mode: MaskMode,
     #[serde(rename = "pt")] pub shape: ShapeProperty,
     #[serde(skip_serializing_if = "Option::is_none", rename =  "o")] pub opacity: Option<Value>,

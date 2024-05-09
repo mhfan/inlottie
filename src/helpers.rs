@@ -384,7 +384,7 @@ impl<'de> Deserialize<'de> for AnyAsset {
         //panic!("{}", value.to_string().get(0..20).unwrap());
         //let _ = Precomposition::deserialize(&value).unwrap();
         let value = AssetBase::deserialize(value).unwrap();
-        panic!("Failed on asset: {{ id: {}, nm: {} }}", value.id, value.nm);
+        panic!("Failed on asset, ID: {}", value.id);
     }
 }
 
