@@ -21,13 +21,13 @@ use serde_path_to_error::deserialize as deserial_err;
         let path = format!("fixtures/segments/{}.json", sfn);
         Ok(deserial_err(&mut json_des::from_reader(File::open(&path)?))
             .map_err(|err| { eprintln!("Failed parsing {path}"); err })?)
-    }   use inlottie::schema::{GradientFill, Stroke, TextRange, Transform};
+    }   use inlottie::schema::{FillStrokeGrad, TextRange, Transform};
 
     segparse::<Animation>("animated_position_legacy")?;
     segparse::<Transform>("transform_complex")?;
-    segparse::<GradientFill>("gradient_fill")?;
+    segparse::<FillStrokeGrad>("gradient_fill")?;
+    segparse::<FillStrokeGrad>("stroke")?;
     segparse::<TextRange>("text_range")?;
-    segparse::<Stroke>("stroke")?;
 
     Ok(())
 }

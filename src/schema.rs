@@ -379,11 +379,11 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
     #[serde(rename = "el")] Ellipse(Ellipse),
     #[serde(rename = "sh")] Path(FreePath),
 
-    #[serde(rename = "fl")] Fill(Fill),                     // Styles:
-    #[serde(rename = "st")] Stroke(Stroke),
-    #[serde(rename = "no")] NoStyle(NoStyle),
-    #[serde(rename = "gf")] GradientFill(GradientFill),
-    #[serde(rename = "gs")] GradientStroke(GradientStroke),
+    #[serde(rename = "no")] NoStyle(NoStyle),               // Styles:
+    #[serde(rename = "fl")] Fill(FillStrokeGrad),
+    #[serde(rename = "st")] Stroke(FillStrokeGrad),
+    #[serde(rename = "gf")] GradientFill(FillStrokeGrad),
+    #[serde(rename = "gs")] GradientStroke(FillStrokeGrad),
 
     #[serde(rename = "rd")] RoundedCorners(RoundedCorners), // Modifiers:
     #[serde(rename = "pb")] PuckerBloat(PuckerBloat),
@@ -439,13 +439,6 @@ pub struct FreePath {  #[serde(flatten)]        pub  base: ShapeBase,
 #[derive(Clone, Copy, Debug, Default, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum StarType { #[default] Star = 1, Polygon, }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Fill { // Solid fill color
-    #[serde(flatten)] pub elem: ShapeElement,
-    #[serde(rename = "c")] pub color: ColorValue,
-    #[serde(rename = "o")] pub opacity: Value,
-    #[serde(rename = "r", default)] pub rule: FillRule,
-}
-
 /// Rule used to handle multiple shapes rendered with the same fill object
 #[derive(Clone, Copy, Debug, Default, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum FillRule {
@@ -454,26 +447,16 @@ pub struct FreePath {  #[serde(flatten)]        pub  base: ShapeBase,
     EvenOdd,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Stroke { // Solid stroke
-    #[serde(flatten)] pub elem: ShapeElement,
-    #[serde(flatten)] pub base: BaseStroke,
-    #[serde(rename = "c")] pub color: ColorValue,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct GradientFill {
-    #[serde(flatten)] pub elem: ShapeElement,
-    #[serde(flatten)] pub grad: Gradient,
-    #[serde(rename = "o")] pub opacity: Value,
-    #[serde(rename = "r", default)] pub rule: FillRule,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Gradient {
     /** Start point for the gradient */ #[serde(rename = "s")] pub sp: Animated2D,
     /** End   point for the gradient */ #[serde(rename = "e")] pub ep: Animated2D,
     #[serde(rename = "g")] pub stops: GradientColors,
 
     #[serde(rename = "t", default)] pub r#type: GradientType,
-    /// Highlight Length, as a percentage between `s` and `e`
+    /// Highlight Length, as a percentage between `s` and `e`.
+    /// If it's a radial gradient, `s` refers to the center of the gradient,
+    /// and the style object may have these additional properties: `h` and `a`.
+    /// Basically the radial highlight position is defined in polar coordinates relative to `s`.
     #[serde(rename = "h", skip_serializing_if = "Option::is_none")] pub hl: Option<Value>,
     /// Highlight Angle, relative to the direction from `s` to `e`
     #[serde(rename = "a", skip_serializing_if = "Option::is_none")] pub ha: Option<Value>,
@@ -488,18 +471,32 @@ pub struct FreePath {  #[serde(flatten)]        pub  base: ShapeBase,
     #[serde(rename = "k")] pub cl: AnimatedProperty<ColorList>, // MultiDimensional
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct GradientStroke {
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct FillStrokeGrad {
     #[serde(flatten)] pub elem: ShapeElement,
-    #[serde(flatten)] pub base: BaseStroke,
-    #[serde(flatten)] pub grad: Gradient,
+    #[serde(flatten)] pub base: FillStrokeEnum,
+    #[serde(flatten)] pub grad: ColorGradEnum,
+    #[serde(rename = "o")] pub opacity: Value,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
+pub enum FillStrokeEnum { Stroke(Box<BaseStroke>), FillRule(FillRuleWrapper), }
+
+#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
+pub enum ColorGradEnum { Color(ColorWrapper), Gradient(Box<Gradient>), }
+
+#[derive(Clone, Debug, Deserialize, Serialize)] pub struct ColorWrapper {
+    #[serde(rename = "c")] pub color: ColorValue
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)] pub struct FillRuleWrapper {
+    #[serde(rename = "r", default)] pub rule: FillRule,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct BaseStroke {
-    #[serde(rename = "o")] pub opacity: Value,
-    #[serde(rename = "w")] pub   width: Value,
+    #[serde(rename = "w")] pub width: Value,    // `opacity` was moved out to unify struct
 
-    #[serde(default)] pub lc: LineCap,
     #[serde(default)] pub lj: LineJoin,
+    #[serde(default)] pub lc: LineCap,
     #[serde(default)] pub ml: f32,  /// Animatable alternative to `ml` (Miter Limit)
     #[serde(skip_serializing_if = "Option::is_none")] pub ml2: Option<Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty", rename = "d")]
