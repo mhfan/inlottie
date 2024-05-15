@@ -24,15 +24,19 @@ serde_repr = "0.1"
 # geometric types with a focus on 2d graphics and layout
 #euclid = "0.22" # { version = "0.22", features = [ "serde" ] }
 
-usvg = "0.41"
 flo_curves = "0.7"
-winit  = { version = "0.29" }
-femtovg = { version = "0.9" }
+usvg  = "0.41"
+
+winit = "0.29"
+femtovg = { version = "0.9", features = [ "image-loading" ]}
+
+#rive-rs = { path = "rive-rs/rive-rs" }
+rive-rs = { git = "https://github.com/rive-app/rive-rs" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-glutin = { version = "0.31" } # offscreen@v0.29
-glutin-winit = { version = "0.4" }
-raw-window-handle = { version = "0.5" } # HasRawWindowHandle
+glutin = "0.31" # offscreen@v0.29
+glutin-winit = "0.4"
+raw-window-handle = "0.5" # HasRawWindowHandle
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web_sys = { version = "0.3", package = "web-sys", features = [
