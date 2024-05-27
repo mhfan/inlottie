@@ -1,7 +1,7 @@
 
 [package]
 name = "inlottie"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = [ "MeiHui FAN <mhfan@ustc.edu>" ]
@@ -9,7 +9,7 @@ authors = [ "MeiHui FAN <mhfan@ustc.edu>" ]
 description = "lib/tool in Rust to load/save/parse/render lottie animation files"
 categories  = [ "parser-implementations", "rendering::data-formats", "graphics",
      "multimedia::images" ]     # https://crates.io/category_slugs
-keywords = [ "Lottie", "Animation", "vector-graphic" ]
+keywords = [ "Lottie", "Rive", "Animation", "vector-graphic" ]
 #exclude  = [ "examples" ]
 
 
@@ -32,7 +32,7 @@ winit = "0.29"
 femtovg = { version = "0.9", features = [ "image-loading" ]}
 
 #rive-rs = { path = "rive-rs/rive-rs" }
-rive-rs = { git = "https://github.com/rive-app/rive-rs" }
+rive-rs = { version = "0", git = "https://github.com/rive-app/rive-rs" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 glutin = "0.31" # offscreen@v0.29

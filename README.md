@@ -1,9 +1,11 @@
 
 # lib/tool in Rust for [Lottie (Bodymovin) Animation](https://lottiefiles.com) file
 
-The original [Lottie json shema](https://lottiefiles.github.io/lottie-docs/schema/) file was slightly modified so that the great [typify](https://github.com/oxidecomputer/typify) tool could run and convert it into Rust codebase. After much simplification and optimization work was done manually, finally, the `parser` seems to be very compatible to accept most of the [realword sample json files](https://github.com/zimond/lottie-rs/blob/main/fixtures) of [Lottie Animation](https://airbnb.design/lottie/) without too much compromise.
+The original [Lottie json shema](https://lottiefiles.github.io/lottie-docs/schema/) file was slightly modified so that the great [typify](https://github.com/oxidecomputer/typify) tool could run and convert it into Rust codebase. After extensive manual simplification and optimization efforts, finally, the `parser` seems to be very compatible to accept most of the [realword sample json files](https://github.com/zimond/lottie-rs/blob/main/fixtures) of [Lottie Animation](https://airbnb.design/lottie/) without too much compromise.
 
-TODO: refer to [intvg](https://github.com/mhfan/intvg), development/implement a `renderer` based on [freetype2/ftgrays](https://gitlab.freedesktop.org/freetype/freetype/-/blob/master/src/smooth/ftgrays.c), [gpac/evg](https://github.com/gpac/gpac/tree/master/src/evg), [blend2d](https://github.com/blend2d/blend2d), HTML5/Web Canvas API or [femtovg](https://github.com/femtovg/femtovg); and a `viewer` based on [bevy engine](https://github.com/bevyengine/bevy) or [Dioxus](https://github.com/DioxusLabs/dioxus)? Then, enhance capability to parse/handle [dotLottie](https://dotlottie.io/structure/#dotlottie-structure).
+Implemented a simple and straightforward viewer/renderer for Lottie animation based on [femtovg](https://github.com/femtovg/femtovg), yet with many many features to be developed. Besides, there is a player/renderer adapted to [rive-app](https://github.com/rive-app/rive-rs) for [**Rive** animation](https://rive.app) based on femtovg, though is not capable to support `clip path` and `blend mode`.
+
+TODO: refer to [intvg](https://github.com/mhfan/intvg), development/implement a `renderer` based on [gpac/evg](https://github.com/gpac/gpac/tree/master/src/evg), [blend2d](https://github.com/blend2d/blend2d), [HTML5/Web Canvas API](https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API) to support most of Lottie and Rive animation features; and a `viewer` based on [bevy engine](https://github.com/bevyengine/bevy) or [Dioxus](https://github.com/DioxusLabs/dioxus)? Then, enhance capability to parse/handle [dotLottie](https://dotlottie.io/structure/#dotlottie-structure).
 
 ## References
 
