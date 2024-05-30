@@ -59,6 +59,16 @@ impl std::ops::Mul<f32> for Vector2D {  type Output = Vector2D;
         Self::Output { x: self.x * scale, y: self.y * scale }
     }
 }
+impl std::ops::Add<f32> for Vector2D {  type Output = Vector2D;
+    #[inline] fn add(self, offset: f32) -> Self::Output {
+        Self::Output { x: self.x + offset, y: self.y + offset }
+    }
+}
+impl std::ops::Sub<f32> for Vector2D {  type Output = Vector2D;
+    #[inline] fn sub(self, offset: f32) -> Self::Output {
+        Self::Output { x: self.x - offset, y: self.y - offset }
+    }
+}
 impl std::ops::Add for Vector2D {  type Output = Vector2D;
     #[inline] fn add(self, rhs: Self) -> Self::Output {
         Self::Output { x: self.x + rhs.x, y: self.y + rhs.y }
@@ -148,7 +158,7 @@ impl PathFactory for Polystar {
 
         let mut angle = -PI / 2. + self.rotation.get_value(fnth) * PI / 180.;
         let angle_step = if matches!(self.sy, StarType::Star) { PI } else { PI * 2. } /
-            if self.base.is_ccw() { -(nvp as f32) } else { nvp as f32 };
+            if self.base.is_ccw() { -(nvp as f32) } else { nvp as _ };
 
         let (rpx, rpy) = (angle.cos() * or, angle.sin() * or);
         let (ptx, pty) = (center.x + rpx, center.y + rpy);
@@ -207,7 +217,7 @@ impl PathFactory for FreePath {
         if !self.base.is_ccw() { self.shape.add_path(path, fnth); return }
         let curv = self.shape.get_value(fnth);
         debug_assert!(curv.vp.len() == curv.it.len() &&
-                        curv.it.len() == curv.ot.len() && !curv.vp.is_empty());
+                      curv.it.len() == curv.ot.len() && !curv.vp.is_empty());
 
         let fpt = curv.vp.last().unwrap();
         path.move_to(fpt.x, fpt.y);
@@ -392,46 +402,33 @@ impl Transform {
         // If your transform is transposed (`tx`, `ty` are on the last column),
         // perform LEFT multiplication instead. Perform the following operations on a
         // matrix starting from the identity matrix (or the parent object's transform matrix):
-        let mut trfm = TM2D::identity();
+        let (mut trfm, mut ts) = (TM2D::identity(), TM2D::identity());
         if  let Some(anchor) = &self.anchor {
             let anchor = anchor.get_value(fnth);
-            let mut tr = TM2D::identity();
-            tr.translate(-anchor.x, -anchor.y);
-            trfm.multiply(&tr);
+            trfm.multiply(&TM2D::new_translation(-anchor.x, -anchor.y));
         }
 
         if  let Some(scale) = &self.scale {
             let scale = scale.get_value(fnth) / 100.;
             //if scale.x == 0. { scale.x = f32::EPSILON; } // workaround for some lottie file?
             //if scale.y == 0. { scale.y = f32::EPSILON; }
-            let mut tr = TM2D::identity();
-            tr.scale(scale.x, scale.y);
-            trfm.multiply(&tr);
+            ts.scale(scale.x, scale.y);     trfm.multiply(&ts);
         }
 
         if  let Some(skew) = &self.skew {
             let axis = self.skew_axis.as_ref()
                 .map(|axis| axis.get_value(fnth) * PI / 180.);
-            if let Some(axis) = axis {
-                let mut tr = TM2D::identity();
-                tr.rotate(-axis);   trfm.multiply(&tr);
-            }
+            if let Some(axis) = axis { ts.rotate(-axis);   trfm.multiply(&ts); }
 
             let skew = (skew.get_value(fnth) * PI / -180.).tan();
-            let mut tr = TM2D::identity();
-                tr.skew_x(skew);    trfm.multiply(&tr);
+            ts.skew_x(skew);    trfm.multiply(&ts);
 
-            if let Some(axis) = axis {
-                let mut tr = TM2D::identity();
-                tr.rotate(axis);    trfm.multiply(&tr);
-            }
+            if let Some(axis) = axis { ts.rotate( axis);   trfm.multiply(&ts); }
         }
 
         match &self.extra {
             TransRotation::Normal2D { rotation: Some(rdegree) } => {
-                let mut tr = TM2D::identity();
-                tr.rotate(rdegree.get_value(fnth) * PI / 180.);
-                trfm.multiply(&tr);
+                ts.rotate(rdegree.get_value(fnth) * PI / 180.); trfm.multiply(&ts);
             }
 
             TransRotation::Split3D(_) => unimplemented!(), //assert!(ddd);
@@ -443,18 +440,59 @@ impl Transform {
                 let pos  = apos.get_value(fnth);
                 if  ao.as_bool() && apos.animated.as_bool() {
                     let orient = pos - apos.get_value(fnth - 1.);
-                    let mut tr = TM2D::identity();
-                    tr.rotate(fast_atan2(orient.y, orient.x));
-                    trfm.multiply(&tr);
-                }
-
-                let mut tr = TM2D::identity();
-                tr.translate(pos.x, pos.y);     trfm.multiply(&tr);
+                    ts.rotate(fast_atan2(orient.y, orient.x));  trfm.multiply(&ts);
+                }   trfm.multiply(&TM2D::new_translation(pos.x, pos.y));
             }
 
             Some(Translation::Split(_)) => unimplemented!(), //assert!(ddd);
             _ => (),
         }   TM2DwO(trfm, opacity)
+    }
+
+    fn to_repeat_trfm(&self, fnth: f32, offset: f32) -> TM2D {
+        let (mut trfm, mut ts) = (TM2D::identity(), TM2D::identity());
+        let anchor = if let Some(anchor) = &self.anchor {
+            let anchor = anchor.get_value(fnth);
+            trfm.multiply(&TM2D::new_translation(-anchor.x, -anchor.y));
+            anchor
+        } else { Vector2D { x: 0., y: 0. } };
+
+        if  let Some(scale) = &self.scale {
+            let scale = scale.get_value(fnth) / 100.;
+            ts.scale(scale.x.powf(offset), scale.y.powf(offset));
+            trfm.multiply(&ts);
+        }
+
+        if  let Some(skew) = &self.skew {
+            let axis = self.skew_axis.as_ref()
+                .map(|axis| axis.get_value(fnth) * PI / 180.);
+            if let Some(axis) = axis { ts.rotate(-axis); trfm.multiply(&ts); }
+
+            let skew = (skew.get_value(fnth) * offset * PI / -180.).tan();
+            ts.skew_x(skew);    trfm.multiply(&ts); // XXX:
+
+            if let Some(axis) = axis { ts.rotate( axis); trfm.multiply(&ts); }
+        }
+
+        match &self.extra {
+            TransRotation::Normal2D { rotation: Some(rdegree) } => {
+                ts.rotate(rdegree.get_value(fnth) * offset * PI / 180.);
+                trfm.multiply(&ts);
+            }
+
+            TransRotation::Split3D(_) => unimplemented!(), //assert!(ddd);
+            _ => (),
+        }
+
+        match &self.position {
+            Some(Translation::Normal(apos)) => {
+                let pos  = apos.get_value(fnth) * offset;
+                trfm.multiply(&TM2D::new_translation(pos.x + anchor.x, pos.y + anchor.y));
+            }
+
+            Some(Translation::Split(_)) => unimplemented!(), //assert!(ddd);
+            _ => (),
+        }   trfm
     }
 }
 
@@ -480,13 +518,13 @@ impl Animation {
         canvas: &mut Canvas<T>, elapsed: f32) -> bool {
         debug_assert!(0. < self.fr && 0. <= self.ip && 1. < self.op - self.ip);
 
-        self.elapsed += elapsed;    let elapsed = self.elapsed * self.fr;
-        if  (elapsed < 1. && self.ip < self.fnth) || self.op <= self.fnth { return false }
+            self.elapsed += elapsed * self.fr;
+        if  self.elapsed < 1. && self.ip < self.fnth { return false }
 
-        if  2. <= elapsed {     // advance/skip elapsed frames
-            let elapsed = (elapsed - 1.).floor();   self.fnth += elapsed;
-            while self.op <= self.fnth { self.fnth -= self.op; }
-            self.elapsed -= elapsed / self.fr;
+        if  2. <= self.elapsed {    // advance/skip elapsed frames
+            let elapsed = (self.elapsed - 1.).floor();
+            self.fnth = (self.fnth + elapsed) % self.op;
+            self.elapsed -= elapsed;
         }
 
         let trfm = canvas.transform();
@@ -496,10 +534,10 @@ impl Animation {
 
         canvas.clear_rect(//0, 0, canvas.width(), canvas.height(),
             ltrb.0, ltrb.1, ltrb.2 - ltrb.0, ltrb.3 - ltrb.1, VGColor::rgbf(0.4, 0.4, 0.4));
+        self.render_layers(canvas, None, &self.layers, self.fnth);
 
-            self.render_layers(canvas, None, &self.layers, self.fnth);  self.fnth += 1.;
-        if  self.op <= self.fnth { self.fnth = 0.; } self.elapsed -= 1.  / self.fr;  true
-        //if  self.elapsed * self.fr < 1. { self.render_next_frame(0.); }
+        self.elapsed -= 1.;       self.fnth += 1.;
+        if self.op <= self.fnth { self.fnth  = 0.; }    true
     }
 
     /// The render order goes from the last element to the first,
@@ -590,6 +628,7 @@ impl Animation {
         ptm: &TM2DwO, coll: &[ShapeListItem], fnth: f32, ao: IntBool) {
         let (mut path, mut trfm) = (VGPath::new(), None);
         let (mut fillp, mut linep) = (vec![], vec![]);
+        let  mut repeater = vec![];
 
         // convert shape to path, convert_style(fill/stroke/gradient)
         // render path of shape with trfm and style to screen/pixmap
@@ -613,16 +652,17 @@ impl Animation {
                         //fillp.push(paint);  continue;   // XXX:
                     }   linep.push(paint);
                 }
-                ShapeListItem::NoStyle(_) => todo!(),
+                ShapeListItem::NoStyle(_) => eprintln!("What need to do here?"),
                 ShapeListItem::GradientFill(grad)
                     if !grad.elem.hd => fillp.push(grad.to_paint(fnth)),
                 ShapeListItem::GradientStroke(grad)
                     if !grad.elem.hd => linep.push(grad.to_paint(fnth)),
 
+                ShapeListItem::Repeater(mdfr)
+                    if !mdfr.elem.hd => repeater = repeat_shape(mdfr, fnth),
                 ShapeListItem::RoundedCorners(_) |  //round_corners(&mdfr, &mut path, fnth);
                 ShapeListItem::PuckerBloat(_) |
                 ShapeListItem::OffsetPath(_)  |
-                ShapeListItem::Repeater(_) |        //repeat_shape(&mdfr, fnth);
                 ShapeListItem::Trim(_)  |           //trim_path(&mdfr, &mut path, fnth);
                 ShapeListItem::Twist(_) |
                 ShapeListItem::Merge(_) |
@@ -640,10 +680,18 @@ impl Animation {
         } }
 
         let trfm = trfm.as_ref().unwrap_or(ptm);    canvas.save();
-        canvas.set_transform(&trfm.0);        canvas.set_global_alpha(trfm.1);
-        fillp.iter().for_each(|paint| canvas.  fill_path(&path, paint));
-        linep.iter().for_each(|paint| canvas.stroke_path(&path, paint));
-        canvas.restore();
+        if repeater.is_empty() { // XXX: execute in order of fill/stroke layer?
+            canvas.set_global_alpha(trfm.1);      canvas.set_transform(&trfm.0);
+            fillp.iter().for_each(|paint| canvas.  fill_path(&path, paint));
+            linep.iter().for_each(|paint| canvas.stroke_path(&path, paint));
+        }   let last_trfm = canvas.transform();
+
+        repeater.into_iter().rev().for_each(|mut ts| {  ts.multiply(trfm);
+            canvas.set_global_alpha(ts.1);        canvas.set_transform(&ts.0);
+            fillp.iter().for_each(|paint| canvas.  fill_path(&path, paint));
+            linep.iter().for_each(|paint| canvas.stroke_path(&path, paint));
+            canvas.reset_transform();             canvas.set_transform(&last_trfm);
+        }); canvas.restore();
     }
 }
 
@@ -699,14 +747,10 @@ fn render_masks<T: Renderer>(canvas: &mut Canvas<T>, masks_prop: &[Mask], fnth: 
             MaskMode::None => None,
         } };
 
-        if let Some(cop) = cop {
-            canvas.global_composite_operation(cop);
-        }
-
         if let Some(opacity) = &mask.opacity {
             canvas.set_global_alpha(opacity.get_value(fnth) / 100.);
         }
-
+        if let Some(cop) = cop { canvas.global_composite_operation(cop); }
         if let Some(_expand) = &mask.expand { todo!() }
 
         let mut path = VGPath::new();   mask.shape.add_path(&mut path, fnth);
@@ -735,21 +779,19 @@ fn render_matte<T: Renderer>(canvas: &mut Canvas<T>,
     canvas.set_transform(&last_trfm);   canvas.flush();     canvas.delete_image(imgid);
 }
 
-fn _repeat_shape(mdfr: &Repeater, fnth: f32) -> Vec<TM2DwO> {
-    let so = mdfr.tr.so.as_ref().map_or(1., |so| so.get_value(fnth));
-    let eo = mdfr.tr.eo.as_ref().map_or(1., |eo| eo.get_value(fnth));
+fn repeat_shape(mdfr: &Repeater, fnth: f32) -> Vec<TM2DwO> {
+    let mut opacity = mdfr.tr.so.as_ref().map_or(1.,
+        |so| so.get_value(fnth) / 100.);
+    let offset = mdfr.offset.as_ref().map_or(0.,
+        |offset| offset.get_value(fnth));   // range [-1, 2]?
 
-    let _offset = mdfr.offset.as_ref().map_or(0.,
-        |offset| offset.get_value(fnth));
-    let tr0 = mdfr.tr.trfm.to_matrix(fnth, false.into()); // XXX: to apply offset
+    let cnt = mdfr.cnt.get_value(fnth);
+    let delta = (mdfr.tr.eo.as_ref().map_or(1.,
+        |eo| eo.get_value(fnth) / 100.) - opacity) / cnt;
 
     let mut coll = vec![];
-    let cnt = mdfr.cnt.get_value(fnth);
-    let mut trn = TM2D::identity();
-
-    for i in 0..cnt as u32 {    trn.multiply(&tr0.0);   let t = i as f32 / cnt;
-        let t = match mdfr.order { Composite::Above => 1. - t, Composite::Below => t, };
-        coll.push(TM2DwO(trn, so.lerp(&eo, t)));
-    }   coll
+    for i in 0..cnt as u32 {    let i = i as f32;   opacity += delta;
+        coll.push(TM2DwO(mdfr.tr.trfm.to_repeat_trfm(fnth, offset + i), opacity));
+    }   if matches!(mdfr.order, Composite::Below) { coll.reverse(); }   coll
 }
 
