@@ -12,7 +12,7 @@ impl From<bool> for IntBool { fn from(value: bool) -> Self { Self(if value { 1 }
 /* #[derive(Debug, Clone, Copy)] pub struct Rgb  { pub r: u8, pub g: u8, pub b: u8 }
 impl Rgb {  pub fn new_u8 (r:  u8, g:  u8, b:  u8) -> Self { Self { r, g, b } }
             pub fn new_f32(r: f32, g: f32, b: f32) -> Self { Self {
-        r: (r * 255.) as u8, g: (g * 255.) as u8, b: (b * 255.) as u8
+        r: (r * 255.) as _, g: (g * 255.) as _, b: (b * 255.) as _
     } }
 } */
 
@@ -22,7 +22,7 @@ impl Default for Rgba { fn default() -> Self { Self { r: 0, g: 0, b: 0, a: 255 }
 impl Rgba {
     pub fn new_u8 (r:  u8, g:  u8, b:  u8, a:  u8) -> Self { Self { r, g, b, a } }
     pub fn new_f32(r: f32, g: f32, b: f32, a: f32) -> Self { Self {
-        r: (r * 255.) as u8, g: (g * 255.) as u8, b: (b * 255.) as u8, a: (a * 255.) as u8
+        r: (r * 255.) as _, g: (g * 255.) as _, b: (b * 255.) as _, a: (a * 255.) as _
     } }
 }
 
@@ -49,8 +49,8 @@ impl std::str::FromStr for Rgba { type Err = String;
             .map_err(|err| err.to_string())?;
 
         let v = if s.len() == 7 { (v << 8) | 0xff } else { v };
-        Ok(Self::new_u8((v >> 24) as u8, ((v >> 16) & 0xff) as u8,
-            ((v >>  8) & 0xff) as u8, (v & 0xff) as u8))
+        Ok(Self::new_u8((v >> 24) as _, ((v >> 16) & 0xff) as _,
+                       ((v >>  8) & 0xff) as _, (v & 0xff) as _))
     }
 }
 
@@ -69,8 +69,8 @@ pub(crate) fn str_from_rgba<S: Serializer>(c: &Rgba, serializer: S) -> Result<S:
     serializer.serialize_str(&c.to_string())
 }
 
-//pub type Vector2D = Vec<f32>; // euclid::default::Vector2D<f32>; // XXX: Position/Scale
-#[derive(Debug, Clone, Copy)] pub struct Vector2D { pub x: f32, pub y: f32 } // Point/Size
+// euclid::default::Vector2D<f32>;  // Point/Size, Position/Scale
+#[derive(Debug, Clone, Copy)] pub struct Vector2D { pub x: f32, pub y: f32 }
 impl From<(f32, f32)> for Vector2D {
     fn from(val: (f32, f32)) -> Self { Self { x: val.0, y: val.1 } }
 }
@@ -148,123 +148,9 @@ pub(crate) mod defaults { #![allow(unused)]
 }
 
 impl FontList { pub fn is_empty(&self) -> bool { self.list.is_empty() } }
-
-pub trait Lerp { fn lerp(&self, other: &Self, t: f32) -> Self; }    // Linear intERPolation
-
-impl Lerp for f32 {
-    fn lerp(&self, other: &Self, t: f32) -> Self { self + (other - self) * t }
-}
-
-impl Lerp for Vector2D {
-    fn lerp(&self, other: &Self, t: f32) -> Self {
-        Self {  x: self.x + (other.x - self.x) * t,
-                y: self.y + (other.y - self.y) * t, }
-    }
-}
-
-impl Lerp for Rgba {
-    fn lerp(&self, other: &Self, t: f32) -> Self {
-        Self {  r: self.r + ((other.r - self.r) as f32 * t) as u8,
-                g: self.g + ((other.g - self.g) as f32 * t) as u8,
-                b: self.b + ((other.b - self.b) as f32 * t) as u8,
-                a: self.a + ((other.a - self.a) as f32 * t) as u8,
-        }
-    }
-}
-
-impl Lerp for Bezier {
-    fn lerp(&self, other: &Self, t: f32) -> Self {
-        let closure =
-            |val: (&Vector2D, &Vector2D)| val.0.lerp(val.1, t);
-        Self { closed: self.closed,
-            vp: self.vp.iter().zip(other.vp.iter()).map(closure).collect(),
-            it: self.it.iter().zip(other.it.iter()).map(closure).collect(),
-            ot: self.ot.iter().zip(other.it.iter()).map(closure).collect(),
-        }
-    }
-}
-
-/* impl Lerp for Vec<Bezier> {
-    fn lerp(&self, other: &Self, t: f32) -> Self {
-        self.iter().zip(other.iter())
-            .map(|val| val.0.lerp(val.1, t)).collect()
-    }
-} */
-
-impl Lerp for ColorList {
-    fn lerp(&self, other: &Self, t: f32) -> Self {
-        Self(self.0.iter().zip(other.0.iter()).map(|val|
-            (val.0.0 + (val.1.0 - val.0.0) * t, val.0.1.lerp(&val.1.1, t))).collect())
-    }
-}
-
-impl Lerp for Vec<f32> {    // aka MultiDimensional
-    fn lerp(&self, other: &Self, t: f32) -> Self {
-        self.iter().zip(other.iter()).map(|val| val.0.lerp(val.1, t)).collect()
-    }
-}
-
-impl<T> KeyframeBase<T> {
-    #[inline] pub fn as_array(&self) -> &[T] {
-        if let Some(ArrayScalar::Array(val)) = &self.value { val } else {
-            unreachable!("Expected array, encountered scalar or none") }
-    }
-
-    #[inline] pub fn as_scalar(&self) -> &T { // can be frequently called
-        match &self.value { None => unreachable!(),
-            Some(ArrayScalar::Scalar(val)) => val,
-            Some(ArrayScalar::Array(val)) => { // Expected single-element array
-                debug_assert!(val.len() == 1);  &val[0]
-            }
-        }
-    }
-}
-
 impl Animation {
-    pub fn from_reader<R: std::io::Read>(r: R) -> // TODO: print out summary here?
+    pub fn from_reader<R: std::io::Read>(r: R) ->   // XXX: print out summary here?
         Result<Self, serde_json::Error> { serde_json::from_reader(r) }
-}
-
-impl<T: Clone + Lerp> AnimatedProperty<T> { #[allow(unused)]
-    pub fn from_value(val: T) -> Self {
-        Self { animated: false.into(), keyframes: AnimatedValue::Static(val) }
-    }
-
-    // XXX: wrapped in Some, and use Cow<&T> to avoid unnecessary clone?
-    pub fn get_value(&self, fnth: f32) -> T {
-        match &self.keyframes {
-            AnimatedValue::Static(val) => {
-                debug_assert!(!self.animated.as_bool());    val.clone()
-            }
-            AnimatedValue::Animated(coll) => {
-                debug_assert!(/* self.animated.as_bool() && */!coll.is_empty());
-                if fnth <= coll[0].start { return coll[0].as_scalar().clone() }
-
-                let mut len = coll.len() - 1;
-                if coll[len].value.is_none() { if 0 < len { len -= 1; } else { unreachable!() } }
-                if coll[len].start <= fnth { return coll[len].as_scalar().clone() }
-                while 0 < len { len -= 1; if coll[len].start <= fnth { break } }
-                // assert `coll` is sorted by `start` as well
-                fn get_scalar(val: &ArrayScalar<f32>) -> f32 { match val {
-                    ArrayScalar::Array(val) => val[0],
-                    ArrayScalar::Scalar(val) => *val,
-                } } // XXX: handle multiple dimention? https://lib.rs/keywords/cubic
-
-                let kf =  &coll[len];
-                let time = (fnth - kf.start) / (coll[len + 1].start - kf.start);
-                use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
-
-                let ctrl = kf.easing.as_ref().map_or(
-                    (Coord2(0., 0.), Coord2(1., 1.)), |eh|
-                    (Coord2(get_scalar(&eh.to.time) as _, get_scalar(&eh.to.factor) as _),
-                     Coord2(get_scalar(&eh.ti.time) as _, get_scalar(&eh.ti.factor) as _)));
-
-                let curve = Curve::from_points(Coord2(0., 0.), ctrl, Coord2(1., 1.));
-                let time = curve.point_at_pos(time as _).1 as _;
-                kf.as_scalar().lerp(coll[len + 1].as_scalar(), time)
-            }   _ => unreachable!(),
-        }
-    }
 }
 
 impl<'de> Deserialize<'de> for LayersItem {
@@ -476,3 +362,195 @@ fn serialize_with_type<S: Serializer>(layers: &[TestLayersItem],
 }
 
 }
+
+pub mod math {  use super::*;
+
+/** Fast arctangent approximations by iterative algorithms, the coordinated rotation
+    digital computer (**CORDIC**) algorithm (requiring only shifts and add operations).
+
+ - https://geekshavefeelings.com/posts/fixed-point-atan2
+ - https://www-labs.iro.umontreal.ca/~mignotte/IFT2425/Documents/EfficientApproximationArctgFunction.pdf
+ - https://ieeexplore.ieee.org/book/6241055
+ - https://math.stackexchange.com/questions/1098487/atan2-faster-approximation
+
+```
+    use core::f32::consts::PI;
+    use inlottie::render::fast_atan2;
+    assert_eq!(fast_atan2( 0.,  0.),   0.);
+
+    assert_eq!(fast_atan2( 0.,  1.),   0.);
+    assert_eq!(fast_atan2( 0., -1.),   PI);
+    assert_eq!(fast_atan2( 1.,  0.),   PI / 2.);
+    assert_eq!(fast_atan2(-1.,  0.),  -PI / 2.);
+
+    assert!  ((fast_atan2( 1.,  1.) -  PI / 4.).abs() < f32::EPSILON);
+    assert!  ((fast_atan2(-1.,  1.) - -PI / 4.).abs() < f32::EPSILON);
+    assert_eq!(fast_atan2(-1., -1.),  -PI * 3. / 4.);
+    assert_eq!(fast_atan2( 1., -1.),   PI * 3. / 4.);
+
+    [(1., 2.), (-1., 2.), (1., -2.), (-1., -2.), (2., 1.), (-2., 1.), (2., -1.), (-2., -1.)]
+    .into_iter().for_each(|(x, y)| assert!((fast_atan2(y, x) - y.atan2(x)).abs() < 0.0038));
+``` */
+pub fn fast_atan2(y: f32, x: f32) -> f32 {  use std::f32::consts::PI;
+    if x == 0. { return if 0. < y { PI / 2. } else if y < 0. { -PI / 2. } else { 0. } }
+    else if y == 0. { return if 0. < x { 0. } else { PI } }
+
+    let flag = y.abs() < x.abs();
+    let slope = if flag { y / x } else { x / y };   // valid range: [-1, 1]
+    let hatan = (PI / 4. + 0.273 - 0.273 * slope.abs()) * slope; // max error ~0.0038
+        //(PI / 4. + 0.2447 - (0.2447 - 0.0663 + 0.0663 * slope.abs()) * slope.abs()) * slope;
+        // http://nghiaho.com/?p=997, max error ~0.0015, 3x faster than standard C atan
+    //if 1. < slope { PI / 2. - hatan } else if slope < -1. { -PI / 2. - hatan } else { hatan }
+
+    if flag { hatan + if 0. < x { 0. } else if 0. < y { PI } else { -PI }
+    } else { (if 0. < y { PI / 2. } else { -PI / 2. }) - hatan }
+}
+
+impl std::ops::Div<f32> for Vector2D {  type Output = Vector2D;
+    #[inline] fn div(self, scale: f32) -> Self::Output {
+        Self::Output { x: self.x / scale, y: self.y / scale }
+    }
+}
+impl std::ops::Mul<f32> for Vector2D {  type Output = Vector2D;
+    #[inline] fn mul(self, scale: f32) -> Self::Output {
+        Self::Output { x: self.x * scale, y: self.y * scale }
+    }
+}
+impl std::ops::Add<f32> for Vector2D {  type Output = Vector2D;
+    #[inline] fn add(self, offset: f32) -> Self::Output {
+        Self::Output { x: self.x + offset, y: self.y + offset }
+    }
+}
+impl std::ops::Sub<f32> for Vector2D {  type Output = Vector2D;
+    #[inline] fn sub(self, offset: f32) -> Self::Output {
+        Self::Output { x: self.x - offset, y: self.y - offset }
+    }
+}
+impl std::ops::Add for Vector2D {  type Output = Vector2D;
+    #[inline] fn add(self, rhs: Self) -> Self::Output {
+        Self::Output { x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+impl std::ops::Sub for Vector2D {  type Output = Vector2D;
+    #[inline] fn sub(self, rhs: Self) -> Self::Output {
+        Self::Output { x: self.x - rhs.x, y: self.y - rhs.y }
+    }
+}
+
+pub trait Lerp { fn lerp(&self, other: &Self, t: f32) -> Self; }    // Linear intERPolation
+
+impl Lerp for f32 {
+    fn lerp(&self, other: &Self, t: f32) -> Self { self + (other - self) * t }
+}
+
+impl Lerp for Vector2D {
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        Self {  x: self.x + (other.x - self.x) * t,
+                y: self.y + (other.y - self.y) * t, }
+    }
+}
+
+impl Lerp for Rgba {
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        Self {  r: self.r + ((other.r - self.r) as f32 * t) as u8,
+                g: self.g + ((other.g - self.g) as f32 * t) as u8,
+                b: self.b + ((other.b - self.b) as f32 * t) as u8,
+                a: self.a + ((other.a - self.a) as f32 * t) as u8,
+        }
+    }
+}
+
+impl Lerp for Bezier {
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        let closure =
+            |val: (&Vector2D, &Vector2D)| val.0.lerp(val.1, t);
+        Self { closed: self.closed,
+            vp: self.vp.iter().zip(other.vp.iter()).map(closure).collect(),
+            it: self.it.iter().zip(other.it.iter()).map(closure).collect(),
+            ot: self.ot.iter().zip(other.it.iter()).map(closure).collect(),
+        }
+    }
+}
+
+/* impl Lerp for Vec<Bezier> {
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        self.iter().zip(other.iter())
+            .map(|val| val.0.lerp(val.1, t)).collect()
+    }
+} */
+
+impl Lerp for ColorList {
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        Self(self.0.iter().zip(other.0.iter()).map(|val|
+            (val.0.0 + (val.1.0 - val.0.0) * t, val.0.1.lerp(&val.1.1, t))).collect())
+    }
+}
+
+impl Lerp for Vec<f32> {    // aka MultiDimensional
+    fn lerp(&self, other: &Self, t: f32) -> Self {
+        self.iter().zip(other.iter()).map(|val| val.0.lerp(val.1, t)).collect()
+    }
+}
+
+impl<T> KeyframeBase<T> {
+    #[inline] pub fn as_array(&self) -> &[T] {
+        if let Some(ArrayScalar::Array(val)) = &self.value { val } else {
+            unreachable!("Expected array, encountered scalar or none") }
+    }
+
+    #[inline] pub fn as_scalar(&self) -> &T { // can be frequently called
+        match &self.value { None => unreachable!(),
+            Some(ArrayScalar::Scalar(val)) => val,
+            Some(ArrayScalar::Array(val)) => { // Expected single-element array
+                debug_assert!(val.len() == 1);  &val[0]
+            }
+        }
+    }
+}
+
+impl<T: Clone + Lerp> AnimatedProperty<T> {
+    pub fn from_value(val: T) -> Self {
+        Self { animated: false.into(), keyframes: AnimatedValue::Static(val) }
+    }
+
+    // XXX: wrapped in Some, and use Cow<&T> to avoid unnecessary clone?
+    pub fn get_value(&self, fnth: f32) -> T {
+        match &self.keyframes {
+            AnimatedValue::Static(val) => {
+                debug_assert!(!self.animated.as_bool());    val.clone()
+            }
+            AnimatedValue::Animated(coll) => {
+                debug_assert!(/* self.animated.as_bool() && */!coll.is_empty());
+                if fnth <= coll[0].start { return coll[0].as_scalar().clone() }
+
+                let mut len = coll.len() - 1;
+                if coll[len].value.is_none() { if 0 < len { len -= 1; } else { unreachable!() } }
+                if coll[len].start <= fnth { return coll[len].as_scalar().clone() }
+                while 0 < len { len -= 1; if coll[len].start <= fnth { break } }
+                // assert `coll` is sorted by `start` as well
+
+                fn get_scalar(val: &ArrayScalar<f32>) -> f32 { match val {
+                    ArrayScalar::Array(val) => val[0],
+                    ArrayScalar::Scalar(val) => *val,
+                } } // XXX: handle multiple dimention? https://lib.rs/keywords/cubic
+
+                let kf =  &coll[len];
+                let time = (fnth - kf.start) / (coll[len + 1].start - kf.start);
+                use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
+                // https://github.com/gre/bezier-easing, https://github.com/hannesmann/keyframe
+
+                let ctrl = kf.easing.as_ref().map_or(
+                    (Coord2(0., 0.), Coord2(1., 1.)), |eh|
+                    (Coord2(get_scalar(&eh.to.time) as _, get_scalar(&eh.to.factor) as _),
+                     Coord2(get_scalar(&eh.ti.time) as _, get_scalar(&eh.ti.factor) as _)));
+
+                let curve = Curve::from_points(Coord2(0., 0.), ctrl, Coord2(1., 1.));
+                let time = curve.point_at_pos(time as _).1 as _;
+                kf.as_scalar().lerp(coll[len + 1].as_scalar(), time)
+            }   _ => unreachable!(),
+        }
+    }
+}
+
+}
+

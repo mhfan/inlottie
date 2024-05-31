@@ -5,80 +5,8 @@
  * Copyright (c) 2024 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::{schema::*, helpers::*};
+use crate::{schema::*, helpers::{*, math::*}};
 use std::f32::consts::PI;
-
-/** Fast arctangent approximations by iterative algorithms, the coordinated rotation
-    digital computer (**CORDIC**) algorithm (requiring only shifts and add operations).
-
- - https://geekshavefeelings.com/posts/fixed-point-atan2
- - https://www-labs.iro.umontreal.ca/~mignotte/IFT2425/Documents/EfficientApproximationArctgFunction.pdf
- - https://ieeexplore.ieee.org/book/6241055
- - https://math.stackexchange.com/questions/1098487/atan2-faster-approximation
-
-```
-    use core::f32::consts::PI;
-    use inlottie::render::fast_atan2;
-    assert_eq!(fast_atan2( 0.,  0.),   0.);
-
-    assert_eq!(fast_atan2( 0.,  1.),   0.);
-    assert_eq!(fast_atan2( 0., -1.),   PI);
-    assert_eq!(fast_atan2( 1.,  0.),   PI / 2.);
-    assert_eq!(fast_atan2(-1.,  0.),  -PI / 2.);
-
-    assert!  ((fast_atan2( 1.,  1.) -  PI / 4.).abs() < f32::EPSILON);
-    assert!  ((fast_atan2(-1.,  1.) - -PI / 4.).abs() < f32::EPSILON);
-    assert_eq!(fast_atan2(-1., -1.),  -PI * 3. / 4.);
-    assert_eq!(fast_atan2( 1., -1.),   PI * 3. / 4.);
-
-    [(1., 2.), (-1., 2.), (1., -2.), (-1., -2.), (2., 1.), (-2., 1.), (2., -1.), (-2., -1.)]
-    .into_iter().for_each(|(x, y)| assert!((fast_atan2(y, x) - y.atan2(x)).abs() < 0.0038));
-``` */
-pub fn fast_atan2(y: f32, x: f32) -> f32 {
-    if x == 0. { return if 0. < y { PI / 2. } else if y < 0. { -PI / 2. } else { 0. } }
-    else if y == 0. { return if 0. < x { 0. } else { PI } }
-
-    let flag = y.abs() < x.abs();
-    let slope = if flag { y / x } else { x / y };   // valid range: [-1, 1]
-    let hatan = (PI / 4. + 0.273 - 0.273 * slope.abs()) * slope; // max error ~0.0038
-        //(PI / 4. + 0.2447 - (0.2447 - 0.0663 + 0.0663 * slope.abs()) * slope.abs()) * slope;
-        // http://nghiaho.com/?p=997, max error ~0.0015, 3x faster than standard C atan
-    //if 1. < slope { PI / 2. - hatan } else if slope < -1. { -PI / 2. - hatan } else { hatan }
-
-    if flag { hatan + if 0. < x { 0. } else if 0. < y { PI } else { -PI }
-    } else { (if 0. < y { PI / 2. } else { -PI / 2. }) - hatan }
-}
-
-impl std::ops::Div<f32> for Vector2D {  type Output = Vector2D;
-    #[inline] fn div(self, scale: f32) -> Self::Output {
-        Self::Output { x: self.x / scale, y: self.y / scale }
-    }
-}
-impl std::ops::Mul<f32> for Vector2D {  type Output = Vector2D;
-    #[inline] fn mul(self, scale: f32) -> Self::Output {
-        Self::Output { x: self.x * scale, y: self.y * scale }
-    }
-}
-impl std::ops::Add<f32> for Vector2D {  type Output = Vector2D;
-    #[inline] fn add(self, offset: f32) -> Self::Output {
-        Self::Output { x: self.x + offset, y: self.y + offset }
-    }
-}
-impl std::ops::Sub<f32> for Vector2D {  type Output = Vector2D;
-    #[inline] fn sub(self, offset: f32) -> Self::Output {
-        Self::Output { x: self.x - offset, y: self.y - offset }
-    }
-}
-impl std::ops::Add for Vector2D {  type Output = Vector2D;
-    #[inline] fn add(self, rhs: Self) -> Self::Output {
-        Self::Output { x: self.x + rhs.x, y: self.y + rhs.y }
-    }
-}
-impl std::ops::Sub for Vector2D {  type Output = Vector2D;
-    #[inline] fn sub(self, rhs: Self) -> Self::Output {
-        Self::Output { x: self.x - rhs.x, y: self.y - rhs.y }
-    }
-}
 
 /// https://lottiefiles.github.io/lottie-docs/rendering/
 trait PathFactory { fn add_path(&self, path: &mut VGPath, fnth: f32); }
@@ -680,7 +608,7 @@ impl Animation {
         } }
 
         let trfm = trfm.as_ref().unwrap_or(ptm);    canvas.save();
-        if repeater.is_empty() { // XXX: execute in order of fill/stroke layer?
+        if repeater.is_empty() {    // XXX: execute in order of fill/stroke layer?
             canvas.set_global_alpha(trfm.1);      canvas.set_transform(&trfm.0);
             fillp.iter().for_each(|paint| canvas.  fill_path(&path, paint));
             linep.iter().for_each(|paint| canvas.stroke_path(&path, paint));
