@@ -501,25 +501,26 @@ impl Animation {
             })
         }
 
-        #[inline] fn need_hide(vl: &VisualLayer, fnth: f32) -> bool {
-            vl.base.hd || fnth < vl.base.ip || vl.base.op <= fnth || fnth < vl.base.st
-        }   // XXX: What are the function of `sr`?
+        fn to_show_frame(vl: &VisualLayer, fnth: f32) -> Option<f32> {
+            if vl.base.hd || fnth < vl.base.ip || vl.base.op <= fnth || fnth < vl.base.st {
+                None } else { Some((fnth - vl.base.st) / vl.base.sr) }
+        }
 
         for layer in layers.iter().rev() { match layer {
-                LayersItem::Shape(shpl) if !need_hide(&shpl.vl, fnth) => {
-                    let fnth = fnth - shpl.vl.base.st;
+                LayersItem::Shape(shpl) =>
+                    if let Some(fnth) = to_show_frame(&shpl.vl, fnth) {
                     let trfm = get_matrix(&shpl.vl, fnth);
 
                     prepare_matte(canvas, &shpl.vl, &mut matte);
                     Self::render_shapes(canvas, &trfm, &shpl.shapes, fnth, shpl.vl.ao);
                      render_matte(canvas, &shpl.vl, &mut matte, fnth);
                 }
-                LayersItem::PrecompLayer(pcl) if !need_hide(&pcl.vl, fnth) => {
+                LayersItem::PrecompLayer(pcl) =>
+                    if let Some(fnth) = to_show_frame(&pcl.vl, fnth) {
                     if let Some(pcomp) = self.assets.iter().find_map(|asset|
                         match asset { AssetsItem::Precomp(pcomp)
                             if pcomp.base.id == pcl.rid => Some(pcomp), _ => None }) {
 
-                        let fnth = fnth - pcl.vl.base.st;
                         let trfm = get_matrix(&pcl.vl, fnth);
                         let fnth = pcl.tm.as_ref().map_or(fnth, // handle time remapping
                             |tm| tm.get_value(fnth) * pcomp.fr);
@@ -529,8 +530,8 @@ impl Animation {
                          render_matte(canvas, &pcl.vl, &mut matte, fnth);
                     }   // clipping(pcl.w, pcl.h)?
                 }
-                LayersItem::SolidColor(scl) if !need_hide(&scl.vl, fnth) => {
-                    let fnth = fnth - scl.vl.base.st;
+                LayersItem::SolidColor(scl) =>
+                    if let Some(fnth) = to_show_frame(&scl.vl, fnth) {
                     let trfm = get_matrix(&scl.vl, fnth);
                     prepare_matte(canvas, &scl.vl, &mut matte);
 
