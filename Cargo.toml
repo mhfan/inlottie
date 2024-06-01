@@ -3,6 +3,7 @@
 name = "inlottie"
 version = "0.1.5"
 edition = "2021"
+default-run = "inlottie"
 license = "MIT OR Apache-2.0"
 authors = [ "MeiHui FAN <mhfan@ustc.edu>" ]
  repository = "https://github.com/mhfan/inlottie"
@@ -17,6 +18,12 @@ keywords = [ "Lottie", "Rive", "Animation", "vector-graphic" ]
 
 [features]
 #default = [ "rive-rs" ]
+vello = [ "dep:vello", "image", "wgpu", "anyhow", "pollster" ]
+
+[[bin]]
+name = "vello"
+path = "src/vello_demo.rs"
+required-features = [ "vello" ]
 
 [dependencies]
 serde = { version = "1.0", features = [ "derive" ] }
@@ -30,6 +37,12 @@ serde_repr = "0.1"
 flo_curves = "0.7"
 kurbo = "0.11"
 usvg  = "0.41"
+
+vello = { version = "0.1", optional = true, git = "https://github.com/linebender/vello.git" }
+pollster = { version = "0.3", optional = true }
+anyhow = { version = "1.0", optional = true }
+image = { version = "0.25", optional = true } #features = [ "png", "jpeg", "gif" ]
+wgpu  = { version = "0.20", optional = true }
 
 winit = "0.29"
 femtovg = { version = "0.9", features = [ "image-loading" ]}
