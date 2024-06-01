@@ -27,5 +27,7 @@ TODO: refer to [intvg](https://github.com/mhfan/intvg), development/implement a 
 * <https://github.com/tseli0s/Prisma2D>
 * <https://github.com/thorvg/thorvg>
 * <https://www.amanithvg.com>
+
+* **<https://www.w3.org/TR/compositing-1/>**
+* <https://2d.graphics/book/contents.html>
 * <https://www.w3schools.com/tags/ref_canvas.asp>
-* <https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API>

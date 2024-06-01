@@ -162,7 +162,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             canvas.reset();     mouse = (0., 0.);
             let scale = (size.width  as f32 / orig_w)
                          .min(size.height as f32 / orig_h) * 0.95;
-            canvas.translate((size.width  as f32 - scale * orig_w)  / 2.,
+            canvas.translate((size.width  as f32 - scale * orig_w) / 2.,
                              (size.height as f32 - scale * orig_h) / 2.);
             canvas.set_size  (size.width, size.height, 1.); // window.scale_factor() as _
             canvas.scale(scale, scale);
@@ -269,8 +269,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if let Some(tree) = &tree {
                         canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
                             Color::rgbf(0.4, 0.4, 0.4));    // to clear viewport/viewbox only?
-                        render_nodes(&mut canvas, &mouse, tree.root(),
-                            &usvg::Transform::default());
+                        let trfm = tree.view_box().to_transform(tree.size())
+                            .pre_concat(tree.root().transform());
+                        render_nodes(&mut canvas, &mouse, tree.root(), &trfm);
                     }/* else {
                         canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
                             Color::rgbf(0.4, 0.4, 0.4));
@@ -368,7 +369,7 @@ impl PerfGraph {
 
     pub fn render<T: Renderer>(&self, canvas: &mut Canvas<T>, x: f32, y: f32) {
         let (rw, rh, mut path) = (100., 20., Path::new());
-        let mut paint = Paint::color(Color::rgba(0, 0, 0, 128));
+        let mut paint = Paint::color(Color::rgba(0, 0, 0, 99));
         path.rect(0., 0., rw, rh);
 
         canvas.save();  canvas.reset_transform();   canvas.translate(x, y);
@@ -385,8 +386,8 @@ impl PerfGraph {
         paint.set_text_align(femtovg::Align::Right);
         paint.set_font_size(14.0); // some fixed values can be moved into the structure
 
-        let _ = canvas.fill_text(rw - 10., 0.,  // self.que.iter().sum::<f32>()
-            &format!("{:.2} FPS", self.sum / self.que.len() as f32), &paint);
+        let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
+        let _ = canvas.fill_text(rw - 10., 0., &format!("{fps:.2} FPS"), &paint);
         canvas.restore();
     }
 }
