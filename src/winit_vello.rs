@@ -31,15 +31,14 @@ fn main() -> anyhow::Result<()> {
     //let mut lottie = None;
     //use inlottie::schema::Animation;
 
-    let mut tree = None;
-    let mut fontdb = usvg::fontdb::Database::new(); fontdb.load_system_fonts();
+    let mut usvg_opts = usvg::Options::default();
+    usvg_opts.fontdb_mut().load_system_fonts();     let mut tree = None;
     let path = std::env::args().nth(1).unwrap_or("data/tiger.svg".to_owned());
 
     //if fs::metadata(&path).is_ok() {} //if std::path::Path(&path).exists() {}
     match path.rfind('.').map_or("", |i| &path[1 + i..]) {
         //"json" => lottie = Animation::from_reader(fs::File::open(&path)?).ok(),
-        "svg"  => tree  = usvg::Tree::from_data(&fs::read(&path)?,
-            &usvg::Options::default(), &fontdb).ok(),
+        "svg"  => tree  = usvg::Tree::from_data(&fs::read(&path)?, &usvg_opts).ok(),
         _ => eprintln!("File format is not supported: {path}"),
     }
 
@@ -62,32 +61,33 @@ fn main() -> anyhow::Result<()> {
     let (mut fragment, mut trfm) = (Scene::new(), Affine::IDENTITY);
     let (mut perf, mut prevt) = (PerfGraph::new(), Instant::now());
 
+    let mut focused = true;
     // Create and run a winit event loop
     let event_loop = winit::event_loop::EventLoop::new()?;
-    event_loop.run(move |event, event_loop| match event {
+    event_loop.run(move |event, elwt| match event {
             // Setup renderer. In winit apps it is recommended to do setup in Event::Resumed
             // for best cross-platform compatibility
             Event::Resumed => {
                 let RenderState::Suspended(cached_window) =
                     &mut render_state else { return };
 
-                let mut size = event_loop.primary_monitor().unwrap().size();
-                size.width  /= 2;   size.height /= 2;
+                let mut wsize = elwt.primary_monitor().unwrap().size();
+                wsize.width  /= 2;  wsize.height /= 2;
 
                 // Get the window cached in a previous Suspended event or else create a new one
                 let window = cached_window.take().unwrap_or_else(|| Arc::new(
                     winit::window::WindowBuilder::new().with_resizable(true)
-                        .with_inner_size(size).with_title("Vello Demo").build(event_loop).unwrap()
-                    /*event_loop.create_window(Window::default_attributes()
+                        .with_inner_size(wsize).with_title("Vello Demo").build(elwt).unwrap()
+                    /*elwt.create_window(Window::default_attributes()
                         .with_inner_size(LogicalSize::new(1044, 800)) // XXX: winit v0.30
                         .with_resizable(true).with_title("Vello Shapes")).unwrap() */
                 ));
 
                 // Create a vello Surface
-                let size = window.inner_size();
+                //let wsize = window.inner_size();
                 let surface_future =
                     render_cx.create_surface(window.clone(),
-                        size.width, size.height, wgpu::PresentMode::AutoVsync);
+                        wsize.width, wsize.height, wgpu::PresentMode::AutoVsync);
                 let surface = pollster::block_on(
                     surface_future).expect("Error creating surface");
 
@@ -102,22 +102,22 @@ fn main() -> anyhow::Result<()> {
 
                 // Save the Window and Surface to a state variable
                 render_state = RenderState::Active(ActiveRenderState { window, surface });
-                event_loop.set_control_flow(ControlFlow::Poll);
+                elwt.set_control_flow(ControlFlow::Poll);
             }
 
             Event::Suspended => {   // Save window state on suspend
                 if let RenderState::Active(state) = &render_state {
                     render_state = RenderState::Suspended(Some(state.window.clone()));
-                }   event_loop.set_control_flow(ControlFlow::Wait);
+                }   elwt.set_control_flow(ControlFlow::Wait);
             }
 
-            Event::AboutToWait => {
+            Event::AboutToWait => if focused {
                 let render_state = match &mut render_state {
                     RenderState::Active(state) => state,
                     _ => return,
                 };  render_state.window.request_redraw();
             }
-            Event::WindowEvent { ref event, window_id, } => {
+            Event::WindowEvent { event, window_id, } => {
                 // Ignore the event (return from the function) if
                 //   - we have no render_state
                 //   - OR the window id of the event doesn't match the one of our render_state
@@ -133,7 +133,8 @@ fn main() -> anyhow::Result<()> {
                 match event {
                     // Exit the event loop when a close is requested
                     // (e.g. window's close button is pressed)
-                    WindowEvent::CloseRequested => event_loop.exit(),
+                    WindowEvent::CloseRequested => elwt.exit(),
+                    WindowEvent::Focused(bl) => focused = bl,
 
                     // Resize the surface when the window is resized
                     WindowEvent::Resized(size) => {
@@ -154,7 +155,8 @@ fn main() -> anyhow::Result<()> {
                     }
 
                     // This is where all the rendering happens
-                    WindowEvent::RedrawRequested => {   prevt = Instant::now();
+                    WindowEvent::RedrawRequested => {
+                        let _ = prevt.elapsed();    prevt = Instant::now();
                         // Empty the scene of objects to draw. You could create a new Scene
                         // each time, but in this case the same Scene is reused so that
                         // the underlying memory allocation can also be reused.
@@ -189,11 +191,11 @@ fn main() -> anyhow::Result<()> {
                             &vello::RenderParams { base_color: Color::rgb8(99, 99, 99), 
                                 width, height, antialiasing_method: AaConfig::Msaa16 }
                         ).expect("failed to render to surface");
+                        perf.update(prevt.elapsed().as_secs_f32());
 
                         // Queue the texture to be presented on the surface
                         surface_texture.present();
                         device_handle.device.poll(wgpu::Maintain::Poll);
-                        perf.update(prevt.elapsed().as_secs_f32());
                     }   _ => ()
                 }
             }   _ => ()
@@ -240,9 +242,9 @@ impl PerfGraph {
 
     pub fn update(&mut self, ft: f32) { //debug_assert!(f32::EPSILON < ft);
         //let ft = self.time.elapsed().as_secs_f32();   self.time = Instant::now();
-        let fps = 1. / ft;  if self.max < fps { self.max = fps } // (ft + f32::EPSILON)
-        if self.que.len() == 100 { self.sum -= self.que.pop_front().unwrap_or(0.); }
-        self.que.push_back(fps);   self.sum += fps;
+        let fps = 1. / ft;  if self.max <  fps { self.max = fps } // (ft + f32::EPSILON)
+        if self.que.len() == 100 {  self.sum -= self.que.pop_front().unwrap_or(0.); }
+        self.que.push_back(fps);    self.sum += fps;
     }
 
     pub fn render(&self, scene: &mut Scene, x: f32, y: f32) {

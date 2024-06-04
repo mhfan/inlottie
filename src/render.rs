@@ -321,6 +321,8 @@ fn stroke_dash(path: &VGPath, paint: &VGPaint, dash: (f32, Vec<f32>)) -> VGPath 
     }); path
 }
 
+// TODO: need to implement bezier.length() and split_at(t)
+
 impl Transform {
     fn to_matrix(&self, fnth: f32, ao: IntBool) -> TM2DwO {
         let opacity = self.opacity.as_ref().map_or(1.,
@@ -578,7 +580,7 @@ impl Animation {
                     let dash = line.get_dash(fnth);
                     if !dash.1.is_empty() {
                         path = stroke_dash(&path, &paint, dash);
-                        //fillp.push(paint);  continue;   // XXX:
+                        //fillp.push(paint);  continue;   // FIXME:
                     }   linep.push(paint);
                 }
                 ShapeListItem::NoStyle(_) => eprintln!("What need to do here?"),

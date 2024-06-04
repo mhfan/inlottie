@@ -64,21 +64,7 @@ pub use usvg;
 /// for a list of some unsupported svg features
 #[inline] pub fn render_tree_with<F: FnMut(&mut Scene, &usvg::Node) -> Result<(), E>, E>(
     scene: &mut Scene, svg: &usvg::Tree, error_handler: &mut F) -> Result<(), E> {
-    render_tree_impl(scene, svg, &svg.view_box(), &usvg::Transform::identity(), error_handler)
-}
-
-/// A helper function to render a tree with a given transform.
-fn render_tree_impl<F: FnMut(&mut Scene, &usvg::Node) -> Result<(), E>, E>(
-    scene: &mut Scene, tree: &usvg::Tree, view_box: &usvg::ViewBox, ts: &usvg::Transform,
-    error_handler: &mut F) -> Result<(), E> {
-    let ts = ts.pre_concat(view_box.to_transform(tree.size()));
-
-    let flag = !ts.is_identity();
-    if  flag { scene.push_layer(DEFAULT_BM, 1.0, util::to_affine(&ts),
-            &util::to_rect_shape(&view_box.rect));
-    }
-    render_group(scene, tree.root(), &ts.pre_concat(tree.root().transform()), error_handler)?;
-    if  flag { scene.pop_layer(); }     Ok(())
+    render_group(scene, svg.root(), &usvg::Transform::identity(), error_handler)?;  Ok(())
 }
 
 const DEFAULT_BM: peniko::BlendMode = peniko::BlendMode {
@@ -87,8 +73,7 @@ const DEFAULT_BM: peniko::BlendMode = peniko::BlendMode {
 
 fn render_group<F: FnMut(&mut Scene, &usvg::Node) -> Result<(), E>, E>(
     scene: &mut Scene, group: &usvg::Group, ts: &usvg::Transform, error_handler: &mut F)
-    -> Result<(), E> {  let trfm = util::to_affine(ts);
-
+    -> Result<(), E> {
     for node in group.children() {
         match node {
             usvg::Node::Group(group) => {
@@ -97,17 +82,17 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node) -> Result<(), E>, E>(
                     if let Some(usvg::Node::Path(clip_path)) =
                         clip_path.root().children().first() {
                         // support clip-path with a single path
-                        scene.push_layer(DEFAULT_BM, 1.0, trfm, &util::to_bez_path(clip_path));
-                        pushed_clip = true;
+                        scene.push_layer(DEFAULT_BM, 1.0, util::to_affine(ts),
+                            &util::to_bez_path(clip_path));     pushed_clip = true;
                     }
                 }
 
                 render_group(scene, group, &ts.pre_concat(group.transform()), error_handler)?;
                 if pushed_clip { scene.pop_layer(); }
             }
-            usvg::Node::Path(path) => {
-                if path.visibility() != usvg::Visibility::Visible { continue }
+            usvg::Node::Path(path) => if path.is_visible() {
                 let local_path = util::to_bez_path(path);
+                let trfm = util::to_affine(ts);
 
                 let do_fill =
                     |scene: &mut Scene, error_handler: &mut F| {
@@ -142,27 +127,15 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node) -> Result<(), E>, E>(
                     }
                 }
             }
-            usvg::Node::Image(img) => {
-                if img.visibility() != usvg::Visibility::Visible { continue }
-                match img.kind() {
-                    usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) |
-                    usvg::ImageKind::GIF(_) => {
+            usvg::Node::Image(img) => if img.is_visible() {
+                match img.kind() {            usvg::ImageKind::JPEG(_) |
+                    usvg::ImageKind::PNG(_) | usvg::ImageKind::GIF(_) => {
                         let Ok(image) = util::decode_raw_raster_image(img.kind())
                         else { error_handler(scene, node)?; continue };
-
-                        let view_box = img.view_box();
-                        let image_ts = view_box.to_transform( // XXX:
-                            usvg::Size::from_wh(image.width as _, image.height as _).unwrap());
-
-                        scene.push_layer(DEFAULT_BM, 1.0, trfm,
-                            &util::to_rect_shape(&view_box.rect));
-                        scene.draw_image(&image, util::to_affine(&ts.pre_concat(image_ts)));
-                        scene.pop_layer();
+                        scene.draw_image(&image, util::to_affine(ts));
                     }
                     usvg::ImageKind::SVG(svg) =>
-                        //render_group(scene, svg, &ts.pre_concat(
-                        //    img.view_box().to_transform(svg.size())), error_handler)?,
-                        render_tree_impl(scene, svg, &img.view_box(), ts, error_handler)?,
+                        render_group(scene, svg.root(), ts, error_handler)?,
                 }
             }
             usvg::Node::Text(text) => { let group = text.flattened();

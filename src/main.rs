@@ -136,8 +136,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut lottie = None;
     use inlottie::schema::Animation;
 
-    let mut tree = None;
-    let mut fontdb = usvg::fontdb::Database::new(); fontdb.load_system_fonts();
+    let mut usvg_opts = usvg::Options::default();
+    usvg_opts.fontdb_mut().load_system_fonts();     let mut tree = None;
     let path = std::env::args().nth(1).unwrap_or("data/tiger.svg".to_owned());
 
     //if fs::metadata(&path).is_ok() {} //if std::path::Path(&path).exists() {}
@@ -145,8 +145,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "json" => lottie = Animation::from_reader(fs::File::open(&path)?).ok(),
         #[cfg(feature = "rive-rs")]
         "riv"  => scene = NanoVG::new_scene(&fs::read(&path)?),
-        "svg"  => tree  = usvg::Tree::from_data(&fs::read(&path)?,
-            &usvg::Options::default(), &fontdb).ok(),
+        "svg"  => tree  = usvg::Tree::from_data(&fs::read(&path)?, &usvg_opts).ok(),
         _ => {  let size = window.inner_size();
             canvas.set_size(size.width, size.height, 1.);
             eprintln!("File format is not supported: {path}");
@@ -156,21 +155,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (mut dragging, mut focused, mut mouse) = (false, true, (0., 0.));
     let (mut perf, mut prevt) = (PerfGraph::new(), Instant::now());
 
-    event_loop.run(|event, target| {
+    event_loop.run(|event, elwt| {
         let mut resize_canvas =
             |size: PhysicalSize<u32>, orig_w: f32, orig_h: f32| {
             canvas.reset();     mouse = (0., 0.);
             let scale = (size.width  as f32 / orig_w)
                          .min(size.height as f32 / orig_h) * 0.95;
-            canvas.translate((size.width  as f32 - scale * orig_w) / 2.,
-                             (size.height as f32 - scale * orig_h) / 2.);
+            canvas.translate((size.width  as f32 - orig_w * scale) / 2.,
+                             (size.height as f32 - orig_h * scale) / 2.);
             canvas.set_size  (size.width, size.height, 1.); // window.scale_factor() as _
             canvas.scale(scale, scale);
         };
 
         match event {
             Event::WindowEvent { window_id: _, event } => match event {
-                WindowEvent::CloseRequested | WindowEvent::Destroyed => target.exit(),
+                WindowEvent::CloseRequested | WindowEvent::Destroyed => elwt.exit(),
 
                 #[cfg(not(target_arch = "wasm32"))]     // first occur on window creation
                 WindowEvent::Resized(size) => {
@@ -236,7 +235,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let file = fs::read(&path).unwrap_or(vec![]);
                     match path.extension().and_then(|ext| ext.to_str()) {
                         Some("svg") => tree  = usvg::Tree::from_data(&file,
-                            &usvg::Options::default(), &fontdb).ok().map(|tree| {
+                            &usvg_opts).ok().map(|tree| {
                                 resize_canvas(window.inner_size(),
                                     tree.size().width(), tree.size().height()); tree }),
 
@@ -269,9 +268,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if let Some(tree) = &tree {
                         canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
                             Color::rgbf(0.4, 0.4, 0.4));    // to clear viewport/viewbox only?
-                        let trfm = tree.view_box().to_transform(tree.size())
-                            .pre_concat(tree.root().transform());
-                        render_nodes(&mut canvas, &mouse, tree.root(), &trfm);
+                        render_nodes(&mut canvas, &mouse, tree.root(),
+                            &usvg::Transform::identity());
                     }/* else {
                         canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
                             Color::rgbf(0.4, 0.4, 0.4));
@@ -280,17 +278,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     perf.render(&mut canvas, 3., 3.);   canvas.flush();
                     // Tell renderer to execute all drawing commands
+                    perf.update(prevt.elapsed().as_secs_f32());
 
                     #[cfg(not(target_arch = "wasm32"))] // Display what just rendered
                     surface.swap_buffers(&glctx).expect("Could not swap buffers");
-                    perf.update(prevt.elapsed().as_secs_f32());
                 }
 
                 _ => ()
             },
 
             Event::AboutToWait => if focused { window.request_redraw() },
-            Event::LoopExiting => target.exit(),
+            Event::LoopExiting => elwt.exit(),
             _ => () //println!("{:?}", event)
     }})?;   Ok(())  //loop {}
 }
@@ -307,12 +305,12 @@ fn create_window(event_loop: &EventLoop<()>, title: &str) -> Result<(Window,
         context::{ContextApi, ContextAttributesBuilder}, display::GetGlDisplay};
     use {raw_window_handle::HasRawWindowHandle, glutin_winit::DisplayBuilder};
 
-    let mut size = event_loop.primary_monitor().unwrap().size();
-    size.width  /= 2;   size.height /= 2;   use std::num::NonZeroU32;
+    let mut wsize = event_loop.primary_monitor().unwrap().size();
+    wsize.width  /= 2;  wsize.height /= 2;   use std::num::NonZeroU32;
 
     let (window, gl_config) = DisplayBuilder::new()
         .with_window_builder(Some(winit::window::WindowBuilder::new()
-            .with_inner_size(size).with_resizable(true).with_title(title)))
+            .with_inner_size(wsize).with_resizable(true).with_title(title)))
         .build(event_loop, ConfigTemplateBuilder::new().with_alpha_size(8),
             |configs|
                 // Find the config with the maximum number of samples,
@@ -329,8 +327,8 @@ fn create_window(event_loop: &EventLoop<()>, title: &str) -> Result<(Window,
 
     let surf_attr =
         SurfaceAttributesBuilder::<WindowSurface>::new()
-            .build(raw_window_handle, NonZeroU32::new(size. width).unwrap(),
-                                      NonZeroU32::new(size.height).unwrap());
+            .build(raw_window_handle, NonZeroU32::new(wsize. width).unwrap(),
+                                      NonZeroU32::new(wsize.height).unwrap());
     let surface = unsafe {
         gl_display.create_window_surface(&gl_config, &surf_attr)? };
 
@@ -362,9 +360,9 @@ impl PerfGraph {
 
     pub fn update(&mut self, ft: f32) { //debug_assert!(f32::EPSILON < ft);
         //let ft = self.time.elapsed().as_secs_f32();   self.time = Instant::now();
-        let fps = 1. / ft;  if self.max < fps { self.max = fps } // (ft + f32::EPSILON)
-        if self.que.len() == 100 { self.sum -= self.que.pop_front().unwrap_or(0.); }
-        self.que.push_back(fps);   self.sum += fps;
+        let fps = 1. / ft;  if self.max <  fps { self.max = fps } // (ft + f32::EPSILON)
+        if self.que.len() == 100 {  self.sum -= self.que.pop_front().unwrap_or(0.); }
+        self.que.push_back(fps);    self.sum += fps;
     }
 
     pub fn render<T: Renderer>(&self, canvas: &mut Canvas<T>, x: f32, y: f32) {
@@ -427,8 +425,7 @@ fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: &(f32, f32),
         usvg::Node::Group(group) =>     // trfm is needed on rendering only
             render_nodes(canvas, mouse, group, &trfm.pre_concat(group.transform())),
 
-        usvg::Node::Path(path) => {
-            if path.visibility() != usvg::Visibility::Visible { continue }
+        usvg::Node::Path(path) => if path.is_visible() {
             let tpath = if trfm.is_identity() { None
             } else { path.data().clone().transform(*trfm) };    // XXX:
             let mut fpath = Path::new();
@@ -491,8 +488,15 @@ fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: &(f32, f32),
             }
         }
 
-        usvg::Node::Image(_) => todo!(),
-        // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
+        usvg::Node::Image(img) => if img.is_visible() {
+            match img.kind() {            usvg::ImageKind::JPEG(_) |
+                usvg::ImageKind::PNG(_) | usvg::ImageKind::GIF(_) => todo!(),
+                // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
+                usvg::ImageKind::SVG(svg) =>
+                    render_nodes(canvas, mouse, svg.root(), trfm),
+            }
+        }
+
         usvg::Node::Text(text) => { let group = text.flattened();
             render_nodes(canvas, mouse, group, &trfm.pre_concat(group.transform()));
         }
