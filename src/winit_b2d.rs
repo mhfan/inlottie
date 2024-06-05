@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    .surface_texture_format(pixels::wgpu::TextureFormat::Rgba8UnormSrgb).build()?;
     let mut pixels = pixels::Pixels::new(wsize.width, wsize.height,
         pixels::SurfaceTexture::new(wsize.width, wsize.height, &window)).unwrap();
-    pixels.clear_color(pixels::wgpu::Color { r: 0.1, g: 0.1, b: 0.1, a: 1.0 });
+    //pixels.clear_color(pixels::wgpu::Color { r: 0.1, g: 0.1, b: 0.1, a: 1.0 });
     //pixels.clear_color(pixels::wgpu::Color::TRANSPARENT);
     let mut blctx = None;
 
@@ -55,25 +55,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         csize: (f32, f32)) -> (BLImage, BLContext) {
         let scale = (wsize.0 / csize.0).min(wsize.1 / csize.1) * 0.95;
         let csize = (csize.0 * scale, csize.1 * scale);
-        let origx = (wsize.0 - csize.0) / 2.;
-        let origy = (wsize.1 - csize.1) / 2.;
+        let  orig = ((wsize.0 - csize.0) / 2., (wsize.1 - csize.1) / 2.);
 
         pixels.frame_mut().chunks_exact_mut(4).for_each(|pix|
             pix.copy_from_slice(&[99, 99, 99, 255]));
         let frame = &mut pixels.frame_mut()[
-            (origy as usize * wsize.0 as usize + origx as usize) * 4 ..];
+            (orig.1 as usize * wsize.0 as usize + orig.0 as usize) * 4 ..];
 
         let mut blimg = BLImage::from_buffer(csize.0 as _, csize.1 as _,
             BLFormat::BL_FORMAT_PRGB32, frame, wsize.0 as u32 * 4);
         //BLImage::new(csize.0 as _, csize.1 as _, BLFormat::BL_FORMAT_PRGB32);
         let mut blctx = BLContext::new(&mut blimg);
 
-        // blctx.translate(origx, origy);
+        // blctx.translate(orig.0, orig.1);
         blctx.scale(scale, scale);  (blimg, blctx)
     }
 
     let mut focused = true;
     let (mut perf, mut prevt) = (PerfGraph::new(), Instant::now());
+    //event_loop.set_control_flow(ControlFlow::Poll);
 
     event_loop.run(move |event, elwt| match event {
         Event::WindowEvent { event, window_id }
@@ -113,7 +113,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let Some((blimg, blctx)) =
                     &mut blctx else { return };
 
-                if let Some(tree) = &tree {     blctx.clearAll();
+                if let Some(tree) = &tree {     //blctx.clearAll();
+                    blctx.fillAllRgba32((99, 99, 99, 255).into());
                     render_nodes(blctx, tree.root(), &usvg::Transform::identity());
                 } else { blend2d_logo(blctx); }
 
@@ -132,6 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     src.iter().zip(dst.iter_mut()).for_each(|(src, dst)|
                         *dst = src.swap_bytes().rotate_right(8)) // 0xAARRGGGBB -> 0xAABBGGRR
                 } */    let _ = pixels.render();
+                //if focused { window.request_redraw(); }
             }
             _ => (),
         },

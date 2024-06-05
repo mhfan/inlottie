@@ -97,7 +97,7 @@ fn get_renderer() -> Result<OpenGl, Box<dyn Error>> {
     Ok(unsafe { OpenGl::new_from_function_cstr(|s| display.get_proc_address(s) as *const _) }?)
 } */
 
-use winit::{window::Window, event_loop::EventLoop, dpi::PhysicalSize};
+use winit::{window::Window, event_loop::EventLoop};
 
 #[cfg_attr(coverage_nightly, coverage(off))] //#[cfg(not(tarpaulin_include))]
 fn main() -> Result<(), Box<dyn Error>> {
@@ -154,16 +154,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (mut dragging, mut focused, mut mouse) = (false, true, (0., 0.));
     let (mut perf, mut prevt) = (PerfGraph::new(), Instant::now());
+    //event_loop.set_control_flow(ControlFlow::Poll);
 
     event_loop.run(|event, elwt| {
-        let mut resize_canvas =
-            |size: PhysicalSize<u32>, orig_w: f32, orig_h: f32| {
-            canvas.reset();     mouse = (0., 0.);
-            let scale = (size.width  as f32 / orig_w)
-                         .min(size.height as f32 / orig_h) * 0.95;
-            canvas.translate((size.width  as f32 - orig_w * scale) / 2.,
-                             (size.height as f32 - orig_h * scale) / 2.);
-            canvas.set_size  (size.width, size.height, 1.); // window.scale_factor() as _
+        let mut resize_canvas = |csize: (f32, f32)| {
+            let wsize = window.inner_size();
+            let wsize = (wsize.width as f32, wsize.height as f32);
+            canvas.reset_transform();   mouse = (0., 0.);
+            let scale = (wsize.0 / csize.0).min(wsize.1  / csize.1) * 0.95;
+            canvas.translate((wsize.0 - csize.0 * scale) / 2., (wsize.1 - csize.1 * scale) / 2.);
+            canvas.set_size  (wsize.0 as _, wsize.1 as _, 1.);  // window.scale_factor() as _
             canvas.scale(scale, scale);
         };
 
@@ -177,10 +177,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                                             size.height.try_into().unwrap());
 
                     if let Some(tree) = &tree {
-                        resize_canvas(size, tree.size().width(), tree.size().height());
+                        resize_canvas((tree.size().width(), tree.size().height()));
                     }
                     if let Some(lottie) = &lottie {
-                        resize_canvas(size, lottie.w as _, lottie.h as _);
+                        resize_canvas((lottie.w as _, lottie.h as _));
                     }
                     #[cfg(feature = "rive-rs")] if scene.is_some() { //mouse = (0., 0.);
                         viewport.resize(size.width, size.height);
@@ -236,15 +236,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                     match path.extension().and_then(|ext| ext.to_str()) {
                         Some("svg") => tree  = usvg::Tree::from_data(&file,
                             &usvg_opts).ok().map(|tree| {
-                                resize_canvas(window.inner_size(),
-                                    tree.size().width(), tree.size().height()); tree }),
+                                resize_canvas((tree.size().width(), tree.size().height())); tree
+                            }),
 
                         #[cfg(feature = "rive-rs")]
                         Some("riv") => scene = NanoVG::new_scene(&file),
                         Some("json") => lottie = Animation::from_reader(
                             fs::File::open(&path).unwrap()).ok().map(|lottie| {
-                                resize_canvas(window.inner_size(),
-                                    lottie.w as _, lottie.h as _); lottie }),
+                                resize_canvas((lottie.w as _, lottie.h as _)); lottie }),
                         _ => eprintln!("File format is not supported: {}", path.display()),
                     }
 
@@ -255,6 +254,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 WindowEvent::RedrawRequested => {
                     let elapsed = prevt.elapsed();  prevt = Instant::now();
+                    canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
+                        Color::rgbf(0.4, 0.4, 0.4));    // to clear viewport/viewbox only?
 
                     #[cfg(feature = "rive-rs")]
                     if let Some(scene) = &mut scene {
@@ -266,8 +267,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                             elapsed.as_secs_f32())) { return }
                     }
                     if let Some(tree) = &tree {
-                        canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
-                            Color::rgbf(0.4, 0.4, 0.4));    // to clear viewport/viewbox only?
                         render_nodes(&mut canvas, &mouse, tree.root(),
                             &usvg::Transform::identity());
                     }/* else {
@@ -282,6 +281,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     #[cfg(not(target_arch = "wasm32"))] // Display what just rendered
                     surface.swap_buffers(&glctx).expect("Could not swap buffers");
+                    //if focused { window.request_redraw(); }
                 }
 
                 _ => ()

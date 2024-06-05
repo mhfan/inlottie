@@ -139,14 +139,12 @@ fn main() -> anyhow::Result<()> {
                     // Resize the surface when the window is resized
                     WindowEvent::Resized(size) => {
                         if let Some(tree) = &tree {
-                            let orig_w = tree.size().width()  as f64;
-                            let orig_h = tree.size().height() as f64;
-                            let scale = (size.width  as f64 / orig_w)
-                                         .min(size.height as f64 / orig_h) * 0.95;
-                            let posx  = (size.width  as f64 - scale * orig_w) / 2.;
-                            let posy  = (size.height as f64 - scale * orig_h) / 2.;
-
-                            trfm = Affine::translate((posx, posy)) * Affine::scale(scale);
+                            let wsize = (size.width as f32, size.height as f32);
+                            let csize = (tree.size().width(), tree.size().height());
+                            let scale =  (wsize.0 / csize.0).min(wsize.1 / csize.1) * 0.95;
+                            let origx = ((wsize.0 - csize.0 * scale) / 2.) as f64;
+                            let origy = ((wsize.1 - csize.1 * scale) / 2.) as f64;
+                            trfm = Affine::translate((origx, origy)) * Affine::scale(scale);
                         }
 
                         render_cx.resize_surface(&mut render_state.surface,
