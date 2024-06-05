@@ -7,6 +7,22 @@ Implemented a simple and straightforward viewer/renderer for Lottie animation ba
 
 TODO: refer to [intvg](https://github.com/mhfan/intvg), development/implement a `renderer` based on [gpac/evg](https://github.com/gpac/gpac/tree/master/src/evg), [blend2d](https://github.com/blend2d/blend2d), [HTML5/Web Canvas API](https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API) to support most of Lottie and Rive animation features; and a `viewer` based on [bevy engine](https://github.com/bevyengine/bevy) or [Dioxus](https://github.com/DioxusLabs/dioxus)? Then, enhance capability to parse/handle [dotLottie](https://dotlottie.io/structure/#dotlottie-structure).
 
+## Usages
+
+```bash
+    cargo r -- <path-to-lottie/svg>
+
+    cargo r -F rive  -- <path-to-rive/lottie/svg>
+
+    cargo r -F vello --bin vello -- <path-to-svg>
+
+    cargo r -F b2d --bin blend2d -- <path-to-svg>
+```
+
+(with Drag & Drop support)
+
+Note: To build for rive support, first remove comment of line "rive-rs = " in Cargo.toml. Since it isn't published on [crates.io]<https://crates.io> yet.
+
 ## References
 
 * <https://lottiefiles.github.io/lottie-docs/schema/>
