@@ -30,13 +30,13 @@ impl PathFactory for Rectangle {
         }
 
         //path.rounded_rect(elx, ety, size.x, size.y, radius);  return;
-        let (clx, cty) = (elx + radius, ety + radius);
-        let (crx, cby) = (erx - radius, eby - radius);
+        let (clx, cty) = (elx + radius, ety + radius); // elt + radius
+        let (crx, cby) = (erx - radius, eby - radius); // erb - radius
             path.move_to(erx, cty);
 
         /* let tangent = radius * 0.5519;   // approximate with cubic Bezier curve
-        let (tlx, tty) = (clx - tangent, cty - tangent);
-        let (trx, tby) = (crx + tangent, cby + tangent);
+        let (tlx, tty) = (clx - tangent, cty - tangent); // clt - tangent
+        let (trx, tby) = (crx + tangent, cby + tangent); // crb + tangent
 
         if self.base.is_ccw() {
             path.bezier_to(erx, tty, trx, ety, crx, ety);     path.line_to(clx, ety);
@@ -79,7 +79,7 @@ impl PathFactory for Polystar {
         let or  = self.or.get_value(fnth);
         let orr = self.os.get_value(fnth) * PI / 2. / 100. / nvp as f32;  // XXX:
 
-        let ir  = self.ir.as_ref().map_or(0.,
+        let ir  = self.ir.as_ref().map_or(0.,   // self.sy == StarType::Star
             |ir| ir.get_value(fnth));
         let irr = self.is.as_ref().map_or(0.,
             |is| is.get_value(fnth) * PI / 2. / 100. / nvp as f32);
@@ -88,20 +88,20 @@ impl PathFactory for Polystar {
         let angle_step = if matches!(self.sy, StarType::Star) { PI } else { PI * 2. } /
             if self.base.is_ccw() { -(nvp as f32) } else { nvp as _ };
 
-        let (rpx, rpy) = (angle.cos() * or, angle.sin() * or);
-        let (ptx, pty) = (center.x + rpx, center.y + rpy);
+        let (rpx, rpy) = (angle.cos() * or, angle.sin() * or); // rpt * or
+        let (ptx, pty) = (center.x + rpx, center.y + rpy); // center + rpt
         path.move_to(ptx, pty);
 
         let (mut lotx, mut loty) = (ptx - rpy * orr, pty + rpx * orr);
         let  mut add_bezier_to = |radius, rr| {
-            angle += angle_step;
+            angle += angle_step;    // rpt * radius
 
             let (rpx, rpy): (f32, _) = (angle.cos() * radius, angle.sin() * radius);
-            let (ptx, pty) = (center.x + rpx, center.y + rpy);
+            let (ptx, pty) = (center.x + rpx, center.y + rpy); // center + rpt
             let (rdx, rdy) = (rpy * rr, -rpx * rr);
 
-            path.bezier_to(lotx, loty, ptx + rdx, pty + rdy, ptx, pty);
-            (lotx, loty) = (ptx - rdx, pty - rdy);
+            path.bezier_to(lotx, loty, ptx + rdx, pty + rdy, ptx, pty); // pt + rd
+            (lotx, loty) = (ptx - rdx, pty - rdy); // pt - rd
         };
 
         for _ in 0..nvp {
@@ -267,45 +267,6 @@ impl FillStrokeGrad {
         }       paint
     }
 }
-
-fn stroke_dash(path: &VGPath, paint: &VGPaint, dash: (f32, Vec<f32>)) -> VGPath {
-    use femtovg::{Verb, LineCap, LineJoin};     use kurbo::PathEl;
-
-    let bezp = path.verbs().map(|verb| match verb {
-        Verb::MoveTo(x, y) => PathEl::MoveTo((x as f64, y as f64).into()),
-        Verb::LineTo(x, y) => PathEl::LineTo((x as f64, y as f64).into()),
-        Verb::BezierTo(ox, oy, ix, iy, x, y) =>
-            PathEl::CurveTo((ox as f64, oy as f64).into(),
-                            (ix as f64, iy as f64).into(), (x as f64, y as f64).into()),
-        Verb::Solid | Verb::Hole => unreachable!(),
-        Verb::Close => PathEl::ClosePath,
-    });
-
-    let style = kurbo::Stroke::new(paint.line_width() as _)
-          .with_caps(match paint.line_cap_start() {
-            LineCap::Butt   => kurbo::Cap::Butt,
-            LineCap::Round  => kurbo::Cap::Round,
-            LineCap::Square => kurbo::Cap::Square,
-        }).with_join(match paint.line_join() {
-            LineJoin::Miter => kurbo::Join::Miter,
-            LineJoin::Round => kurbo::Join::Round,
-            LineJoin::Bevel => kurbo::Join::Bevel,
-        }).with_miter_limit(paint.miter_limit() as _)
-          .with_dashes(dash.0 as _, dash.1.into_iter().map(|v| v as f64));
-
-    let mut path = VGPath::new();
-    kurbo::stroke(bezp, &style, &kurbo::StrokeOpts::default(), 0.5)
-        .into_iter().for_each(|el| match el {
-        PathEl::MoveTo(pt) => path.move_to(pt.x as _, pt.y as _),
-        PathEl::LineTo(pt) => path.line_to(pt.x as _, pt.y as _),
-        PathEl::CurveTo(ot, it, pt) =>
-            path.bezier_to(ot.x as _, ot.y as _, it.x as _, it.y as _, pt.x as _, pt.y as _),
-        PathEl::QuadTo(_, _) => unreachable!(),
-        PathEl::ClosePath => path.close(),
-    }); path
-}
-
-// TODO: need to implement bezier.length() and split_at(t)
 
 impl Transform {
     fn to_matrix(&self, fnth: f32, ao: IntBool) -> TM2DwO {
@@ -537,7 +498,7 @@ impl Animation {
         ptm: &TM2DwO, coll: &[ShapeListItem], fnth: f32, ao: IntBool) {
         let (mut path, mut trfm) = (VGPath::new(), None);
         let (mut fillp, mut linep) = (vec![], vec![]);
-        let  mut repeater = vec![];
+        let (mut dash, mut repeater) = ((0., vec![]), vec![]);
 
         // convert shape to path, convert_style(fill/stroke/gradient)
         // render path of shape with trfm and style to screen/pixmap
@@ -554,12 +515,8 @@ impl Animation {
                 ShapeListItem::Fill(fill)
                     if !fill.elem.hd => fillp.push(fill.to_paint(fnth)),
                 ShapeListItem::Stroke(line) if !line.elem.hd => {
-                    let paint = line.to_paint(fnth);
-                    let dash = line.get_dash(fnth);
-                    if !dash.1.is_empty() {
-                        path = stroke_dash(&path, &paint, dash);
-                        //fillp.push(paint);  continue;   // FIXME:
-                    }   linep.push(paint);
+                    let paint = line.to_paint(fnth);    dash = line.get_dash(fnth);
+                        linep.push(paint);
                 }
                 ShapeListItem::NoStyle(_) => eprintln!("What need to do here?"),
                 ShapeListItem::GradientFill(grad)
@@ -587,6 +544,31 @@ impl Animation {
                 }
                 _ => (),
         } }
+
+        if !dash.1.is_empty() { path = make_dash(&path, dash); }
+    fn make_dash(path: &VGPath, dash: (f32, Vec<f32>)) -> VGPath {
+        use {kurbo::PathEl, femtovg::Verb};
+        let bezp = path.verbs().map(|verb| match verb {
+            Verb::MoveTo(x, y) => PathEl::MoveTo((x as f64, y as f64).into()),
+            Verb::LineTo(x, y) => PathEl::LineTo((x as f64, y as f64).into()),
+            Verb::BezierTo(ox, oy, ix, iy, x, y) =>
+                PathEl::CurveTo((ox as f64, oy as f64).into(),
+                                (ix as f64, iy as f64).into(), (x as f64, y as f64).into()),
+            Verb::Solid | Verb::Hole => unreachable!(),
+            Verb::Close => PathEl::ClosePath,
+        });
+
+        let mut path = VGPath::new();
+        kurbo::dash(bezp, dash.0 as _, &dash.1.into_iter()
+            .map(|v| v as f64).collect::<Vec<_>>()).for_each(|el| match el {
+            PathEl::MoveTo(pt) => path.move_to(pt.x as _, pt.y as _),
+            PathEl::LineTo(pt) => path.line_to(pt.x as _, pt.y as _),
+            PathEl::CurveTo(ot, it, pt) =>
+                path.bezier_to(ot.x as _, ot.y as _, it.x as _, it.y as _, pt.x as _, pt.y as _),
+            PathEl::QuadTo(_, _) => unreachable!(),
+            PathEl::ClosePath => path.close(),
+        }); path
+    }
 
         let trfm = trfm.as_ref().unwrap_or(ptm);    canvas.save();
         if repeater.is_empty() {    // XXX: execute in order of fill/stroke layer?
@@ -623,7 +605,6 @@ fn prepare_matte<T: Renderer>(canvas: &mut Canvas<T>,
     } else if let Some(matte) = matte {     //canvas.restore();
         match matte.mode {  MatteMode::Normal => (),
             MatteMode::Alpha => // XXX: femtovg seems not work correctly for DstIn
-            // Non-overlapping parts are not masked, and the geometry is upside-down
                 canvas.global_composite_operation(CompOp::DestinationIn),
             MatteMode::InvertedAlpha =>
                 canvas.global_composite_operation(CompOp::DestinationOut),
@@ -656,15 +637,14 @@ fn render_masks<T: Renderer>(canvas: &mut Canvas<T>, masks_prop: &[Mask], fnth: 
             MaskMode::None => None,
         } };
 
-        if let Some(opacity) = &mask.opacity {
-            canvas.set_global_alpha(opacity.get_value(fnth) / 100.);
-        }
-        if let Some(cop) = cop { canvas.global_composite_operation(cop); }
         if let Some(_expand) = &mask.expand { todo!() }
+        let opacity = mask.opacity.as_ref().map_or(1., |opacity|
+            opacity.get_value(fnth) / 100.);    //canvas.set_global_alpha(opacity);
 
         let mut path = VGPath::new();   mask.shape.add_path(&mut path, fnth);
-        canvas.fill_path(&path, &VGPaint::color(VGColor::rgbaf(0., 0., 0., 1.)));
-    }); canvas.set_global_alpha(1.); // XXX: restore
+        if let Some(cop) = cop { canvas.global_composite_operation(cop); }
+        canvas.fill_path(&path, &VGPaint::color(VGColor::rgbaf(0., 0., 0., opacity)));
+    }); //canvas.set_global_alpha(1.);  // restore global alpha
 }
 
 fn render_matte<T: Renderer>(canvas: &mut Canvas<T>,
@@ -702,5 +682,11 @@ fn repeat_shape(mdfr: &Repeater, fnth: f32) -> Vec<TM2DwO> {
     for i in 0..cnt as u32 {    let i = i as f32;   opacity += delta;
         coll.push(TM2DwO(mdfr.tr.trfm.to_repeat_trfm(fnth, offset + i), opacity));
     }   if matches!(mdfr.order, Composite::Below) { coll.reverse(); }   coll
+}
+
+#[allow(unused)] fn trim_path(mdfr: &TrimPath, path: &VGPath, fnth: f32) -> VGPath {
+    // https://lottiefiles.github.io/lottie-docs/scripts/lottie_bezier.js
+    // TODO: use bezier.length() and subdivide(t, seg) with flo_curve
+    todo!()
 }
 
