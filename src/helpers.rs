@@ -552,5 +552,29 @@ impl<T: Clone + Lerp> AnimatedProperty<T> {
     }
 }
 
+impl ShapeBase {
+    #[inline] pub fn is_ccw(&self) -> bool {
+        self.dir.is_some_and(|d| matches!(d, ShapeDirection::Reversed))
+    }
+}
+
+impl FillStrokeGrad {
+    #[inline] pub fn get_dash(&self, fnth: f32) -> (f32, Vec<f32>) {
+        if let FillStrokeEnum::Stroke(stroke) = &self.base {
+            let (mut offset, mut gap, mut dpat) = (0., None, vec![]);
+            stroke.dash.iter().for_each(|sd| {
+                let value = sd.value.get_value(fnth);
+
+                match sd.r#type {
+                    StrokeDashType::Offset => { offset =  value; }
+                    StrokeDashType::Length => { dpat.push(value);
+                        if let Some(gap) = gap { dpat.push(gap); } gap = None; }
+                    StrokeDashType::Gap    => { gap = Some(value); }
+                }});    if let Some(gap) = gap { dpat.push(gap); }
+            (offset, dpat)
+        } else { (0., vec![]) }
+    }
+}
+
 }
 

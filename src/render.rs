@@ -266,22 +266,6 @@ impl FillStrokeGrad {
             }
         }       paint
     }
-
-    #[inline] fn get_dash(&self, fnth: f32) -> (f32, Vec<f32>) {
-        if let FillStrokeEnum::Stroke(stroke) = &self.base {
-            let (mut offset, mut gap, mut dpat) = (0., None, vec![]);
-            stroke.dash.iter().for_each(|sd| {
-                let value = sd.value.get_value(fnth);
-
-                match sd.r#type {
-                    StrokeDashType::Offset => { offset =  value; }
-                    StrokeDashType::Length => { dpat.push(value);
-                        if let Some(gap) = gap { dpat.push(gap); } gap = None; }
-                    StrokeDashType::Gap    => { gap = Some(value); }
-                }});    if let Some(gap) = gap { dpat.push(gap); }
-            (offset, dpat)
-        } else { (0., vec![]) }
-    }
 }
 
 fn stroke_dash(path: &VGPath, paint: &VGPaint, dash: (f32, Vec<f32>)) -> VGPath {
@@ -430,12 +414,6 @@ struct TM2DwO(TM2D, f32);
 impl   TM2DwO {
     #[inline] fn multiply(&mut self, other: &TM2DwO) {
         self.0  .multiply(&other.0);  self.1 *= other.1;
-    }
-}
-
-impl ShapeBase {
-    #[inline] fn is_ccw(&self) -> bool {
-        self.dir.is_some_and(|d| matches!(d, ShapeDirection::Reversed))
     }
 }
 
