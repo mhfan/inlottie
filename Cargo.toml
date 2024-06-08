@@ -39,7 +39,7 @@ serde_repr = "0.1"
 # geometric types with a focus on 2d graphics and layout
 #euclid = "0.22" # { version = "0.22", features = [ "serde" ] }
 
-flo_curves = "0.7"
+#flo_curves = "0.7"
 kurbo = "0.11"
 usvg  = "0.42"
 

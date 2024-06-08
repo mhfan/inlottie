@@ -371,6 +371,10 @@ pub mod math {  use super::*;
  - https://geekshavefeelings.com/posts/fixed-point-atan2
  - https://www-labs.iro.umontreal.ca/~mignotte/IFT2425/Documents/EfficientApproximationArctgFunction.pdf
  - https://ieeexplore.ieee.org/book/6241055
+ - https://en.wikipedia.org/wiki/Atan2
+ - https://en.wikipedia.org/wiki/CORDIC
+ - https://en.wikipedia.org/wiki/Fast_inverse_square_root
+ - https://en.wikipedia.org/wiki/Methods_of_computing_square_roots
  - https://math.stackexchange.com/questions/1098487/atan2-faster-approximation
 
 ```
@@ -440,7 +444,7 @@ impl std::ops::Sub for Vector2D {  type Output = Vector2D;
 pub trait Lerp { fn lerp(&self, other: &Self, t: f32) -> Self; }    // Linear intERPolation
 
 impl Lerp for f32 {
-    fn lerp(&self, other: &Self, t: f32) -> Self { self + (other - self) * t }
+    #[inline] fn lerp(&self, other: &Self, t: f32) -> Self { self + (other - self) * t }
 }
 
 impl Lerp for Vector2D {
@@ -509,11 +513,11 @@ impl<T> KeyframeBase<T> {
 }
 
 impl<T: Clone + Lerp> AnimatedProperty<T> {
-    pub fn from_value(val: T) -> Self {
+    #[inline] pub fn from_value(val: T) -> Self {
         Self { animated: false.into(), keyframes: AnimatedValue::Static(val) }
     }
 
-    // XXX: wrapped in Some, and use Cow<&T> to avoid unnecessary clone?
+    // XXX: wrapped in Option, and use Cow<&T> to avoid unnecessary clone?
     pub fn get_value(&self, fnth: f32) -> T {
         match &self.keyframes {
             AnimatedValue::Static(val) => {
@@ -529,23 +533,31 @@ impl<T: Clone + Lerp> AnimatedProperty<T> {
                 while 0 < len { len -= 1; if coll[len].start <= fnth { break } }
                 // assert `coll` is sorted by `start` as well
 
-                fn get_scalar(val: &ArrayScalar<f32>) -> f32 { match val {
+                #[inline] fn get_scalar(val: &ArrayScalar<f32>) -> f32 { match val {
                     ArrayScalar::Array(val) => val[0],
                     ArrayScalar::Scalar(val) => *val,
-                } } // XXX: handle multiple dimention? https://lib.rs/keywords/cubic
+                } } // XXX: handle multiple dimention?
 
-                let kf =  &coll[len];
-                let time = (fnth - kf.start) / (coll[len + 1].start - kf.start);
-                use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
-                // https://github.com/gre/bezier-easing, https://github.com/hannesmann/keyframe
+                let kf = &coll[len];
+                let mut time = (fnth - kf.start) / (coll[len + 1].start - kf.start);
 
-                let ctrl = kf.easing.as_ref().map_or(
-                    (Coord2(0., 0.), Coord2(1., 1.)), |eh|
-                    (Coord2(get_scalar(&eh.to.time) as _, get_scalar(&eh.to.factor) as _),
-                     Coord2(get_scalar(&eh.ti.time) as _, get_scalar(&eh.ti.factor) as _)));
+                if let Some(ctrl) =
+                    kf.easing.as_ref().map(|eh|
+                    ((get_scalar(&eh.to.time) as _, get_scalar(&eh.to.factor) as _),
+                     (get_scalar(&eh.ti.time) as _, get_scalar(&eh.ti.factor) as _))) {
 
-                let curve = Curve::from_points(Coord2(0., 0.), ctrl, Coord2(1., 1.));
-                let time = curve.point_at_pos(time as _).1 as _;
+                /*  https://github.com/gre/bezier-easing, https://lib.rs/keywords/cubic,
+                    https://github.com/hannesmann/keyframe
+                    use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
+                    let curve = Curve::from_points((0., 0.).into(),
+                        (Coord2::from(ctrl.0), Coord2::from(ctrl.1)), (1., 1.).into());
+                    time = curve.point_at_pos(time as _).1 as f32; */
+
+                    use kurbo::{CubicBez,ParamCurve};
+                    let curve = CubicBez::new((0., 0.), ctrl.0, ctrl.1, (1., 1.));
+                    time = curve.eval(time as _).y as _;
+                }
+
                 kf.as_scalar().lerp(coll[len + 1].as_scalar(), time)
             }   _ => unreachable!(),
         }
@@ -560,8 +572,8 @@ impl ShapeBase {
 
 impl FillStrokeGrad {
     #[inline] pub fn get_dash(&self, fnth: f32) -> (f32, Vec<f32>) {
+        let (mut offset, mut gap, mut dpat) = (0., None, vec![]);
         if let FillStrokeEnum::Stroke(stroke) = &self.base {
-            let (mut offset, mut gap, mut dpat) = (0., None, vec![]);
             stroke.dash.iter().for_each(|sd| {
                 let value = sd.value.get_value(fnth);
 
@@ -571,8 +583,7 @@ impl FillStrokeGrad {
                         if let Some(gap) = gap { dpat.push(gap); } gap = None; }
                     StrokeDashType::Gap    => { gap = Some(value); }
                 }});    if let Some(gap) = gap { dpat.push(gap); }
-            (offset, dpat)
-        } else { (0., vec![]) }
+        }   (offset, dpat)
     }
 }
 

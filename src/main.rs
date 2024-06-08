@@ -413,10 +413,9 @@ fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: &(f32, f32),
                 Paint::linear_gradient_stops(grad.x1(), grad.y1(), grad.x2(), grad.y2(),
                     convert_stops(grad.stops(), opacity)),
             usvg::Paint::RadialGradient(grad) => {
-                let (dx, dy) = (grad.cx() - grad.fx(), grad.cy() - grad.fy());
-                let radius = (dx * dx + dy * dy).sqrt();    // XXX: 1./0.
-                Paint::radial_gradient_stops(grad.fx(), grad.fy(), radius, grad.r().get(),
-                    convert_stops(grad.stops(), opacity))
+                Paint::radial_gradient_stops(grad.fx(), grad.fy(),  // XXX: 1./0.
+                    (grad.cx() - grad.fx()).hypot(grad.cy() - grad.fy()),
+                     grad.r().get(), convert_stops(grad.stops(), opacity))
             }
         })
     }

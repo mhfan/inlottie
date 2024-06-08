@@ -227,10 +227,10 @@ fn render_nodes(blctx: &mut BLContext, parent: &usvg::Group, trfm: &usvg::Transf
                 convert_stops(&mut linear, grad.stops(), opacity);     Box::new(linear)
             }
             usvg::Paint::RadialGradient(grad) => {
-                //let (dx, dy) = (grad.cx() - grad.fx(), grad.cy() - grad.fy());
                 let mut radial = BLGradient::new(&BLRadialGradientValues::new(
                     &(grad.cx(), grad.cy()).into(), &(grad.fx(), grad.fy()).into(),
-                    grad.r().get(), 1.));   // XXX: 1./0.,  (dx * dx + dy * dy).sqrt()
+                    grad.r().get(), 1.));   // XXX: 1./0.
+                    //(grad.cx() - grad.fx()).hypot(grad.cy() - grad.fy())
                 convert_stops(&mut radial, grad.stops(), opacity);     Box::new(radial)
             }
         })

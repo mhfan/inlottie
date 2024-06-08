@@ -9,10 +9,11 @@ use crate::{schema::*, helpers::{*, math::*}};
 use std::f32::consts::PI;
 
 /// https://lottiefiles.github.io/lottie-docs/rendering/
-trait PathFactory { fn add_path(&self, path: &mut VGPath, fnth: f32); }
+trait PathFactory { fn to_path(&self, fnth: f32) -> VGPath; }
 
 impl PathFactory for Rectangle {
-    fn add_path(&self, path: &mut VGPath, fnth: f32) {
+    fn to_path(&self, fnth: f32) -> VGPath {
+        let mut path = VGPath::new();
         let center = self. pos.get_value(fnth);
         let half   = self.size.get_value(fnth) / 2.;    //let  half = size / 2.;
         let radius = self.rcr.get_value(fnth).min(half.x).min(half.y);
@@ -20,12 +21,16 @@ impl PathFactory for Rectangle {
         let (elx, ety) = (center.x - half.x, center.y - half.y); // center - half
         let (erx, eby) = (center.x + half.x, center.y + half.y); // center + half
 
+        // Note that unlike other shapes, on lottie web when the `d` attribute is missing,
+        // the rectangle defaults as being reversed.
+        //let is_ccw = self.base.dir.map_or(true, |d| matches!(d, ShapeDirection::Reversed));
+
         if radius < f32::EPSILON {      path.move_to(erx, ety);
             if self.base.is_ccw() {
-                path.line_to(erx, eby); path.line_to(elx, eby); path.line_to(elx, ety);
-            } else {
                 path.line_to(elx, ety); path.line_to(elx, eby); path.line_to(erx, eby);
-            }   path.close();   return
+            } else {
+                path.line_to(erx, eby); path.line_to(elx, eby); path.line_to(elx, ety);
+            }   path.close();   return  path
             //path.rect(elx, ety, size.x, size.y);    return;
         }
 
@@ -68,12 +73,12 @@ impl PathFactory for Rectangle {
                                         //path.arc_to(elx, ety, clx, ety, radius);
             path.line_to(crx, ety);     path.arc(crx, cty, radius,  PI / 2.,  0., dir);
                                         //path.arc_to(erx, ety, erx, cty, radius);
-        }   path.close();
+        }   path.close();   path
     }
 }
 
 impl PathFactory for Polystar {
-    fn add_path(&self, path: &mut VGPath, fnth: f32) {
+    fn to_path(&self, fnth: f32) -> VGPath {
         let center = self.pos.get_value(fnth);
         let nvp = self.pt.get_value(fnth) as u32;
         let or  = self.or.get_value(fnth);
@@ -90,7 +95,7 @@ impl PathFactory for Polystar {
 
         let (rpx, rpy) = (angle.cos() * or, angle.sin() * or); // rpt * or
         let (ptx, pty) = (center.x + rpx, center.y + rpy); // center + rpt
-        path.move_to(ptx, pty);
+        let mut path = VGPath::new();   path.move_to(ptx, pty);
 
         let (mut lotx, mut loty) = (ptx - rpy * orr, pty + rpx * orr);
         let  mut add_bezier_to = |radius, rr| {
@@ -107,12 +112,12 @@ impl PathFactory for Polystar {
         for _ in 0..nvp {
             if matches!(self.sy, StarType::Star) { add_bezier_to(ir, irr); }
             add_bezier_to(or, orr);
-        }   path.close();
+        }   path.close();   path
     }
 }
 
 impl PathFactory for Ellipse {
-    fn add_path(&self, path: &mut VGPath, fnth: f32) {
+    fn to_path(&self, fnth: f32) -> VGPath {
         let center = self. pos.get_value(fnth);
         let radius = self.size.get_value(fnth) / 2.;
         //path.ellipse(center.x, center.y, radius.x, radius.y);   return;
@@ -125,7 +130,7 @@ impl PathFactory for Ellipse {
         let (tlx, tty) = (center.x - tangent.x, center.y - tangent.y); // center - tangent
         let (trx, tby) = (center.x + tangent.x, center.y + tangent.y); // center + tangent
 
-            path.move_to(center.x, ety);
+        let mut path = VGPath::new();   path.move_to(center.x, ety);
         if self.base.is_ccw() {
             path.bezier_to(tlx, ety, elx, tty, elx, center.y);
             path.bezier_to(elx, tby, tlx, eby, center.x, eby);
@@ -136,19 +141,19 @@ impl PathFactory for Ellipse {
             path.bezier_to(erx, tby, trx, eby, center.x, eby);
             path.bezier_to(tlx, eby, elx, tby, elx, center.y);
             path.bezier_to(elx, tty, tlx, ety, center.x, ety);
-        }   path.close();
+        }   path.close();   path
     }
 }
 
 impl PathFactory for FreePath {
-    fn add_path(&self, path: &mut VGPath, fnth: f32) {
-        if !self.base.is_ccw() { self.shape.add_path(path, fnth); return }
+    fn to_path(&self, fnth: f32) -> VGPath {
+        if !self.base.is_ccw() { return self.shape.to_path(fnth); }
         let curv = self.shape.get_value(fnth);
         debug_assert!(curv.vp.len() == curv.it.len() &&
                       curv.it.len() == curv.ot.len() && !curv.vp.is_empty());
 
         let fpt = curv.vp.last().unwrap();
-        path.move_to(fpt.x, fpt.y);
+        let mut path = VGPath::new();   path.move_to(fpt.x, fpt.y);
 
         for ((cvp, cit), (lvp, lot)) in
             curv.vp.iter().zip(curv.it.iter()).rev().skip(1).zip(
@@ -165,18 +170,18 @@ impl PathFactory for FreePath {
             path.bezier_to(curv.vp[0].x + curv.ot[0].x, curv.vp[0].y + curv.ot[0].y,
                 fpt.x + curv.it[j].x, fpt.y + curv.it[j].y, fpt.x, fpt.y);
             path.close();
-        }
+        }   path
     }
 }
 
 impl PathFactory for ShapeProperty {    // for mask
-    fn add_path(&self, path: &mut VGPath, fnth: f32) {
+    fn to_path(&self, fnth: f32) -> VGPath {
         let curv = self.get_value(fnth);
         debug_assert!(curv.vp.len() == curv.it.len() &&
                       curv.it.len() == curv.ot.len() && !curv.vp.is_empty());
 
         let fpt = curv.vp.first().unwrap(); //&curv.vp[0];
-        path.move_to(fpt.x, fpt.y);
+        let mut path = VGPath::new();   path.move_to(fpt.x, fpt.y);
 
         /* let _ = curv.vp.iter().zip(curv.it.iter()).cycle().skip(1).take( //.rev()
                 curv.vp.len() - if curv.closed { 0 } else { 1 }).zip(
@@ -196,7 +201,7 @@ impl PathFactory for ShapeProperty {    // for mask
             path.bezier_to(curv.vp[j].x + curv.ot[j].x, curv.vp[j].y + curv.ot[j].y,
                 fpt.x + curv.it[0].x, fpt.y + curv.it[0].y, fpt.x, fpt.y);
             path.close();
-        }
+        }   path
     }
 }
 
@@ -222,20 +227,19 @@ impl FillStrokeGrad {
                 let stops = grad.stops.cl.get_value(fnth).0;
                 debug_assert!(stops.len() as u32 == grad.stops.cnt);
                 if matches!(grad.r#type, GradientType::Radial) {
-                    let (dx, dy) = (ep.x - sp.x, ep.y - sp.y);
-                    let radius = (dx * dx + dy * dy).sqrt();
-
                     /* let hl = grad.hl.as_ref().map_or(0.,
                         |hl| hl.get_value(fnth) * radius / 100.);
                     let ha = grad.ha.as_ref().map_or(0., |ha|
                         ha.get_value(fnth) * PI / 180.) + fast_atan2(dy, dx);
-                    ctx.createRadialGradient(sp.x + ha.cos() * hl, sp.y + ha.sin() * hl, 0,
-                        sp.x, sp.y, radius); // XXX: femtovg::Paint doesn't support focal? */
 
-                         VGPaint::radial_gradient_stops(sp.x, sp.y,
-                            1., radius, convert_stops(&stops, opacity))
-                } else { VGPaint::linear_gradient_stops(sp.x, sp.y,
-                            ep.x, ep.y, convert_stops(&stops, opacity))
+                    ctx.createRadialGradient(sp.x + ha.cos() * hl, sp.y + ha.sin() * hl, 0,
+                        sp.x, sp.y, (ep.x - sp.x).hypot(ep.y - sp.y));
+                        // XXX: femtovg::Paint doesn't support focal? */
+
+                         VGPaint::radial_gradient_stops(sp.x, sp.y, 1., // 0.
+                            (ep.x - sp.x).hypot(ep.y - sp.y), convert_stops(&stops, opacity))
+                } else { VGPaint::linear_gradient_stops(sp.x, sp.y, ep.x, ep.y,
+                            convert_stops(&stops, opacity))
                 }
             }
         };
@@ -496,27 +500,28 @@ impl Animation {
 
     fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>,
         ptm: &TM2DwO, coll: &[ShapeListItem], fnth: f32, ao: IntBool) {
-        let (mut path, mut trfm) = (VGPath::new(), None);
+        let (mut path, mut trfm) = (vec![], None);
         let (mut fillp, mut linep) = (vec![], vec![]);
         let (mut dash, mut repeater) = ((0., vec![]), vec![]);
+        let  mut trim = None;
 
         // convert shape to path, convert_style(fill/stroke/gradient)
         // render path of shape with trfm and style to screen/pixmap
         for shape in coll.iter().rev() { match shape {
                 ShapeListItem::Rectangle(rect)
-                    if !rect.base.elem.hd => rect.add_path(&mut path, fnth),
+                    if !rect.base.elem.hd => path.push(Box::new(rect.to_path(fnth))),
                 ShapeListItem::Polystar(star)
-                    if !star.base.elem.hd => star.add_path(&mut path, fnth),
+                    if !star.base.elem.hd => path.push(Box::new(star.to_path(fnth))),
                 ShapeListItem::Ellipse(elps)
-                    if !elps.base.elem.hd => elps.add_path(&mut path, fnth),
+                    if !elps.base.elem.hd => path.push(Box::new(elps.to_path(fnth))),
                 ShapeListItem::Path(curv)
-                    if !curv.base.elem.hd => curv.add_path(&mut path, fnth),
+                    if !curv.base.elem.hd => path.push(Box::new(curv.to_path(fnth))),
 
                 ShapeListItem::Fill(fill)
                     if !fill.elem.hd => fillp.push(fill.to_paint(fnth)),
                 ShapeListItem::Stroke(line) if !line.elem.hd => {
                     let paint = line.to_paint(fnth);    dash = line.get_dash(fnth);
-                        linep.push(paint);
+                        linep.push(paint);       debug_assert!(dash.1.len() < 5);
                 }
                 ShapeListItem::NoStyle(_) => eprintln!("What need to do here?"),
                 ShapeListItem::GradientFill(grad)
@@ -526,12 +531,11 @@ impl Animation {
 
                 ShapeListItem::Repeater(mdfr)
                     if !mdfr.elem.hd => repeater = repeat_shape(mdfr, fnth),
+                ShapeListItem::Trim(mdfr) if !mdfr.elem.hd => trim = Some(mdfr),
+
                 ShapeListItem::RoundedCorners(_) |  //round_corners(&mdfr, &mut path, fnth);
-                ShapeListItem::PuckerBloat(_) |
-                ShapeListItem::OffsetPath(_)  |
-                ShapeListItem::Trim(_)  |           //trim_path(&mdfr, &mut path, fnth);
-                ShapeListItem::Twist(_) |
-                ShapeListItem::Merge(_) |
+                ShapeListItem::PuckerBloat(_) | ShapeListItem::Twist(_) |
+                ShapeListItem::OffsetPath(_)  | ShapeListItem::Merge(_) |
                 ShapeListItem::ZigZag(_) => dbg!(),
 
                 ShapeListItem::Group(group) if !group.elem.hd => {
@@ -545,44 +549,41 @@ impl Animation {
                 _ => (),
         } }
 
-        if !dash.1.is_empty() { path = make_dash(&path, dash); }
-    fn make_dash(path: &VGPath, dash: (f32, Vec<f32>)) -> VGPath {
-        use {kurbo::PathEl, femtovg::Verb};
-        let bezp = path.verbs().map(|verb| match verb {
-            Verb::MoveTo(x, y) => PathEl::MoveTo((x as f64, y as f64).into()),
-            Verb::LineTo(x, y) => PathEl::LineTo((x as f64, y as f64).into()),
-            Verb::BezierTo(ox, oy, ix, iy, x, y) =>
-                PathEl::CurveTo((ox as f64, oy as f64).into(),
-                                (ix as f64, iy as f64).into(), (x as f64, y as f64).into()),
-            Verb::Solid | Verb::Hole => unreachable!(),
-            Verb::Close => PathEl::ClosePath,
-        });
+        if !dash.1.is_empty() { for path in path.iter_mut() {
+            let mut npath = VGPath::new();
+            kurbo::dash(path.verbs().map(convert_path_f2k), dash.0 as _, &dash.1.iter()
+                .map(|v| *v as f64).collect::<Vec<_>>())
+                .for_each(|el| convert_path_k2f(el, &mut npath));
+            *path = Box::new(npath);
+        } }
 
-        let mut path = VGPath::new();
-        kurbo::dash(bezp, dash.0 as _, &dash.1.into_iter()
-            .map(|v| v as f64).collect::<Vec<_>>()).for_each(|el| match el {
-            PathEl::MoveTo(pt) => path.move_to(pt.x as _, pt.y as _),
-            PathEl::LineTo(pt) => path.line_to(pt.x as _, pt.y as _),
-            PathEl::CurveTo(ot, it, pt) =>
-                path.bezier_to(ot.x as _, ot.y as _, it.x as _, it.y as _, pt.x as _, pt.y as _),
-            PathEl::QuadTo(_, _) => unreachable!(),
-            PathEl::ClosePath => path.close(),
-        }); path
-    }
+        if let Some(mdfr) = trim {
+            if mdfr.multiple.is_some_and(|ml|
+                matches!(ml, TrimMultiple::Simultaneously)) {
+                path.iter_mut().for_each(|path|
+                    *path =  Box::new(trim_path(mdfr, path.verbs(), fnth)));
+            } else {
+                path = vec![ Box::new(trim_path(mdfr,
+                    path.iter().rev().flat_map(|path| path.verbs()), fnth)) ];
+            }
+        }
 
         let trfm = trfm.as_ref().unwrap_or(ptm);    canvas.save();
         if repeater.is_empty() {    // XXX: execute in order of fill/stroke layer?
             canvas.set_global_alpha(trfm.1);      canvas.set_transform(&trfm.0);
-            fillp.iter().for_each(|paint| canvas.  fill_path(&path, paint));
-            linep.iter().for_each(|paint| canvas.stroke_path(&path, paint));
+            for path in path.iter().rev() {
+                fillp.iter().for_each(|paint| canvas.  fill_path(path, paint));
+                linep.iter().for_each(|paint| canvas.stroke_path(path, paint));
+            }
         }   let last_trfm = canvas.transform();
 
         repeater.into_iter().rev().for_each(|mut ts| {  ts.multiply(trfm);
             canvas.set_global_alpha(ts.1);        canvas.set_transform(&ts.0);
-            fillp.iter().for_each(|paint| canvas.  fill_path(&path, paint));
-            linep.iter().for_each(|paint| canvas.stroke_path(&path, paint));
-            canvas.reset_transform();             canvas.set_transform(&last_trfm);
-        }); canvas.restore();
+            for path in path.iter().rev() {
+                fillp.iter().for_each(|paint| canvas.  fill_path(path, paint));
+                linep.iter().for_each(|paint| canvas.stroke_path(path, paint));
+            }   canvas.reset_transform();             canvas.set_transform(&last_trfm);
+        });     canvas.restore();
     }
 }
 
@@ -641,9 +642,9 @@ fn render_masks<T: Renderer>(canvas: &mut Canvas<T>, masks_prop: &[Mask], fnth: 
         let opacity = mask.opacity.as_ref().map_or(1., |opacity|
             opacity.get_value(fnth) / 100.);    //canvas.set_global_alpha(opacity);
 
-        let mut path = VGPath::new();   mask.shape.add_path(&mut path, fnth);
         if let Some(cop) = cop { canvas.global_composite_operation(cop); }
-        canvas.fill_path(&path, &VGPaint::color(VGColor::rgbaf(0., 0., 0., opacity)));
+        canvas.fill_path(&mask.shape.to_path(fnth),
+            &VGPaint::color(VGColor::rgbaf(0., 0., 0., opacity)));
     }); //canvas.set_global_alpha(1.);  // restore global alpha
 }
 
@@ -684,9 +685,57 @@ fn repeat_shape(mdfr: &Repeater, fnth: f32) -> Vec<TM2DwO> {
     }   if matches!(mdfr.order, Composite::Below) { coll.reverse(); }   coll
 }
 
-#[allow(unused)] fn trim_path(mdfr: &TrimPath, path: &VGPath, fnth: f32) -> VGPath {
+fn trim_path<I: Iterator<Item = Verb>>(mdfr: &TrimPath, path: I, fnth: f32) -> VGPath {
     // https://lottiefiles.github.io/lottie-docs/scripts/lottie_bezier.js
-    // TODO: use bezier.length() and subdivide(t, seg) with flo_curve
-    todo!()
+    // or use curve_length(curve, merr) and subdivide(t, seg) of flo_curves
+    let offset = mdfr.offset.get_value(fnth) / 360.;
+    let start  = mdfr. start.get_value(fnth) / 100.;
+    let trim   = mdfr.   end.get_value(fnth) / 100. - start;
+    debug_assert!(start + offset < 2. && (0.0..=1.).contains(&trim));
+
+    let accuracy = 1e-2;
+    use kurbo::{BezPath, ParamCurve, ParamCurveArclen};
+    //let segments = kurbo::segments(path.map(convert_path_f2k));
+    let path = path.map(convert_path_f2k).collect::<BezPath>();
+
+    let total = path.segments().fold(0., |acc, seg| acc + seg.arclen(accuracy));
+    let (start, mut slen) = (total * ((start + offset) % 1.)  as f64, 0.);
+    let (mut fpath, mut trim) = (VGPath::new(), total * trim as f64);
+
+    BezPath::from_path_segments(path.segments().chain(path.segments()).filter_map(|seg| {
+        let len = seg.arclen(accuracy);
+
+        let range = if slen <= start && start < slen + len {
+            let start = start - slen;   let end = start + trim;
+            if  end < len { trim = 0.;      start / len .. end / len
+            } else { trim -= len - start;   start / len .. 1. }
+        } else if start < slen && 0. < trim {
+            if trim < len { let end = trim / len;
+                     trim  = 0.;    0.0 .. end
+            } else { trim -= len;   0.0 .. 1. }
+        } else {     slen += len;   return None };
+
+        slen += len;    Some(seg.subsegment(range))
+    })).iter().for_each(|el| convert_path_k2f(el, &mut fpath));  fpath
 }
+
+use {kurbo::PathEl, femtovg::Verb};
+#[inline] fn convert_path_f2k(verb: Verb) -> PathEl { match verb {
+    Verb::MoveTo(x, y) => PathEl::MoveTo((x as f64, y as f64).into()),
+    Verb::LineTo(x, y) => PathEl::LineTo((x as f64, y as f64).into()),
+    Verb::BezierTo(ox, oy, ix, iy, x, y) =>
+        PathEl::CurveTo((ox as f64, oy as f64).into(),
+                        (ix as f64, iy as f64).into(), (x as f64, y as f64).into()),
+    Verb::Solid | Verb::Hole => unreachable!(),
+    Verb::Close => PathEl::ClosePath,
+} }
+
+#[inline] fn convert_path_k2f(elem: PathEl, path: &mut VGPath) { match elem {
+    PathEl::MoveTo(pt) => path.move_to(pt.x as _, pt.y as _),
+    PathEl::LineTo(pt) => path.line_to(pt.x as _, pt.y as _),
+    PathEl::CurveTo(ot, it, pt) =>
+        path.bezier_to(ot.x as _, ot.y as _, it.x as _, it.y as _, pt.x as _, pt.y as _),
+    PathEl::QuadTo(_, _) => unreachable!(),
+    PathEl::ClosePath => path.close(),
+} }
 

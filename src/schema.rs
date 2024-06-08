@@ -652,7 +652,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 
 /// How to handle multiple shapes in trim path
 #[derive(Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
-#[repr(u8)] pub enum TrimMultiple { Individually = 1, Simultaneously, }
+#[repr(u8)] pub enum TrimMultiple { Simultaneously = 1, Individually, }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Twist {
     #[serde(flatten)] pub elem: ShapeElement,
