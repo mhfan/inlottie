@@ -152,8 +152,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let (mut dragging, mut focused, mut mouse) = (false, true, (0., 0.));
+    let (mut dragging, mut focused, mut paused) = (false, true, false);
     let (mut perf, mut prevt) = (PerfGraph::new(), Instant::now());
+    let  mut mouse = (0., 0.);
     //event_loop.set_control_flow(ControlFlow::Poll);
 
     event_loop.run(|event, elwt| {
@@ -188,7 +189,27 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                 }
 
-                // TODO: keyinput, space to pause, 'n' to advance a frame
+                WindowEvent::KeyboardInput { event, .. } => {
+                    if event.state == ElementState::Pressed {
+                        use winit::keyboard::{Key, NamedKey};
+                        match event.logical_key.as_ref() {
+                            Key::Named(NamedKey::Space) => {
+                                prevt = Instant::now();      paused = !paused;
+                            }
+                            Key::Character(char) => if paused { use std::time::Duration;
+                                match char {
+                                    "n" | "N" => {
+                                        prevt = Instant::now() - Duration::from_millis((1000. /
+                                            lottie.as_ref().map_or(60., |lottie|
+                                                lottie.fr)) as _);  // XXX:
+                                        window.request_redraw();
+                                    }   _ => (),
+                                }
+                            }   _ => (),
+                        }
+                    }
+                }
+
                 WindowEvent::MouseInput { button: MouseButton::Left,
                     state, .. } => match state {
                     ElementState::Pressed  => { dragging = true;
@@ -255,7 +276,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 WindowEvent::RedrawRequested => {
                     let elapsed = prevt.elapsed();  prevt = Instant::now();
                     canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
-                        Color::rgbf(0.4, 0.4, 0.4));    // to clear viewport/viewbox only?
+                        Color::rgbf(0.4, 0.4, 0.4));    // XXX: to clear viewport/viewbox only?
 
                     #[cfg(feature = "rive-rs")]
                     if let Some(scene) = &mut scene {
@@ -265,6 +286,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if let Some(lottie) = &mut lottie {
                         if !(lottie.render_next_frame(&mut canvas,
                             elapsed.as_secs_f32())) { return }
+                        // TODO: draw frame time (lottie.fnth) on screen?
                     }
                     if let Some(tree) = &tree {
                         render_nodes(&mut canvas, &mouse, tree.root(),
@@ -287,7 +309,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 _ => ()
             },
 
-            Event::AboutToWait => if focused { window.request_redraw() },
+            Event::AboutToWait => if focused && !paused { window.request_redraw() },
             Event::LoopExiting => elwt.exit(),
             _ => () //println!("{:?}", event)
     }})?;   Ok(())  //loop {}
