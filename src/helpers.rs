@@ -10,18 +10,18 @@ impl From<IntBool> for bool { #[inline] fn from(value: IntBool) -> Self { value.
 impl From<bool> for IntBool { fn from(value: bool) -> Self { Self(if value { 1 } else { 0 }) } }
 
 /* #[derive(Debug, Clone, Copy)] pub struct Rgb  { pub r: u8, pub g: u8, pub b: u8 }
-impl Rgb {  pub fn new_u8 (r:  u8, g:  u8, b:  u8) -> Self { Self { r, g, b } }
-            pub fn new_f32(r: f32, g: f32, b: f32) -> Self { Self {
+impl Rgb {  #[inline] pub fn new_u8 (r:  u8, g:  u8, b:  u8) -> Self { Self { r, g, b } }
+            #[inline] pub fn new_f32(r: f32, g: f32, b: f32) -> Self { Self {
         r: (r * 255.) as _, g: (g * 255.) as _, b: (b * 255.) as _
     } }
 } */
 
 #[derive(Debug, Clone, Copy)] pub struct Rgba { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }
-impl Default for Rgba { fn default() -> Self { Self { r: 0, g: 0, b: 0, a: 255 } } }
+impl Default for Rgba { #[inline] fn default() -> Self { Self { r: 0, g: 0, b: 0, a: 255 } } }
 
 impl Rgba {
-    pub fn new_u8 (r:  u8, g:  u8, b:  u8, a:  u8) -> Self { Self { r, g, b, a } }
-    pub fn new_f32(r: f32, g: f32, b: f32, a: f32) -> Self { Self {
+    #[inline] pub fn new_u8 (r:  u8, g:  u8, b:  u8, a:  u8) -> Self { Self { r, g, b, a } }
+    #[inline] pub fn new_f32(r: f32, g: f32, b: f32, a: f32) -> Self { Self {
         r: (r * 255.) as _, g: (g * 255.) as _, b: (b * 255.) as _, a: (a * 255.) as _
     } }
 }
@@ -29,7 +29,7 @@ impl Rgba {
 impl<'de> Deserialize<'de> for Rgba {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let v = Vec::<f32>::deserialize(deserializer)?;
-        assert!(2 < v.len() && v.len() < 5);
+        debug_assert!(2 < v.len() && v.len() < 5);
         Ok(Self::new_f32(v[0], v[1], v[2], v.get(3).cloned().unwrap_or(1.)))
     }
 }
@@ -43,7 +43,7 @@ impl Serialize for Rgba {
 }
 
 impl std::str::FromStr for Rgba { type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> { //assert!(s.len() == 7);
+    fn from_str(s: &str) -> Result<Self, Self::Err> { //debug_assert!(s.len() == 7);
         let v = u32::from_str_radix(s.strip_prefix('#')
             .ok_or("not prefixed with '#'".to_owned())?, 16)
             .map_err(|err| err.to_string())?;
@@ -61,30 +61,29 @@ impl core::fmt::Display for Rgba {
     }
 }
 
-pub(crate) fn str_to_rgba<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Rgba, D::Error> {
-    String::deserialize(deserializer)?.parse().map_err(D::Error::custom)
-}
+#[inline] pub(crate) fn str_to_rgba<'de, D: Deserializer<'de>>(deserializer: D) ->
+    Result<Rgba, D::Error> { String::deserialize(deserializer)?.parse().map_err(D::Error::custom) }
 
-pub(crate) fn str_from_rgba<S: Serializer>(c: &Rgba, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(&c.to_string())
-}
+#[inline] pub(crate) fn str_from_rgba<S: Serializer>(c: &Rgba, serializer: S) ->
+    Result<S::Ok, S::Error> { serializer.serialize_str(&c.to_string()) }
 
 // euclid::default::Vector2D<f32>;  // Point/Size, Position/Scale
 #[derive(Debug, Clone, Copy)] pub struct Vector2D { pub x: f32, pub y: f32 }
+//impl From<Vector2D> for (f32, f32) { fn from(val: Vector2D) -> Self { (val.x, val.y) } }
 impl From<(f32, f32)> for Vector2D {
-    fn from(val: (f32, f32)) -> Self { Self { x: val.0, y: val.1 } }
+    #[inline] fn from(val: (f32, f32)) -> Self { Self { x: val.0, y: val.1 } }
 }
 
 impl<'de> Deserialize<'de> for Vector2D {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let v = Vec::<f32>::deserialize(deserializer)?;
-        assert!(!v.is_empty() && v.len() < 4); // XXX: ignore extra 3rd value?
+        debug_assert!(!v.is_empty() && v.len() < 4); // XXX: ignore extra 3rd value?
         Ok(Self { x: v[0], y: v.get(1).cloned().unwrap_or(0.) })
     }
 }
 
 impl Serialize for Vector2D {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    #[inline] fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         [self.x, self.y].serialize(serializer)
     }
 }
@@ -144,12 +143,12 @@ pub(crate) mod defaults { #![allow(unused)]
     pub fn opacity() -> Value { Value::from_value(100.) }
     pub fn animated2d() -> Animated2D { Animated2D::from_value((100., 100.).into()) }
 
-    pub fn is_default<T: Default + PartialEq>(v: &T) -> bool { *v == T::default() }
+    #[inline] pub fn is_default<T: Default + PartialEq>(v: &T) -> bool { *v == T::default() }
 }
 
-impl FontList { pub fn is_empty(&self) -> bool { self.list.is_empty() } }
+impl FontList { #[inline] pub fn is_empty(&self) -> bool { self.list.is_empty() } }
 impl Animation {
-    pub fn from_reader<R: std::io::Read>(r: R) ->   // XXX: print out summary here?
+    #[inline] pub fn from_reader<R: std::io::Read>(r: R) -> // XXX: print out summary here?
         Result<Self, serde_json::Error> { serde_json::from_reader(r) }
 }
 
@@ -276,7 +275,7 @@ impl<'de> Deserialize<'de> for AnyAsset {
 
 #[derive(Clone, Debug, Serialize)] pub struct AnyValue(serde_json::Value);
 impl<'de> Deserialize<'de> for AnyValue {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+    #[inline] fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         panic!("{}", serde_json::Value::deserialize(d)?);
     }
 }
@@ -395,7 +394,7 @@ pub mod math {  use super::*;
     [(1., 2.), (-1., 2.), (1., -2.), (-1., -2.), (2., 1.), (-2., 1.), (2., -1.), (-2., -1.)]
     .into_iter().for_each(|(x, y)| assert!((fast_atan2(y, x) - y.atan2(x)).abs() < 0.0038));
 ``` */
-pub fn fast_atan2(y: f32, x: f32) -> f32 {  use std::f32::consts::PI;
+pub fn fast_atan2(y: f32, x: f32) -> f32 {  use core::f32::consts::PI;
     if x == 0. { return if 0. < y { PI / 2. } else if y < 0. { -PI / 2. } else { 0. } }
     else if y == 0. { return if 0. < x { 0. } else { PI } }
 
@@ -410,38 +409,42 @@ pub fn fast_atan2(y: f32, x: f32) -> f32 {  use std::f32::consts::PI;
     } else { (if 0. < y { PI / 2. } else { -PI / 2. }) - hatan }
 }
 
-impl std::ops::Div<f32> for Vector2D {  type Output = Vector2D;
+use core::ops::{Div, Mul, Add, Sub};
+impl Div<f32> for Vector2D {  type Output = Vector2D;
     #[inline] fn div(self, scale: f32) -> Self::Output {
         Self::Output { x: self.x / scale, y: self.y / scale }
     }
 }
-impl std::ops::Mul<f32> for Vector2D {  type Output = Vector2D;
+impl Mul<f32> for Vector2D {  type Output = Vector2D;
     #[inline] fn mul(self, scale: f32) -> Self::Output {
         Self::Output { x: self.x * scale, y: self.y * scale }
     }
 }
-impl std::ops::Add<f32> for Vector2D {  type Output = Vector2D;
+impl Add<f32> for Vector2D {  type Output = Vector2D;
     #[inline] fn add(self, offset: f32) -> Self::Output {
         Self::Output { x: self.x + offset, y: self.y + offset }
     }
 }
-impl std::ops::Sub<f32> for Vector2D {  type Output = Vector2D;
+impl Sub<f32> for Vector2D {  type Output = Vector2D;
     #[inline] fn sub(self, offset: f32) -> Self::Output {
         Self::Output { x: self.x - offset, y: self.y - offset }
     }
 }
-impl std::ops::Add for Vector2D {  type Output = Vector2D;
+impl Add for Vector2D {  type Output = Vector2D;
     #[inline] fn add(self, rhs: Self) -> Self::Output {
         Self::Output { x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }
-impl std::ops::Sub for Vector2D {  type Output = Vector2D;
+impl Sub for Vector2D {  type Output = Vector2D;
     #[inline] fn sub(self, rhs: Self) -> Self::Output {
         Self::Output { x: self.x - rhs.x, y: self.y - rhs.y }
     }
 }
 
-pub trait Lerp { fn lerp(&self, other: &Self, t: f32) -> Self; }    // Linear intERPolation
+pub trait Lerp { fn lerp(&self, other: &Self, t: f32) -> Self;  // Linear intERPolation
+    fn bezc(&self, _: &Self, _: f32, _: &PositionExtra) -> Self
+        where Self: std::marker::Sized { unreachable!() }
+}
 
 impl Lerp for f32 {
     #[inline] fn lerp(&self, other: &Self, t: f32) -> Self { self + (other - self) * t }
@@ -451,6 +454,23 @@ impl Lerp for Vector2D {
     fn lerp(&self, other: &Self, t: f32) -> Self {
         Self {  x: self.x + (other.x - self.x) * t,
                 y: self.y + (other.y - self.y) * t, }
+    }
+
+    fn bezc(&self, other: &Self, t: f32, extra: &PositionExtra) -> Self
+        where Self: std::marker::Sized {
+        /* impl From<&Vector2D> for Coord2 {
+            #[inline] fn from(val: &Vector2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
+        }   use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
+        let pt = Curve::from_points((*self).into(), ((*self + extra.to).into(),
+            (*other + extra.ti).into()), (*other).into()).point_at_pos(time as _).1 as _; */
+
+        impl From<Vector2D> for Point {
+            #[inline] fn from(val: Vector2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
+        }   use kurbo::{CubicBez, ParamCurve, Point};
+        let pt = CubicBez::new::<Point>((*self).into(), (*self + extra.to).into(),
+            (*other + extra.ti).into(), (*other).into()).eval(t as _);
+
+        Self { x: pt.x as _, y: pt.y as _ } //(pt.x as _, pt.y as _).into()
     }
 }
 
@@ -471,7 +491,7 @@ impl Lerp for Bezier {
         Self { closed: self.closed,
             vp: self.vp.iter().zip(other.vp.iter()).map(closure).collect(),
             it: self.it.iter().zip(other.it.iter()).map(closure).collect(),
-            ot: self.ot.iter().zip(other.it.iter()).map(closure).collect(),
+            ot: self.ot.iter().zip(other.ot.iter()).map(closure).collect(),
         }
     }
 }
@@ -485,14 +505,15 @@ impl Lerp for Bezier {
 
 impl Lerp for ColorList {
     fn lerp(&self, other: &Self, t: f32) -> Self {
-        Self(self.0.iter().zip(other.0.iter()).map(|val|
-            (val.0.0 + (val.1.0 - val.0.0) * t, val.0.1.lerp(&val.1.1, t))).collect())
+        Self(self.0.iter().zip(other.0.iter()).map(|(first, second)|
+            (first.0 + (second.0 - first.0) * t, first.1.lerp(&second.1, t))).collect())
     }
 }
 
-impl Lerp for Vec<f32> {    // aka MultiDimensional
+impl Lerp for Vec<f32> {    // aka MultiD
     fn lerp(&self, other: &Self, t: f32) -> Self {
-        self.iter().zip(other.iter()).map(|val| val.0.lerp(val.1, t)).collect()
+        self.iter().zip(other.iter()).map(|val| //val.0.lerp(val.1, t)
+            *val.0 + (*val.1 - *val.0) * t).collect()
     }
 }
 
@@ -505,9 +526,8 @@ impl<T> KeyframeBase<T> {
     #[inline] pub fn as_scalar(&self) -> &T { // can be frequently called
         match &self.value { None => unreachable!(),
             Some(ArrayScalar::Scalar(val)) => val,
-            Some(ArrayScalar::Array(val)) => { // Expected single-element array
-                debug_assert!(val.len() == 1);  &val[0]
-            }
+            Some(ArrayScalar::Array (val)) => &val[0],
+                //debug_assert!(val.len() == 1); // Expect single-element array
         }
     }
 }
@@ -520,25 +540,25 @@ impl<T: Clone + Lerp> AnimatedProperty<T> {
     // XXX: wrapped in Option, and use Cow<&T> to avoid unnecessary clone?
     pub fn get_value(&self, fnth: f32) -> T {
         match &self.keyframes {
-            AnimatedValue::Static(val) => {
-                debug_assert!(!self.animated.as_bool());    val.clone()
-            }
+            AnimatedValue::Static(val) => val.clone(),
+                //debug_assert!(!self.animated.as_bool());
             AnimatedValue::Animated(coll) => {
-                debug_assert!(/* self.animated.as_bool() && */!coll.is_empty());
+                //debug_assert!( self.animated.as_bool() && !coll.is_empty());
                 if fnth <= coll[0].start { return coll[0].as_scalar().clone() }
 
                 let mut len = coll.len() - 1;
                 if coll[len].value.is_none() { if 0 < len { len -= 1; } else { unreachable!() } }
                 if coll[len].start <= fnth { return coll[len].as_scalar().clone() }
                 while 0 < len { len -= 1; if coll[len].start <= fnth { break } }
-                // assert `coll` is sorted by `start` as well
+                // assert `coll` is sorted by `start` as well?
 
                 #[inline] fn get_scalar(val: &ArrayScalar<f32>) -> f32 { match val {
-                    ArrayScalar::Array(val) => val[0],
+                    ArrayScalar::Array (val) => val[0],
                     ArrayScalar::Scalar(val) => *val,
                 } } // XXX: handle multiple dimention?
 
                 let kf = &coll[len];
+                if  kf.hold.as_bool() { return kf.as_scalar().clone() }
                 let mut time = (fnth - kf.start) / (coll[len + 1].start - kf.start);
 
                 if let Some(ctrl) =
@@ -549,16 +569,19 @@ impl<T: Clone + Lerp> AnimatedProperty<T> {
                 /*  https://github.com/gre/bezier-easing, https://lib.rs/keywords/cubic,
                     https://github.com/hannesmann/keyframe
                     use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
-                    let curve = Curve::from_points((0., 0.).into(),
-                        (Coord2::from(ctrl.0), Coord2::from(ctrl.1)), (1., 1.).into());
-                    time = curve.point_at_pos(time as _).1 as f32; */
+                    time = Curve::from_points( (0., 0.).into(), (Coord2::from(ctrl.0),
+                        Coord2::from(ctrl.1)), (1., 1.).into()).point_at_pos(time as _).1 as _; */
 
                     use kurbo::{CubicBez,ParamCurve};
-                    let curve = CubicBez::new((0., 0.), ctrl.0, ctrl.1, (1., 1.));
-                    time = curve.eval(time as _).y as _;
+                    time = CubicBez::new((0., 0.), ctrl.0, ctrl.1,
+                                         (1., 1.)).eval(time as _).y as _;
                 }
 
-                kf.as_scalar().lerp(coll[len + 1].as_scalar(), time)
+                let (kf_prev, kf_next) = (kf.as_scalar(), coll[len + 1].as_scalar());
+                if let Some(extra) = &kf.pextra {
+                    //debug_assert!(std::any::TypeId::of::<T>() == TypeId::of::<Vector2D>());
+                    kf_prev.bezc(kf_next, time, extra)
+                } else { kf_prev.lerp(kf_next, time) }
             }   _ => unreachable!(),
         }
     }

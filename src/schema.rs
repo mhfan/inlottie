@@ -115,7 +115,7 @@ pub struct AudioLayer { // a workaround for issues missing `au`
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AudioSettings { pub lv: MultiDimensional } // Level
+pub struct AudioSettings { pub lv: MultiD } // Level
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct CameraLayer { // 3D Camera
     #[serde(flatten)] pub base: LayerInfo,
@@ -251,15 +251,15 @@ pub enum TransRotation {    Split3D(Box<SplitRotation>),
     #[serde(skip_serializing_if = "Option::is_none")] ry: Option<Value>,
     /** equivalent to `r` when not split */ rz: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
-    /** Orientation, MultiDimentional    */ or: Option<Animated2D>,
+    /** Orientation, MultiDimentional    */ or: Option<MultiD>,
 }
 
 /// (In/Out) tangent for values (eg: moving position around a curved path)
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct PositionExtra {
     //#[serde(flatten)] pub kf: KeyframeBase<Vector2D>, // PositionKeyframe
 
-    #[serde(default, skip_serializing_if = "Vec::is_empty")] pub ti: Vec<f32>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")] pub to: Vec<f32>,
+    pub ti: Vector2D, //Vec<f32>,
+    pub to: Vector2D, //Vec<f32>,
 }
 
 /// An animatable property that is split into individually anaimated components
@@ -270,10 +270,10 @@ pub enum TransRotation {    Split3D(Box<SplitRotation>),
 }
 
 pub type Value = AnimatedProperty<f32>;
-pub type Position = AnimatedProperty<Vector2D>;
-type MultiDimensional = AnimatedProperty<Vec<f32>>;
+pub type Position   = AnimatedProperty<Vector2D>;
 pub type Animated2D = AnimatedProperty<Vector2D>;
 pub type ColorValue = AnimatedProperty<Color>;
+pub type MultiD = AnimatedProperty<Vec<f32>>;
 
 /// Color as a [r, g, b] array with values in 0~1
 /// Note sometimes you might find color values with 4 components
@@ -334,7 +334,7 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
     #[serde(rename = "s")] pub value: Option<ArrayScalar<T>>, // a workaround for old file
 
     #[serde(flatten)] pub easing: Option<Box<EasingHandle>>,
-    #[serde(flatten)] pub pextra: Option<Box<PositionExtra>>,
+    #[serde(flatten)] pub pextra: Option<PositionExtra>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct EasingHandle {
@@ -471,7 +471,7 @@ pub struct FreePath {  #[serde(flatten)]        pub  base: ShapeBase,
     same as above but at the end of the list there is a sequence of 'offset, alpha'. */
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct GradientColors {
     /** Number of colors in `k` */ #[serde(rename = "p")] pub cnt: u32,
-    #[serde(rename = "k")] pub cl: AnimatedProperty<ColorList>, // MultiDimensional
+    #[serde(rename = "k")] pub cl: AnimatedProperty<ColorList>, // MultiD
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct FillStrokeGrad {
@@ -810,7 +810,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 /// The origin point for each character, word, or line can be changed.
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextAlignmentOptions {
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")] /// Group alignment
-    pub align: Option<MultiDimensional>,
+    pub align: Option<MultiD>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "g")] /// Anchor point grouping
     pub group: Option<TextGrouping>,
 }
@@ -976,7 +976,7 @@ pub struct CharacterShapes {
 
 #[allow(unused)] type Slots = serde_json::Value; // XXX: Available property overrides
 /* #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Slots {
-    // patternProperties: any of MultiDimensional/ColorValue/Position/ShapeProperty/Value
+    // patternProperties: any of MultiD/ColorValue/Position/ShapeProperty/Value
 } */
 
 /// Layers can have post-processing effects applied to them.

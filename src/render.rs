@@ -310,20 +310,28 @@ impl Transform {
                 ts.rotate(rdegree.get_value(fnth) * PI / 180.); trfm.multiply(&ts);
             }
 
-            TransRotation::Split3D(_) => unimplemented!(), //assert!(ddd);
+            TransRotation::Split3D(_) => unimplemented!(), //debug_assert!(ddd);
             _ => (),
         }
 
         match &self.position {
             Some(Translation::Normal(apos)) => {
                 let pos  = apos.get_value(fnth);
-                if  ao.as_bool() && apos.animated.as_bool() {
+                if  ao.as_bool() &&  apos.animated.as_bool() {
                     let orient = pos - apos.get_value(fnth - 1.);
                     ts.rotate(fast_atan2(orient.y, orient.x));  trfm.multiply(&ts);
                 }   trfm.multiply(&TM2D::new_translation(pos.x, pos.y));
             }
 
-            Some(Translation::Split(_)) => unimplemented!(), //assert!(ddd);
+            Some(Translation::Split(sv)) => {   debug_assert!(sv.split);
+                let pos = Vector2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) };
+                if  ao.as_bool() {
+                    let orient = Vector2D { x: pos.x - sv.x.get_value(fnth - 1.),
+                                                      y: pos.y - sv.y.get_value(fnth - 1.) };
+                    ts.rotate(fast_atan2(orient.y, orient.x));  trfm.multiply(&ts);
+                }   trfm.multiply(&TM2D::new_translation(pos.x, pos.y));
+                if sv.z.is_some() { unimplemented!(); }
+            }
             _ => (),
         }   TM2DwO(trfm, opacity)
     }
@@ -332,8 +340,7 @@ impl Transform {
         let (mut trfm, mut ts) = (TM2D::identity(), TM2D::identity());
         let anchor = if let Some(anchor) = &self.anchor {
             let anchor = anchor.get_value(fnth);
-            trfm.multiply(&TM2D::new_translation(-anchor.x, -anchor.y));
-            anchor
+            trfm.multiply(&TM2D::new_translation(-anchor.x, -anchor.y));    anchor
         } else { Vector2D { x: 0., y: 0. } };
 
         if  let Some(scale) = &self.scale {
@@ -359,19 +366,19 @@ impl Transform {
                 trfm.multiply(&ts);
             }
 
-            TransRotation::Split3D(_) => unimplemented!(), //assert!(ddd);
+            TransRotation::Split3D(_) => unimplemented!(), //debug_assert!(ddd);
             _ => (),
         }
 
-        match &self.position {
-            Some(Translation::Normal(apos)) => {
-                let pos  = apos.get_value(fnth) * offset;
-                trfm.multiply(&TM2D::new_translation(pos.x + anchor.x, pos.y + anchor.y));
-            }
+        let pos = match &self.position {
+            Some(Translation::Normal(apos)) => apos.get_value(fnth),
+            Some(Translation::Split(sv)) => {   debug_assert!(sv.split);
+                Vector2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) }
+            }   _ => Vector2D { x: 0., y: 0. },
+        };  // XXX: shouldn't need to deal with auto orient?
 
-            Some(Translation::Split(_)) => unimplemented!(), //assert!(ddd);
-            _ => (),
-        }   trfm
+        trfm.multiply(&TM2D::new_translation(pos.x * offset + anchor.x,
+                                             pos.y * offset + anchor.y));   trfm
     }
 }
 
@@ -389,7 +396,7 @@ impl Animation {
     //fn get_duration(&self) -> f32 { (self.op - self.ip) / self.fr }
     pub fn render_next_frame<T: Renderer>(&mut self,
         canvas: &mut Canvas<T>, elapsed: f32) -> bool {
-        debug_assert!(0. < self.fr && 0. <= self.ip && 1. < self.op - self.ip);
+        //debug_assert!(0. < self.fr && 0. <= self.ip && 1. < self.op - self.ip);
 
             self.elapsed += elapsed * self.fr;
         if  self.elapsed < 1. && self.ip < self.fnth { return false }
@@ -446,25 +453,23 @@ impl Animation {
             })
         }
 
-        fn to_show_frame(vl: &VisualLayer, fnth: f32) -> Option<f32> {
-            if vl.base.hd || fnth < vl.base.ip || vl.base.op <= fnth || fnth < vl.base.st {
-                None } else { Some((fnth - vl.base.st) / vl.base.sr) }
+        fn need_to_hide(vl: &VisualLayer, fnth: f32) -> bool {
+            vl.base.hd || fnth < vl.base.ip || vl.base.op <= fnth || fnth < vl.base.st
         }
 
         for layer in layers.iter().rev() { match layer {
-                LayersItem::Shape(shpl) =>
-                    if let Some(fnth) = to_show_frame(&shpl.vl, fnth) {
+                LayersItem::Shape(shpl) => if !need_to_hide(&shpl.vl, fnth) {
                     let trfm = get_matrix(&shpl.vl, fnth);
 
                     prepare_matte(canvas, &shpl.vl, &mut matte);
                     Self::render_shapes(canvas, &trfm, &shpl.shapes, fnth, shpl.vl.ao);
                      render_matte(canvas, &shpl.vl, &mut matte, fnth);
                 }
-                LayersItem::PrecompLayer(pcl) =>
-                    if let Some(fnth) = to_show_frame(&pcl.vl, fnth) {
+                LayersItem::PrecompLayer(pcl) => if !need_to_hide(&pcl.vl, fnth) {
                     if let Some(pcomp) = self.assets.iter().find_map(|asset|
                         match asset { AssetsItem::Precomp(pcomp)
                             if pcomp.base.id == pcl.rid => Some(pcomp), _ => None }) {
+                        let fnth = (fnth - pcl.vl.base.st) / pcl.vl.base.sr;
 
                         let trfm = get_matrix(&pcl.vl, fnth);
                         let fnth = pcl.tm.as_ref().map_or(fnth, // handle time remapping
@@ -475,8 +480,7 @@ impl Animation {
                          render_matte(canvas, &pcl.vl, &mut matte, fnth);
                     }   // clipping(pcl.w, pcl.h)?
                 }
-                LayersItem::SolidColor(scl) =>
-                    if let Some(fnth) = to_show_frame(&scl.vl, fnth) {
+                LayersItem::SolidColor(scl) => if !need_to_hide(&scl.vl, fnth) {
                     let trfm = get_matrix(&scl.vl, fnth);
                     prepare_matte(canvas, &scl.vl, &mut matte);
 
