@@ -378,7 +378,7 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
 /// **Modifiers** process their siblings and alter the path defined by shapes.
 #[derive(Clone, Debug, Deserialize, Serialize)] #[serde(tag = "ty")] pub enum ShapeListItem {
     #[serde(rename = "rc")] Rectangle(Rectangle),           // Shapes:
-    #[serde(rename = "sr")] Polystar(Polystar),
+    #[serde(rename = "sr")] Polystar(Box<Polystar>),
     #[serde(rename = "el")] Ellipse(Ellipse),
     #[serde(rename = "sh")] Path(FreePath),
 
@@ -388,20 +388,21 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
     #[serde(rename = "gf")] GradientFill(FillStrokeGrad),
     #[serde(rename = "gs")] GradientStroke(FillStrokeGrad),
 
+    /** A group is a shape that can contain other shapes (including other groups).
+        The usual contents of a group are: `Shapes`, `Styles`, `Transform`.
+        While the contents may vary, a group must always end with a `Transform` shape. */
+    #[serde(rename = "gr")] Group(Group),
+    #[serde(rename = "rp")] Repeater(Box<Repeater>),
+
     #[serde(rename = "rd")] RoundedCorners(RoundedCorners), // Modifiers:
     #[serde(rename = "pb")] PuckerBloat(PuckerBloat),
-    #[serde(rename = "rp")] Repeater(Box<Repeater>),
     #[serde(rename = "op")] OffsetPath(OffsetPath),
     #[serde(rename = "tm")] Trim(TrimPath),
     #[serde(rename = "tw")] Twist(Twist),
     #[serde(rename = "mm")] Merge(Merge),
     #[serde(rename = "zz")] ZigZag(ZigZag),
 
-    #[serde(rename = "tr")] GroupTransform(TransformShape), // Group:
-    /** A group is a shape that can contain other shapes (including other groups).
-        The usual contents of a group are: `Shapes`, `Styles`, `Transform`.
-        While the contents may vary, a group must always end with a `Transform` shape. */
-    #[serde(rename = "gr")] Group(Group),
+    #[serde(rename = "tr")] Transform(Box<TransformShape>),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Ellipse {
