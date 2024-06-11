@@ -461,14 +461,30 @@ impl Lerp for Vector2D {
         /* impl From<&Vector2D> for Coord2 {
             #[inline] fn from(val: &Vector2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
         }   use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
-        let pt = Curve::from_points((*self).into(), ((*self + extra.to).into(),
-            (*other + extra.ti).into()), (*other).into()).point_at_pos(time as _).1 as _; */
+        let bezier = Curve::from_points((*self).into(), ((*self + extra.to).into(),
+            (*other + extra.ti).into()), (*other).into());
+
+        let (mut tmin, mut tmax) = (0., 1.);
+        let tlen = bezier.estimate_length() * t as f64;
+        while 1e-2 < tmax - tmin {
+            let tmid = (tmin + tmax) / 2.;
+            if bezier.subdivide(tmid).1.estimate_length() < tlen {
+                tmin = tmid; } else { tmax = tmid; }
+        }   let pt = bezier.point_at_pos((tmin + tmax) / 2.); */
 
         impl From<Vector2D> for Point {
             #[inline] fn from(val: Vector2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
-        }   use kurbo::{CubicBez, ParamCurve, Point};
-        let pt = CubicBez::new::<Point>((*self).into(), (*self + extra.to).into(),
-            (*other + extra.ti).into(), (*other).into()).eval(t as _);
+        }   use kurbo::{CubicBez, ParamCurve, ParamCurveArclen, Point};
+        let curve = CubicBez::new::<Point>((*self).into(), (*self + extra.to).into(),
+            (*other + extra.ti).into(), (*other).into());
+
+        let (mut tmin, mut tmax, tolerance) = (0., 1., 1e-2);
+        let tlen = curve.arclen(tolerance) * t as f64;
+        while tolerance < tmax - tmin {
+            let tmid = (tmin + tmax) / 2.;
+            if curve.subsegment(0.0..tmid).arclen(tolerance) < tlen {
+                tmin = tmid; } else { tmax = tmid; }
+        }   let pt = curve.eval((tmin + tmax) / 2.);
 
         Self { x: pt.x as _, y: pt.y as _ } //(pt.x as _, pt.y as _).into()
     }
@@ -569,12 +585,21 @@ impl<T: Clone + Lerp> AnimatedProperty<T> {
                 /*  https://github.com/gre/bezier-easing, https://lib.rs/keywords/cubic,
                     https://github.com/hannesmann/keyframe
                     use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
-                    time = Curve::from_points( (0., 0.).into(), (Coord2::from(ctrl.0),
-                        Coord2::from(ctrl.1)), (1., 1.).into()).point_at_pos(time as _).1 as _; */
+                    let curve = Curve::from_points( (0., 0.).into(), (Coord2::from(ctrl.0),
+                        Coord2::from(ctrl.1)), (1., 1.).into());
+                    let intersect = curve_intersects_line(&curve,
+                        &((time as _, 0.).into(), ((time as _, 1.).into())));
+                    time = if intersect.is_empty() { 0. } else { intersect[0].2.1 as _ }; */
 
-                    use kurbo::{CubicBez,ParamCurve};
-                    time = CubicBez::new((0., 0.), ctrl.0, ctrl.1,
-                                         (1., 1.)).eval(time as _).y as _;
+                    use kurbo::{CubicBez, ParamCurve, PathSeg};
+                    let curve = CubicBez::new((0., 0.), ctrl.0, ctrl.1, (1., 1.));
+                    let sline = kurbo::Line::new((time as _, 0.), (time as _, 1.));
+                    let intersect =
+                        PathSeg::Cubic(curve).intersect_line(sline);
+                    time = if intersect.is_empty() { 0. } else {
+                        //curve.eval(intersect[0].segment_t).y as _
+                        sline.eval(intersect[0].line_t).y as _
+                    };  //time = curve.eval(time as _).y as _;
                 }
 
                 let (kf_prev, kf_next) = (kf.as_scalar(), coll[len + 1].as_scalar());
