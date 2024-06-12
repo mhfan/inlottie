@@ -32,7 +32,9 @@ Note: To build for rive support, first remove comment of line "rive-rs = " in Ca
 * <https://github.com/angular-rust/ux-animate/tree/main/src/runtime/lottie>
 * <https://github.com/thorvg/thorvg/tree/main/src/loaders/lottie>
 * <https://github.com/Samsung/rlottie/tree/master/src/lottie>
+* <https://github.com/google/skia/tree/main/modules/skottie>
 * <https://github.com/servo/pathfinder/tree/master/lottie>
+* <https://skia.org/docs/user/modules/skottie/>
 * <https://transform.tools/json-to-rust-serde>
 * <https://airbnb.design/lottie/>
 

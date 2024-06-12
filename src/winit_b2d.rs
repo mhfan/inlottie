@@ -160,16 +160,18 @@ fn blend2d_logo(ctx: &mut BLContext) {  ctx.clearAll();
     ctx.setCompOp(BLCompOp::BL_COMP_OP_DIFFERENCE);
     ctx.fillGeometryExt(&BLRoundRect::new(&(195, 195, 270, 270).into(), 25.0), &linear);
     ctx.setCompOp(BLCompOp::BL_COMP_OP_SRC_OVER);   // restore to default
+
+    //let _ = img.writeToFile("target/logo_b2d.png");
 }
 
 #[allow(dead_code)] pub struct PerfGraph { que: VecDeque<f32>, max: f32, sum: f32
-    /*, time: Instant*/, font: BLFont, face: BLFontFace }
+    /*, time: Instant*/, font: Option<BLFont> }
 
 impl PerfGraph {
     #[allow(clippy::new_without_default)] pub fn new() -> Self {
-        let face = BLFontFace::from_file("data/Roboto-Regular.ttf");
-        Self { que: VecDeque::with_capacity(100), max: 0., sum: 0.
-            /*, time: Instant::now()*/, font: BLFont::new(&face, 14.), face }
+        let face = BLFontFace::from_file("data/Roboto-Regular.ttf").ok();
+        Self { que: VecDeque::with_capacity(100), max: 0., sum: 0. /*, time: Instant::now()*/,
+            font: face.as_ref().map(|face| BLFont::new(face, 14.)) }
     }
 
     pub fn update(&mut self, ft: f32) { //debug_assert!(f32::EPSILON < ft);
@@ -198,9 +200,10 @@ impl PerfGraph {
         //paint.set_font_size(14.0); // some fixed values can be moved into the structure
 
         let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
-        blctx.fillUtf8TextDRgba32(&(10., 15.).into(), &self.font,   // XXX:
-            &format!("{fps:.2} FPS"), (240, 240, 240, 255).into());
-        blctx.reset_transform(Some(&last_trfm));
+        if let Some(font) = &self.font {
+            blctx.fillUtf8TextDRgba32(&(10., 15.).into(), font,   // XXX:
+                &format!("{fps:.2} FPS"), (240, 240, 240, 255).into());
+        }   blctx.reset_transform(Some(&last_trfm));
     }
 }
 
@@ -303,7 +306,7 @@ fn render_nodes(blctx: &mut BLContext, parent: &usvg::Group, trfm: &usvg::Transf
             }
 
             /* let mat = blctx.getUserTransform(); // XXX: must be in screen viewport
-            if  matches!(fpath.hitTest(&mat.mapPonitD(&(mouse.0, mouse.1).into()),
+            if  matches!(fpath.hitTest(&mat.invert().mapPonitD(&(mouse.0, mouse.1).into()),
                 BLFillRule::BL_FILL_RULE_NON_ZERO), BLHitTest::BL_HIT_TEST_IN) {
                 blctx.setStrokeWidth(1. / mat.getScaling().0);
                 blctx.strokeGeometryRgba32(&fpath, (32, 240, 32, 128).into());

@@ -83,9 +83,8 @@ impl<'de> Deserialize<'de> for Vector2D {
 }
 
 impl Serialize for Vector2D {
-    #[inline] fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        [self.x, self.y].serialize(serializer)
-    }
+    #[inline] fn serialize<S: Serializer>(&self, serializer: S) ->
+        Result<S::Ok, S::Error> { [self.x, self.y].serialize(serializer) }
 }
 
 #[derive(Clone, Debug)] pub struct ColorList(pub Vec<(f32, Rgba)>); // (offset, color)
@@ -148,8 +147,9 @@ pub(crate) mod defaults { #![allow(unused)]
 
 impl FontList { #[inline] pub fn is_empty(&self) -> bool { self.list.is_empty() } }
 impl Animation {
-    #[inline] pub fn from_reader<R: std::io::Read>(r: R) -> // XXX: print out summary here?
-        Result<Self, serde_json::Error> { serde_json::from_reader(r) }
+    #[inline] pub fn from_reader<R: std::io::Read>(r: R) -> Result<Self, serde_json::Error> {
+        serde_json:: from_reader(r)     // XXX: print out summary here?
+    }
 }
 
 impl<'de> Deserialize<'de> for LayersItem {
@@ -199,8 +199,8 @@ pub(crate) fn serialize_animated<S, T, K>(av: &AnimatedValue<T, K>, serializer: 
     };  item.serialize(serializer)
 } */
 
-pub(crate) fn deserialize_strarray<'de, D: Deserializer<'de>>(d: D)
-    -> Result<Vec<String>, D::Error> {
+pub(crate) fn deserialize_strarray<'de, D: Deserializer<'de>>(d: D) ->
+    Result<Vec<String>, D::Error> {
     let value = serde_json::Value::deserialize(d)?;
     if let Ok(v) = String::deserialize(&value) { Ok(vec![v]) } else {
         Vec::<String>::deserialize(value).map_err(D::Error::custom)
@@ -266,17 +266,18 @@ impl<'de> Deserialize<'de> for LayerStyleItem {
 impl<'de> Deserialize<'de> for AnyAsset {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
-        //panic!("{}", value.to_string().get(0..20).unwrap());
+        //eprintln!("{}", value.to_string().get(0..20).unwrap());
         //let _ = Precomposition::deserialize(&value).unwrap();
         let value = AssetBase::deserialize(value).unwrap();
-        panic!("Failed on asset, ID: {}", value.id);
+        eprintln!("Failed with asset: {}", value.id);   Ok(AnyAsset(value))
     }
 }
 
 #[derive(Clone, Debug, Serialize)] pub struct AnyValue(serde_json::Value);
 impl<'de> Deserialize<'de> for AnyValue {
     #[inline] fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        panic!("{}", serde_json::Value::deserialize(d)?);
+        let value = serde_json::Value::deserialize(d)?;
+        eprintln!("Unexpected value: {}", value);   Ok(AnyValue(value))
     }
 }
 

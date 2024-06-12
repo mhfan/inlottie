@@ -278,8 +278,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
                         Color::rgbf(0.4, 0.4, 0.4));    // XXX: to clear viewport/viewbox only?
 
-                    #[cfg(feature = "rive-rs")]
-                    if let Some(scene) = &mut scene {
+                    #[cfg(feature = "rive-rs")] if let Some(scene) = &mut scene {
                         if !scene.advance_and_maybe_draw(&mut NanoVG::new(&mut canvas),
                             elapsed, &mut viewport) { return }
                     }
@@ -294,7 +293,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }/* else {
                         canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
                             Color::rgbf(0.4, 0.4, 0.4));
-                        some_test_case(&mut canvas);
+                        _some_test_case(&mut canvas);
                     } */
 
                     perf.render(&mut canvas, 3., 3.);   canvas.flush();

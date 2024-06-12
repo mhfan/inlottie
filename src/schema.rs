@@ -390,18 +390,18 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
 
     #[serde(rename = "rd")] RoundedCorners(RoundedCorners), // Modifiers:
     #[serde(rename = "pb")] PuckerBloat(PuckerBloat),
-    #[serde(rename = "op")] OffsetPath(OffsetPath),
     #[serde(rename = "rp")] Repeater(Box<Repeater>),
+    #[serde(rename = "op")] OffsetPath(OffsetPath),
     #[serde(rename = "tm")] Trim(TrimPath),
     #[serde(rename = "tw")] Twist(Twist),
     #[serde(rename = "mm")] Merge(Merge),
     #[serde(rename = "zz")] ZigZag(ZigZag),
 
+    #[serde(rename = "tr")] GroupTransform(TransformShape), // Group:
     /** A group is a shape that can contain other shapes (including other groups).
-        The usual contents of a group are: `Shapes`, `Style`, `Transform`.
+        The usual contents of a group are: `Shapes`, `Styles`, `Transform`.
         While the contents may vary, a group must always end with a `Transform` shape. */
     #[serde(rename = "gr")] Group(Group),
-    #[serde(rename = "tr")] GroupTransform(TransformShape),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Ellipse {
