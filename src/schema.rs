@@ -5,7 +5,7 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset, def
 
 /// Top level object, describing the animation.
 /// https://lottiefiles.github.io/lottie-docs/schema/
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Animation {
+#[derive(Deserialize, Serialize)] pub struct Animation {
     #[serde(skip)] pub elapsed: f32,    // for rendering
     #[serde(skip)] pub fnth: f32,
 
@@ -48,7 +48,7 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset, def
     #[cfg(feature = "expression")] pub slots: Option<Box<Slots>>,
 }
 
-#[derive(Clone, Debug, Serialize)] #[serde(untagged)] #[allow(clippy::large_enum_variant)]
+#[derive(Serialize)] #[serde(untagged)] #[allow(clippy::large_enum_variant)]
 /** Base class for layer holders */ pub enum LayersItem {
     /*  0 */PrecompLayer(PrecompLayer),
     /*  1 */SolidColor(SolidLayer),
@@ -56,7 +56,7 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset, def
     /*  4 */Shape(ShapeLayer),
     /*  6 */Audio(AudioLayer),
     /*  3 */Null(NullLayer),
-    /*  5 */Text(TextLayer),
+    /*  5 */Text(Box<TextLayer>),
 
     //  7 */VideoPlaceholder,
     //  8 */ImageSequence,
@@ -74,14 +74,14 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset, def
 type NullLayer = VisualLayer;
 type DataLayer =  ImageLayer;   // refId of the data source in assets
 
-#[derive(Clone, Debug, Deserialize, Serialize)] /// Layer that shows an image asset
-pub struct ImageLayer {
+/// Layer that shows an image asset
+#[derive(Deserialize, Serialize)] pub struct ImageLayer {
     #[serde(flatten)] pub vl: VisualLayer,
     #[serde(rename = "refId")] pub rid: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] /// Layer that renders a Precomposition asset
-pub struct PrecompLayer {
+/// Layer that renders a Precomposition asset
+#[derive(Deserialize, Serialize)] pub struct PrecompLayer {
     #[serde(flatten)] pub vl: VisualLayer,
     /// ID of the precomp as specified in the assets
     #[serde(rename = "refId")] pub rid: String,
@@ -97,8 +97,8 @@ pub struct PrecompLayer {
 
 use crate::helpers::{str_to_rgba, str_from_rgba, deserialize_strarray};
 
-#[derive(Clone, Debug, Deserialize, Serialize)] /// Layer with a solid color rectangle
-pub struct SolidLayer {
+/// Layer with a solid color rectangle
+#[derive(Deserialize, Serialize)] pub struct SolidLayer {
     #[serde(flatten)] pub vl: VisualLayer,
     /// Color of the layer, unlike most other places, the color is a `#rrggbb` hex string
     #[serde(deserialize_with = "str_to_rgba", serialize_with = "str_from_rgba")] pub sc: Rgba,
@@ -106,26 +106,24 @@ pub struct SolidLayer {
     pub sh: f32, // Height
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] /// A layer playing sounds
-pub struct AudioLayer { // a workaround for issues missing `au`
+#[derive(Deserialize, Serialize)] /** A layer playing sounds */ pub struct AudioLayer {
     #[serde(flatten)] pub base: LayerInfo,
     /// ID of the sound as specified in the assets
-    #[serde(rename = "refId")] pub rid: String,
+    #[serde(rename = "refId")] pub rid: String,  // a workaround for issues missing `au`
     #[serde(skip_serializing_if = "Option::is_none")] pub au: Option<AudioSettings>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AudioSettings { pub lv: MultiD } // Level
+#[derive(Deserialize, Serialize)] pub struct AudioSettings { pub lv: MultiD } // Level
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct CameraLayer { // 3D Camera
+#[derive(Deserialize, Serialize)] pub struct CameraLayer { // 3D Camera
     #[serde(flatten)] pub base: LayerInfo,
     pub ks: Transform, // Layer transform
     /// Distance from the (Z=0) plane. Small values yield a higher perspective effect.
     pub pe: Value,     // Perspective
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] /// Layer used to affect visual elements
-pub struct VisualLayer {
+/// Layer used to affect visual elements
+#[derive(Deserialize, Serialize)] pub struct VisualLayer {
     #[serde(flatten)] pub base: LayerInfo,
     pub ks: Transform, // Layer transform
 
@@ -166,13 +164,13 @@ pub struct VisualLayer {
 }
 
 /// (tag name, `id` attribute, CSS class list) used by the SVG renderer
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct SVGProp {
+#[derive(Deserialize, Serialize)] pub struct SVGProp {
     #[serde(default, skip_serializing_if = "String::is_empty")] pub tg: String,
     #[serde(default, skip_serializing_if = "String::is_empty")] pub ln: String,
     #[serde(default, skip_serializing_if = "String::is_empty")] pub cl: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct LayerInfo {
+#[derive(Deserialize, Serialize)] pub struct LayerInfo {
     //* Layer type */ pub ty: u32
     /** Start Time */ pub st: f32, // XXX: what is `st` used for?
     /**  In Point  */ pub ip: f32,
@@ -199,7 +197,7 @@ pub struct VisualLayer {
     #[serde(skip_serializing_if = "Option::is_none")] pub parent: Option<u32>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct VisualObject {
+#[derive(Deserialize, Serialize)] pub struct VisualObject {
     //#[serde(default, skip_serializing_if = "String::is_empty")]
     //* Name, as seen from editors and the like */ pub nm: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -210,7 +208,7 @@ pub struct VisualLayer {
 /// `a`, `p`, `s` are 2D Vector. // XXX: Transform for 3D layers (`ddd` == `1`)
 /// will have `a` and `p` specified as 3D components. To make the anchor point
 /// properly line up with the center of location, `p` and `a` should have the same value.
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Transform { // Layer transform
+#[derive(Deserialize, Serialize)] pub struct Transform { // Layer transform
     /// Anchor point: a position (relative to its parent) around which
     /// transformations are applied (ie: center for rotation / scale)
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")]
@@ -233,12 +231,12 @@ pub struct VisualLayer {
     #[serde(flatten)] pub extra: TransRotation,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
+#[derive(Deserialize, Serialize)] #[serde(untagged)]
 pub enum Translation { /** Position / Translation */ Normal(Position),
     /** Position / Translation with split components */ Split(Box<SplitVector>),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
+#[derive(Deserialize, Serialize)] #[serde(untagged)]
 pub enum TransRotation {    Split3D(Box<SplitRotation>),
     Normal2D { #[serde(skip_serializing_if = "Option::is_none", rename = "r")]
         /** Rotation in degrees (0~360), clockwise */ rotation: Option<Value>,
@@ -246,7 +244,7 @@ pub enum TransRotation {    Split3D(Box<SplitRotation>),
 }
 
 /// XXX: Split rotation component, X/Y/Z (3D) Rotation and Orientation
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct SplitRotation {
+#[derive(Deserialize, Serialize)] pub struct SplitRotation {
     #[serde(skip_serializing_if = "Option::is_none")] rx: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")] ry: Option<Value>,
     /** equivalent to `r` when not split */ rz: Value,
@@ -255,7 +253,7 @@ pub enum TransRotation {    Split3D(Box<SplitRotation>),
 }
 
 /// (In/Out) tangent for values (eg: moving position around a curved path)
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct PositionExtra {
+#[derive(Deserialize, Serialize)] pub struct PositionExtra {
     //#[serde(flatten)] pub kf: KeyframeBase<Vector2D>, // PositionKeyframe
 
     pub ti: Vector2D, //Vec<f32>,
@@ -263,7 +261,7 @@ pub enum TransRotation {    Split3D(Box<SplitRotation>),
 }
 
 /// An animatable property that is split into individually anaimated components
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct SplitVector {
+#[derive(Deserialize, Serialize)] pub struct SplitVector {
     pub x: Value, pub y: Value,
     #[serde(skip_serializing_if = "Option::is_none")]  pub z: Option<Value>,
     #[serde(rename = "s")] /** default `true` const */ pub split: bool,
@@ -281,7 +279,7 @@ pub type MultiD = AnimatedProperty<Vec<f32>>;
 type Color = Rgba; // Vec<f32>;
 
 /// An animatable property that holds an array of numbers
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct AnimatedProperty<T> {
+#[derive(Deserialize, Serialize)] pub struct AnimatedProperty<T> {
     //#[serde(serialize_with = "crate::helpers::serialize_animated")]
     #[serde(rename = "k")] pub keyframes: AnimatedValue<T>,
     /// Whether the property is animated. Note some old animations might not have this
@@ -290,7 +288,7 @@ type Color = Rgba; // Vec<f32>;
     #[cfg(feature = "expression")] #[serde(flatten)] expr: Option<Box<Expression>>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
+#[derive(Deserialize, Serialize)] #[serde(untagged)]
 pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
     /** Array of keyframes, when `a` == `1` */ Animated(Vec<KeyframeBase<T>>),
     /** Any unexpected value, used for debugging only */ DebugAny(Box<AnyValue>),
@@ -300,7 +298,7 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
     the value of such properties can be modified by using the expression.
     The expression language is based on JavaScript / ECMAScript.
     https://lottiefiles.github.io/lottie-docs/expressions/ */
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Expression { // XXX:
+#[derive(Deserialize, Serialize)] pub struct Expression { // XXX:
     #[serde(default, skip_serializing_if = "String::is_empty")] /** Expression */ pub x: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     /** Slot ID, One of the ID in the file's slots */ pub sid: String,
@@ -315,7 +313,7 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
 
 /// A Keyframes specifies the value at a specific time and
 /// the interpolation function to reach the next keyframe.
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct KeyframeBase<T> {
+#[derive(Deserialize, Serialize)] pub struct KeyframeBase<T> {
     /// Keyframe time (in frames). They also have a final keyframe with only the `t` attribute
     /// and you need to determine its value based on the `s` value of the previous keyframe.
     #[serde(rename = "t")] pub start: f32,
@@ -337,7 +335,7 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
     #[serde(flatten)] pub pextra: Option<PositionExtra>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct EasingHandle {
+#[derive(Deserialize, Serialize)] pub struct EasingHandle {
     /// Easing tangent leaving the current keyframe
     #[serde(rename = "o")] pub to: BezierHandle,
     /// Easing tangent going into the next keyframe
@@ -345,7 +343,7 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
 }
 
 /// Easing (Bezier) handles for keyframe interpolation
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct BezierHandle {
+#[derive(Deserialize, Serialize)] pub struct BezierHandle {
     /// Time component: `0` means time of the current keyframe,
     /// `1` for the next keyframe. (range: 0~1)
     #[serde(rename = "x")] pub   time: ArrayScalar<f32>,
@@ -354,10 +352,10 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
     #[serde(rename = "y")] pub factor: ArrayScalar<f32>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
+#[derive(Deserialize, Serialize)] #[serde(untagged)]
 pub enum ArrayScalar<T> { Array(Vec<T>), Scalar(T), }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Default, PartialEq, Deserialize_repr, Serialize_repr)]
 /** Layer and shape blend mode */ #[repr(u8)] pub enum BlendMode {
     #[default] Normal = 0, Multiply, Screen, Overlay, Darken, Lighten,
     ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion,
@@ -365,10 +363,10 @@ pub enum ArrayScalar<T> { Array(Vec<T>), Scalar(T), }
 }
 
 /// How a layer should mask another layer
-#[derive(Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum MatteMode { Normal = 0, Alpha, InvertedAlpha, Luma, InvertedLuma, }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] /// Layer containing Shapes
+#[derive(Deserialize, Serialize)] /// Layer containing Shapes
 pub struct ShapeLayer { #[serde(flatten)] pub vl: VisualLayer, pub shapes: ShapeList, }
 
 type ShapeList = Vec<ShapeListItem>; // List of valid shapes
@@ -376,7 +374,7 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
 /// they must be followed by some style shape.
 /// Each **style** is applied to all preceding shapes in the same group / layer.
 /// **Modifiers** process their siblings and alter the path defined by shapes.
-#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(tag = "ty")] pub enum ShapeListItem {
+#[derive(Deserialize, Serialize)] #[serde(tag = "ty")] pub enum ShapeListItem {
     #[serde(rename = "rc")] Rectangle(Rectangle),           // Shapes:
     #[serde(rename = "sr")] Polystar(Box<Polystar>),
     #[serde(rename = "el")] Ellipse(Ellipse),
@@ -405,21 +403,20 @@ type ShapeList = Vec<ShapeListItem>; // List of valid shapes
     #[serde(rename = "tr")] Transform(Box<TransformShape>),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Ellipse {
+#[derive(Deserialize, Serialize)] pub struct Ellipse {
     #[serde(flatten)] pub base: ShapeBase,
     #[serde(rename = "s")] pub size: Animated2D,
     #[serde(rename = "p")] pub pos: Position,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Rectangle {
+#[derive(Deserialize, Serialize)] pub struct Rectangle {
     #[serde(flatten)] pub base: ShapeBase,
     #[serde(rename = "s")] pub size: Animated2D,
     /** Center of the rectangle */ #[serde(rename = "p")] pub pos: Position,
     /** Rounded corners radius  */ #[serde(rename = "r")] pub rcr: Value,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] /// Star or regular polygon
-pub struct Polystar {
+#[derive(Deserialize, Serialize)] /** Star or regular polygon */ pub struct Polystar {
     #[serde(flatten)] pub base: ShapeBase,
 
     #[serde(rename = "p")] pub pos: Position,
@@ -435,23 +432,23 @@ pub struct Polystar {
     #[serde(skip_serializing_if = "Option::is_none")] pub is: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] /// Animatable Bezier curve
+#[derive(Deserialize, Serialize)] /// Animatable Bezier curve
 pub struct FreePath {  #[serde(flatten)]        pub  base: ShapeBase,
     /** Bezier path */ #[serde(rename = "ks")]  pub shape: ShapeProperty,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Default, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum StarType { #[default] Star = 1, Polygon, }
 
 /// Rule used to handle multiple shapes rendered with the same fill object
-#[derive(Clone, Copy, Debug, Default, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Default, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum FillRule {
     /** Everything is colored (You can think of this as an OR) */ #[default] NonZero = 1,
     /// Colored based on intersections and path direction, can be used to create 'holes'
     EvenOdd,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Gradient {
+#[derive(Deserialize, Serialize)] pub struct Gradient {
     /** Start point for the gradient */ #[serde(rename = "s")] pub sp: Animated2D,
     /** End   point for the gradient */ #[serde(rename = "e")] pub ep: Animated2D,
     #[serde(rename = "g")] pub stops: GradientColors,
@@ -470,33 +467,33 @@ pub struct FreePath {  #[serde(flatten)]        pub  base: ShapeBase,
     interleaving offsets and color components in weird ways. There are two possible layouts:
     Without alpha, the colors are a sequence of 'offset, r, g, b'; With alpha,
     same as above but at the end of the list there is a sequence of 'offset, alpha'. */
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct GradientColors {
+#[derive(Deserialize, Serialize)] pub struct GradientColors {
     /** Number of colors in `k` */ #[serde(rename = "p")] pub cnt: u32,
     #[serde(rename = "k")] pub cl: AnimatedProperty<ColorList>, // MultiD
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct FillStrokeGrad {
+#[derive(Deserialize, Serialize)] pub struct FillStrokeGrad {
     #[serde(flatten)] pub elem: ShapeElement,
     #[serde(flatten)] pub base: FillStrokeEnum,
     #[serde(flatten)] pub grad: ColorGradEnum,
     #[serde(rename = "o")] pub opacity: Value,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
+#[derive(Deserialize, Serialize)] #[serde(untagged)]
 pub enum FillStrokeEnum { Stroke(Box<BaseStroke>), FillRule(FillRuleWrapper), }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
+#[derive(Deserialize, Serialize)] #[serde(untagged)]
 pub enum ColorGradEnum { Color(ColorWrapper), Gradient(Box<Gradient>), }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct ColorWrapper {
+#[derive(Deserialize, Serialize)] pub struct ColorWrapper {
     #[serde(rename = "c")] pub color: ColorValue
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)] pub struct FillRuleWrapper {
+#[derive(Clone, Copy, Deserialize, Serialize)] pub struct FillRuleWrapper {
     #[serde(rename = "r", default)] pub rule: FillRule,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct BaseStroke {
+#[derive(Deserialize, Serialize)] pub struct BaseStroke {
     #[serde(rename = "w")] pub width: Value,    // `opacity` was moved out to unify struct
 
     #[serde(default)] pub lj: LineJoin,
@@ -508,27 +505,27 @@ pub enum ColorGradEnum { Color(ColorWrapper), Gradient(Box<Gradient>), }
 }
 
 /// An item used to described the dash pattern in a stroked path
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct StrokeDash {
+#[derive(Deserialize, Serialize)] pub struct StrokeDash {
     //#[serde(flatten)] pub vo: VisualObject,     // Type of a dash item in a stroked line
     #[serde(rename = "n")] pub r#type: StrokeDashType,  /// Length of the dash
     #[serde(rename = "v")] pub  value: Value,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, Default)] pub enum StrokeDashType {
+#[derive(Clone, Copy, Deserialize, Serialize, Default)] pub enum StrokeDashType {
     #[serde(rename = "d")] #[default] Length,
     #[serde(rename = "o")] Offset,
     #[serde(rename = "g")] Gap,
 }
 
 /// Style at the end of a stoked line
-#[derive(Clone, Copy, Debug, Default, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Default, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum LineCap  {  Butt = 1, #[default] Round, Square, }
 
 /// Style at a sharp corner of a stoked line
-#[derive(Clone, Copy, Debug, Default, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Default, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum LineJoin { Miter = 1, #[default] Round,  Bevel, }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct ShapeBase { // Drawable shape
+#[derive(Deserialize, Serialize)] pub struct ShapeBase { // Drawable shape
     #[serde(flatten)] pub elem: ShapeElement,
     /// Direction the shape is drawn as, mostly relevant when using trim path
     #[serde(skip_serializing_if = "Option::is_none", rename = "d")]
@@ -538,7 +535,7 @@ pub enum ColorGradEnum { Color(ColorWrapper), Gradient(Box<Gradient>), }
 /** Represents a style for shapes without fill or stroke */ type NoStyle = ShapeElement;
 
 /// Base class for all elements of ShapeLayer and Group
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct ShapeElement {
+#[derive(Deserialize, Serialize)] pub struct ShapeElement {
     //pub ty: String, // Shape type, handled via enum tag
     //#[serde(flatten)] pub vo: VisualObject,
     #[serde(default, skip_serializing_if = "defaults::is_default")] pub bm: Option<BlendMode>,
@@ -554,7 +551,7 @@ pub enum ColorGradEnum { Color(ColorWrapper), Gradient(Box<Gradient>), }
 }
 
 /// Drawing direction of the shape curve, useful for trim path
-#[derive(Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum ShapeDirection {
     /** Usually clockwise */Normal = 1, /** Counter clockwise */Reversed = 3,
     Unknown2 = 2, Unknown0 = 0, // workaround with issue_1732.json, precomposition.json
@@ -569,8 +566,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 /// `o` for a segment to be `[0, 0]`. If you want it quadratic, set them to 2/3rd of what the
 /// quadratic control point would be. If you want a point to be smooth you need to make sure 
 /// that `i = -o`. "A Primer on Bézier Curves": https://pomax.github.io/bezierinfo/
-#[derive(Clone, Debug, Deserialize, Serialize)]
-/** Single bezier curve */ pub struct Bezier {
+#[derive(Clone, Deserialize, Serialize)] /** Single bezier curve */ pub struct Bezier {
     #[serde(rename = "c", default)] pub closed: bool,
     /// These points are along the bezier path.
     #[serde(rename = "v")] pub vp: Vec<Vector2D>,
@@ -580,27 +576,26 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
     #[serde(rename = "o")] pub ot: Vec<Vector2D>, // Cubic control points, outgoing tangent
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-/** Group transform */ pub struct TransformShape {
+#[derive(Deserialize, Serialize)] /** Group transform */ pub struct TransformShape {
     #[serde(flatten)] pub elem: ShapeElement,
     #[serde(flatten)] pub trfm: Transform,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct RoundedCorners {
+#[derive(Deserialize, Serialize)] pub struct RoundedCorners {
     #[serde(flatten)] pub elem: ShapeElement, /// Rounds corners of other shapes
     #[serde(rename = "r")] pub radius: Value,
 }
 
 /// Interpolates bezier vertices towards the center of the shape,
 /// and tangent handles away from it (or vice-versa).
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct PuckerBloat {
+#[derive(Deserialize, Serialize)] pub struct PuckerBloat {
     #[serde(flatten)] pub elem: ShapeElement,
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")] /// Amount as a percentage
     pub amount: Option<Value>,
 }
 
 /// Interpolates the shape with its center point and bezier tangents with the opposite direction
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct OffsetPath {
+#[derive(Deserialize, Serialize)] pub struct OffsetPath {
     #[serde(flatten)] pub elem: ShapeElement,
     #[serde(default)] pub lj: LineJoin,
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")] pub amount: Option<Value>,
@@ -608,7 +603,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 }
 
 /// Duplicates previous shapes in a group
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Repeater {
+#[derive(Deserialize, Serialize)] pub struct Repeater {
     #[serde(flatten)] pub elem: ShapeElement,
     /** Number of copies */ #[serde(rename = "c")] pub cnt: Value,
     /** Stacking order   */ #[serde(rename = "m", default)] pub order: Composite,
@@ -617,11 +612,11 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 }
 
 /// How to stack copies in a repeater
-#[derive(Clone, Copy, Debug, Default, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Default, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum Composite { #[default] Above = 1, Below, }
 
 /// Transform used by a repeater, the transform is applied to each subsequent repeated object.
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct RepeaterTransform {
+#[derive(Deserialize, Serialize)] pub struct RepeaterTransform {
     #[serde(flatten)] pub trfm: Transform,
     /// Opacity of the first repeated object.
     #[serde(skip_serializing_if = "Option::is_none")] pub so: Option<Value>,
@@ -630,7 +625,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 }
 
 /// Shape Element that can contain other shapes
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Group {
+#[derive(Deserialize, Serialize)] pub struct Group {
     #[serde(flatten)] pub elem: ShapeElement,   /// Index used in expressions
     #[serde(skip_serializing_if = "Option::is_none", rename = "cix")]
     #[cfg(feature = "expression")] pub ix: Option<u32>,     /// Number Of Properties
@@ -641,7 +636,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 /// This is mostly useful for shapes with a stroke and not a fill.
 /// It takes the path defined by shapes and only shows a segment of the resulting bezier
 /// data. Also has the attributes from Modifier.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 /** Trims shapes into a segment */ pub struct TrimPath {
     #[serde(flatten)] pub elem: ShapeElement,
     /** Segment start */ #[serde(rename = "s")] pub start: Value,
@@ -652,28 +647,28 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 }
 
 /// How to handle multiple shapes in trim path
-#[derive(Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum TrimMultiple { Simultaneously = 1, Individually, }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Twist {
+#[derive(Deserialize, Serialize)] pub struct Twist {
     #[serde(flatten)] pub elem: ShapeElement,
     #[serde(rename = "a", skip_serializing_if = "Option::is_none")] pub angle: Option<Value>,
     #[serde(rename = "c", skip_serializing_if = "Option::is_none")]
     pub center: Option<Animated2D>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Merge {
+#[derive(Deserialize, Serialize)] pub struct Merge {
     #[serde(flatten)] pub elem: ShapeElement,   /// Boolean operator on shapes
     #[serde(default)] pub mm: MergeMode,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Default, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum MergeMode { #[default] Normal = 1,
     Add, Subtract, Intersect, ExcludeIntersect,
 }
 
 /// Changes the edges of affected shapes into a series of peaks and valleys of uniform size
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct ZigZag {
+#[derive(Deserialize, Serialize)] pub struct ZigZag {
     #[serde(flatten)] pub elem: ShapeElement,   /// Frequency, Number of ridges per segment
     #[serde(skip_serializing_if = "Option::is_none", rename = "r")] pub freq: Option<Value>,
     /// Amplitude, Distance between peaks and troughs
@@ -682,12 +677,12 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
     #[serde(skip_serializing_if = "Option::is_none")] pub   pt: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextLayer { // Layer with some text
+#[derive(Deserialize, Serialize)] pub struct TextLayer { // Layer with some text
     #[serde(flatten)] pub vl: VisualLayer, pub t: TextData,
 }
 
 /// Contains all the text data and animation
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextData {
+#[derive(Deserialize, Serialize)] pub struct TextData {
     #[serde(rename = "a")] pub ranges: Vec<TextRange>,
     #[serde(rename = "d")] pub    doc: AnimatedTextDocument,
     #[serde(rename = "m")] pub  align: TextAlignmentOptions,
@@ -695,7 +690,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 }
 
 /// Range of text with custom animations and style
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextRange {
+#[derive(Deserialize, Serialize)] pub struct TextRange {
     //#[serde(default, skip_serializing_if = "String::is_empty")] /** Name */ pub nm: String,
     #[serde(skip_serializing_if = "Option::is_none", rename = "s")]
     pub select: Option<TextRangeSelector>,
@@ -703,7 +698,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
     pub  style: Option<TextStyle>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextStyle {
+#[derive(Deserialize, Serialize)] pub struct TextStyle {
     #[serde(flatten)] pub trfm: Transform,            /// Letter Spacing
     #[serde(skip_serializing_if = "Option::is_none", rename = "t")] pub spacing: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")] /// Blur
@@ -736,7 +731,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
     pub fo: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextRangeSelector {
+#[derive(Deserialize, Serialize)] pub struct TextRangeSelector {
     #[serde(skip_serializing_if = "Option::is_none")] /// Randomize
     pub rn: Option<IntBool>,
 
@@ -756,11 +751,11 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
     #[serde(skip_serializing_if = "Option::is_none", rename = "e")] pub   end: Option<Value>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize_repr, Serialize_repr)] /// Unit type for a text selector
+#[derive(Clone, Copy, Deserialize_repr, Serialize_repr)] /// Unit type for a text selector
 #[repr(u8)] pub enum TextRangeUnits { Percent = 1, Index, }
 
 /// Animated property representing the text contents
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct AnimatedTextDocument {
+#[derive(Deserialize, Serialize)] pub struct AnimatedTextDocument {
     /** A keyframe containing a text document */ pub k: Vec<TextDocumentKeyframe>,
     #[serde(default, skip_serializing_if = "String::is_empty")] /// Expression
     #[cfg(feature = "expression")] pub x: String,
@@ -768,12 +763,12 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
     #[cfg(feature = "expression")] pub sid: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextDocumentKeyframe {
+#[derive(Deserialize, Serialize)] pub struct TextDocumentKeyframe {
     #[serde(rename = "s")] pub value: TextDocument,
     #[serde(rename = "t")] pub start: f32, // Time
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextDocument {
+#[derive(Deserialize, Serialize)] pub struct TextDocument {
     /// Text, note that newlines are encoded with \r
     #[serde(rename = "t")] pub ts: String,
     #[serde(rename = "f")] /** Font Family */ pub ff: String,
@@ -797,29 +792,29 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
     pub ls: Option<f32>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Default, Deserialize_repr, Serialize_repr)]
 /** Text alignment / justification */ #[repr(u8)] pub enum TextJustify {
     #[default] Left = 0, Right, Center, JustifyWithLastLineLeft,
     JustifyWithLastLineRight, JustifyWithLastLineCenter, JustifyWithLastLineFull,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum TextCaps { Regular = 0, AllCaps, SmallCaps, }
 
 /// Used to change the origin point for transformations,
 /// such as Rotation, that may be applied to the text string.
 /// The origin point for each character, word, or line can be changed.
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextAlignmentOptions {
+#[derive(Deserialize, Serialize)] pub struct TextAlignmentOptions {
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")] /// Group alignment
     pub align: Option<MultiD>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "g")] /// Anchor point grouping
     pub group: Option<TextGrouping>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum TextGrouping { Characters = 1, Word, Line, All, }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct TextFollowPath {
+#[derive(Deserialize, Serialize)] pub struct TextFollowPath {
     /// Mask, Index of the mask to use
     #[serde(skip_serializing_if = "Option::is_none", rename = "m")] pub mask: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "f")] /// First Margin
@@ -834,19 +829,19 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
     pub    perp: Option<Value>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum TextBased { Characters = 1, ExcludingSpaces, Words, Lines, }
 
 /// Defines the function used to determine the interpolating factor on a text range selector.
-#[derive(Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum TextShape { Square = 1, RampUp, RampDown, Triangle, Round, Smooth, }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
+#[derive(Deserialize, Serialize)] #[serde(untagged)]
 pub enum AssetsItem { Image(Image), Sound(Sound), DataSource(DataSource),
     Precomp(Precomp), DebugAny(AnyAsset),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Image { // External image
+#[derive(Deserialize, Serialize)] pub struct Image { // External image
     #[serde(flatten)] pub file: FileAsset,
     #[serde(default)] pub w: f32, //  Width of the image
     #[serde(default)] pub h: f32, // Height of the image
@@ -858,13 +853,13 @@ pub enum AssetsItem { Image(Image), Sound(Sound), DataSource(DataSource),
 }
 
 /// External data source, usually a JSON file
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct DataSource {
+#[derive(Deserialize, Serialize)] pub struct DataSource {
     #[serde(flatten)] pub file: FileAsset,
     #[serde(rename = "t")] /** default `3` const */ pub r#type: u32,
 }
 
 type Sound = FileAsset; // External sound
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct FileAsset {
+#[derive(Deserialize, Serialize)] pub struct FileAsset {
     #[serde(rename = "p")] /** Filename or data url */ pub url: String,
     #[serde(flatten)] pub base: AssetBase,
     /// Path to the directory containing a file
@@ -877,23 +872,22 @@ type Sound = FileAsset; // External sound
 /// file that can be referenced using precomp layers. Within a precomposition you can have
 /// precomp layers showing other precompositions, as long as you don't create a dependency
 /// cycle. https://lottiefiles.github.io/lottie-docs/breakdown/precomps/
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Precomp {
+#[derive(Deserialize, Serialize)] pub struct Precomp {
     #[serde(flatten)] pub base: AssetBase,
     pub layers: Vec<LayersItem>,
     #[serde(default = "defaults::animation_fr")] pub fr: f32,
     #[serde(default, rename = "xt")] /** Extra composition */ pub extra: IntBool,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct AssetBase {
+#[derive(Deserialize, Serialize)] pub struct AssetBase {
     /** Unique identifier used by layers when referencing this asset */ pub id: String,
     //#[serde(default, skip_serializing_if = "String::is_empty")] /** Name */ pub nm: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct FontList { pub list: Vec<Font>, }
+#[derive(Default, Deserialize, Serialize)] pub struct FontList { pub list: Vec<Font>, }
 
 /// Describes how a font with given settings should be loaded
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Font {
+#[derive(Deserialize, Serialize)] pub struct Font {
     /// Name used by text documents to reference this font,
     /// usually it's `fFamily` followed by `fStyle`
     #[serde(rename = "fName")]   pub   name: String, // default "sans-Regular"
@@ -911,10 +905,10 @@ pub struct FontList { pub list: Vec<Font>, }
     #[serde(skip_serializing_if = "Option::is_none")] pub origin: Option<FontPathOrigin>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum FontPathOrigin { Local = 0, CssUrl, ScriptUrl, FontUrl, }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] /// Defines character shapes
+#[derive(Deserialize, Serialize)] /// Defines character shapes
 pub struct CharacterData {
     #[serde(rename = "fFamily")] pub family: String,
     pub style: String,
@@ -924,16 +918,16 @@ pub struct CharacterData {
     pub  size: f32,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] #[serde(untagged)]
+#[derive(Deserialize, Serialize)] #[serde(untagged)]
 pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>), }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] /// Shapes forming the character
-pub struct CharacterShapes {
+/// Shapes forming the character
+#[derive(Deserialize, Serialize)] pub struct CharacterShapes {
     #[serde(default, skip_serializing_if = "Vec::is_empty")] pub shapes: ShapeList,
 }
 
 /// Defines a character as a precomp layer
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct CharacterPrecomp {
+#[derive(Deserialize, Serialize)] pub struct CharacterPrecomp {
     /// ID of the precomp as specified in the assets
     #[serde(rename = "refId")] pub rid: String,
     #[serde(skip_serializing_if = "Option::is_none")] pub ks: Option<Transform>,
@@ -945,21 +939,21 @@ pub struct CharacterShapes {
 }
 
 /// Defines named portions of the composition.
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Marker {
+#[derive(Deserialize, Serialize)] pub struct Marker {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     /** Comment  */ pub cm: String,
     /** Time     */ #[serde(default)] pub tm: f32,
     /** Duration */ #[serde(default)] pub dr: f32,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct MotionBlur { // Motion blur settings
+#[derive(Deserialize, Serialize)] pub struct MotionBlur { // Motion blur settings
     /** Shutter Angle in degrees */ #[serde(default)] pub  sa: f32,
     /** Shutter Phase in degrees */ #[serde(default)] pub  sp: f32,
     /** Samples per Frame        */ #[serde(default)] pub spf: f32,
     /** Adaptive Sample Limit    */ #[serde(default)] pub asl: f32,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Metadata {
+#[derive(Deserialize, Serialize)] pub struct Metadata {
     #[serde(default, skip_serializing_if = "String::is_empty")] pub author: String,
     #[serde(default, skip_serializing_if = "String::is_empty", rename = "d")] pub   desc: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -970,19 +964,19 @@ pub struct CharacterShapes {
         deserialize_with = "deserialize_strarray")] pub keywords: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct UserMetadata {
+#[derive(Deserialize, Serialize)] pub struct UserMetadata {
     #[serde(default, rename = "customProps")] pub cprops: serde_json::Value, // XXX:
     #[serde(default, skip_serializing_if = "String::is_empty")] pub filename: String,
 }
 
 #[allow(unused)] type Slots = serde_json::Value; // XXX: Available property overrides
-/* #[derive(Clone, Debug, Deserialize, Serialize)] pub struct Slots {
+/* #[derive(Deserialize, Serialize)] pub struct Slots {
     // patternProperties: any of MultiD/ColorValue/Position/ShapeProperty/Value
 } */
 
 /// Layers can have post-processing effects applied to them.
 /// Many effects have unused values which are labeled with a number.
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Effect { // Layer effect
+#[derive(Deserialize, Serialize)] pub struct Effect { // Layer effect
     pub ef: Vec<EffectValuesItem>,
     pub ty: EffectType,
     #[serde(default = "defaults::effect_en")] /** Enabled */ pub en: IntBool,
@@ -992,8 +986,7 @@ pub struct CharacterShapes {
     /** Effect Index */ #[serde(default)] pub ix: u32,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
-#[repr(u8)] pub enum EffectType {
+#[derive(Clone, Copy, Deserialize_repr, Serialize_repr)] #[repr(u8)] pub enum EffectType {
     /// Some lottie files use `ty` = 5 for many different effects.
     /// Sometimes these are used together with expressions.
     /*  5 */Custom = 5,
@@ -1026,7 +1019,7 @@ pub struct CharacterShapes {
     // Bulge, WaveWarp, ?
 }
 
-#[derive(Clone, Debug, Serialize)] #[serde(untagged)] pub enum EffectValuesItem {
+#[derive(Serialize)] #[serde(untagged)] pub enum EffectValuesItem {
     /*  0 */Slider(EffectValue<Value>),
     /*  1 */Angle (EffectValue<Value>),
     /*  3 */Point (EffectValue<Animated2D>),
@@ -1039,14 +1032,14 @@ pub struct CharacterShapes {
     /* 10 */EffectLayer(EffectValue<Value>),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct EffectValue<T> {
+#[derive(Deserialize, Serialize)] pub struct EffectValue<T> {
     //* Effect (value) type */ pub ty: u32,
     /** Effect Index */ pub ix: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "v")] pub value: Option<T>,
     //#[serde(flatten)] pub vo: VisualObject,
 }
 
-#[derive(Clone, Debug, Serialize)] #[serde(untagged)] pub enum LayerStyleItem {
+#[derive(Serialize)] #[serde(untagged)] pub enum LayerStyleItem {
     /* 2 */InnerShadow(InnerShadowStyle),
     /* 1 */DropShadow  (DropShadowStyle),
     /* 3 */OuterGlow(OuterGlowStyle),
@@ -1058,20 +1051,20 @@ pub struct CharacterShapes {
     /* 8 */GradientOverlay(GradientOverlayStyle),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct StrokeStyle { // Stroke / frame
+#[derive(Deserialize, Serialize)] pub struct StrokeStyle { // Stroke / frame
     //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "s")] pub size: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct DropShadowStyle {
+#[derive(Deserialize, Serialize)] pub struct DropShadowStyle {
     #[serde(flatten)] pub inner: InnerShadowStyle,
     /// Layer Conceal, Layer knowck out drop shadow
     #[serde(skip_serializing_if = "Option::is_none")] pub lc: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct InnerShadowStyle {
+#[derive(Deserialize, Serialize)] pub struct InnerShadowStyle {
     //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
@@ -1088,7 +1081,7 @@ pub struct CharacterShapes {
     #[serde(skip_serializing_if = "Option::is_none", rename = "d")] pub distance: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct OuterGlowStyle {
+#[derive(Deserialize, Serialize)] pub struct OuterGlowStyle {
     //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
      pub color: Option<ColorValue>,
@@ -1102,12 +1095,12 @@ pub struct CharacterShapes {
     #[serde(skip_serializing_if = "Option::is_none", rename = "j")] pub jitter: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct InnerGlowStyle {
+#[derive(Deserialize, Serialize)] pub struct InnerGlowStyle {
     #[serde(flatten)] pub outer: OuterGlowStyle,    /// Source
     #[serde(skip_serializing_if = "Option::is_none")] pub sr: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct BevelEmbossStyle {
+#[derive(Deserialize, Serialize)] pub struct BevelEmbossStyle {
     //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")] /// Local light angle
     pub angle: Option<Value>,
@@ -1137,7 +1130,7 @@ pub struct CharacterShapes {
     pub hc: Option<ColorValue>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct SatinStyle {
+#[derive(Deserialize, Serialize)] pub struct SatinStyle {
     //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
@@ -1152,7 +1145,7 @@ pub struct CharacterShapes {
     #[serde(skip_serializing_if = "Option::is_none", rename = "in")] pub invert: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct ColorOverlayStyle {
+#[derive(Deserialize, Serialize)] pub struct ColorOverlayStyle {
     //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
@@ -1160,7 +1153,7 @@ pub struct CharacterShapes {
     #[serde(skip_serializing_if = "Option::is_none")] /** Blend Mode */ pub bm: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct GradientOverlayStyle {
+#[derive(Deserialize, Serialize)] pub struct GradientOverlayStyle {
     //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "o")] pub opacity: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")] /// Local light angle
@@ -1178,17 +1171,17 @@ pub struct CharacterShapes {
     #[serde(skip_serializing_if = "Option::is_none")] pub gt: Option<GradientType>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Default, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum GradientType { #[default] Linear = 1, Radial, }
 
 //type LayerStyle = VisualObject; // Style applied to a layer
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct LayerStyle {
+#[derive(Deserialize, Serialize)] pub struct LayerStyle {
     //* Style type */ pub ty: u32
     //#[serde(flatten)] pub vo: VisualObject,
 }
 
 /// Bezier shape used to mask/clip a layer
-#[derive(Clone, Debug, Deserialize, Serialize)] pub struct Mask {
+#[derive(Deserialize, Serialize)] pub struct Mask {
     //#[serde(flatten)] pub vo: VisualObject,
     #[serde(default)] /** Inverted */ pub inv: bool,
     #[serde(default)] pub mode: MaskMode,
@@ -1199,7 +1192,7 @@ pub struct CharacterShapes {
 
 /// How masks interact with each other. See
 /// https://helpx.adobe.com/after-effects/using/alpha-channels-masks-mattes.html
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)] pub enum MaskMode {
+#[derive(Clone, Copy, Default, Deserialize, Serialize)] pub enum MaskMode {
     #[serde(rename = "n")] None,
     #[serde(rename = "a")] Add,
     #[serde(rename = "s")] Subtract,

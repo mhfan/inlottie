@@ -2,21 +2,21 @@
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
 //  Represents boolean values as an integer. 0 is false, 1 is true.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
 #[serde(transparent)] pub struct IntBool(u8);
 
 impl IntBool { #[inline] pub fn as_bool(&self) -> bool { (*self).into() } }
 impl From<IntBool> for bool { #[inline] fn from(value: IntBool) -> Self { value.0 != 0 } }
 impl From<bool> for IntBool { fn from(value: bool) -> Self { Self(if value { 1 } else { 0 }) } }
 
-/* #[derive(Debug, Clone, Copy)] pub struct Rgb  { pub r: u8, pub g: u8, pub b: u8 }
+/* #[derive(Clone, Copy)] pub struct Rgb  { pub r: u8, pub g: u8, pub b: u8 }
 impl Rgb {  #[inline] pub fn new_u8 (r:  u8, g:  u8, b:  u8) -> Self { Self { r, g, b } }
             #[inline] pub fn new_f32(r: f32, g: f32, b: f32) -> Self { Self {
         r: (r * 255.) as _, g: (g * 255.) as _, b: (b * 255.) as _
     } }
 } */
 
-#[derive(Debug, Clone, Copy)] pub struct Rgba { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }
+#[derive(Clone, Copy)] pub struct Rgba { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }
 impl Default for Rgba { #[inline] fn default() -> Self { Self { r: 0, g: 0, b: 0, a: 255 } } }
 
 impl Rgba {
@@ -68,7 +68,7 @@ impl core::fmt::Display for Rgba {
     Result<S::Ok, S::Error> { serializer.serialize_str(&c.to_string()) }
 
 // euclid::default::Vector2D<f32>;  // Point/Size, Position/Scale
-#[derive(Debug, Clone, Copy)] pub struct Vector2D { pub x: f32, pub y: f32 }
+#[derive(Clone, Copy)] pub struct Vector2D { pub x: f32, pub y: f32 }
 //impl From<Vector2D> for (f32, f32) { fn from(val: Vector2D) -> Self { (val.x, val.y) } }
 impl From<(f32, f32)> for Vector2D {
     #[inline] fn from(val: (f32, f32)) -> Self { Self { x: val.0, y: val.1 } }
@@ -87,7 +87,7 @@ impl Serialize for Vector2D {
         Result<S::Ok, S::Error> { [self.x, self.y].serialize(serializer) }
 }
 
-#[derive(Clone, Debug)] pub struct ColorList(pub Vec<(f32, Rgba)>); // (offset, color)
+#[derive(Clone)] pub struct ColorList(pub Vec<(f32, Rgba)>); // (offset, color)
 
 impl<'de> Deserialize<'de> for ColorList {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -164,7 +164,7 @@ impl<'de> Deserialize<'de> for LayersItem {
             2 | 15 => Self::Image(ImageLayer::deserialize(value).map_err(D::Error::custom)?),
             3 => Self::Null(VisualLayer::deserialize(value).map_err(D::Error::custom)?),
             4 => Self::Shape(ShapeLayer::deserialize(value).map_err(D::Error::custom)?),
-            5 => Self::Text ( TextLayer::deserialize(value).map_err(D::Error::custom)?),
+            5 => Self::Text (Box::new(TextLayer::deserialize(value).map_err(D::Error::custom)?)),
             6 => Self::Audio(AudioLayer::deserialize(value).map_err(D::Error::custom)?),
            13 => Self::Camera(CameraLayer::deserialize(value).map_err(D::Error::custom)?),
 
@@ -262,7 +262,7 @@ impl<'de> Deserialize<'de> for LayerStyleItem {
     }
 }
 
-#[derive(Clone, Debug, Serialize)] pub struct AnyAsset(AssetBase); //serde_json::Value
+#[derive(Serialize)] pub struct AnyAsset(AssetBase); //serde_json::Value
 impl<'de> Deserialize<'de> for AnyAsset {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
@@ -273,7 +273,7 @@ impl<'de> Deserialize<'de> for AnyAsset {
     }
 }
 
-#[derive(Clone, Debug, Serialize)] pub struct AnyValue(serde_json::Value);
+#[derive(Clone, Serialize)] pub struct AnyValue(serde_json::Value);
 impl<'de> Deserialize<'de> for AnyValue {
     #[inline] fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
@@ -310,16 +310,16 @@ impl<'de> Deserialize<'de> for AnyValue {
         //assert_ser_tokens(&cont, &tokens);
     }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)] struct Container {
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)] struct Container {
     #[serde(serialize_with = "serialize_with_type")] layers: Vec<TestLayersItem>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)] enum TestLayersItem { SomeLayer(SomeLayer),
     //Color(Rgba), //IntBool(IntBool), //Vector2D(Vector2D),
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)] struct SomeLayer {
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)] struct SomeLayer {
     ind: u32, nm: String,
 }
 
