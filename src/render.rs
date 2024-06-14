@@ -382,8 +382,9 @@ impl Transform {
     }
 }
 
-struct TM2DwO(TM2D, f32);
-impl   TM2DwO {
+#[derive(Clone)] struct TM2DwO(TM2D, f32);
+impl Default for TM2DwO { fn default() -> Self { Self(TM2D::identity(), 1.) } }
+impl TM2DwO {
     #[inline] fn multiply(&mut self, other: &TM2DwO) {
         self.0  .multiply(&other.0);  self.1 *= other.1;
     }
@@ -434,8 +435,10 @@ impl Animation {
                         vl.base.ind.and_then(|ind| if ind == pid {
                             Some(vl.ks.to_matrix(fnth, vl.ao)) } else { None })));
 
-                if let Some(ptm) = &ptm { trfm.multiply(ptm) } else { unreachable!() }
-            };  if let Some(ptm) =  ptm { trfm.multiply(ptm) }  trfm
+                if let Some(ptm) = &ptm { trfm.multiply(ptm) } else {
+                    unreachable!()  //Default::default()
+                }
+            };  trfm
         };
 
         #[inline] fn get_visual_layer(layer: &LayersItem) -> Option<&VisualLayer> {
@@ -457,13 +460,27 @@ impl Animation {
             vl.base.hd || fnth < vl.base.ip || vl.base.op <= fnth || fnth < vl.base.st
         }
 
+        let last_trfm = canvas.transform();
         for layer in layers.iter().rev() { match layer {
             LayersItem::Shape(shpl) => if !need_to_hide(&shpl.vl, fnth) {
-                let trfm = get_matrix(&shpl.vl, fnth);
+                let mut trfm = get_matrix(&shpl.vl, fnth);
+                canvas.set_transform(&trfm.0);
+                //canvas.set_global_alpha(trfm.1);
+
+                // XXX: transform are set correctly already, this is merely for
+                // computing alpha/opacity correctly along rendering stack
+                if let Some(ptm) = ptm { trfm.multiply(ptm) }
 
                 prepare_matte(canvas, &shpl.vl, &mut matte);
-                Self::render_shapes(canvas, &trfm, &shpl.shapes, fnth, shpl.vl.ao);
-                 render_matte(canvas, &shpl.vl, &mut matte, &trfm, fnth);
+                let (draws, mut ts) =
+                    convert_shapes(&shpl.shapes, fnth, shpl.vl.ao);
+                canvas.set_transform(&ts.0);    ts.multiply(&trfm);
+                canvas.set_global_alpha(ts.1);
+
+                render_shapes(canvas, &trfm, &draws);
+                render_mattel(canvas, &shpl.vl, &mut matte, fnth);
+
+                canvas.reset_transform();    canvas.set_transform(&last_trfm);
             }
             LayersItem::PrecompLayer(pcl) => if !need_to_hide(&pcl.vl, fnth) {
                 if let Some(pcomp) = self.assets.iter().find_map(|asset|
@@ -471,28 +488,38 @@ impl Animation {
                         if pcomp.base.id == pcl.rid => Some(pcomp), _ => None }) {
                     let fnth = (fnth - pcl.vl.base.st) / pcl.vl.base.sr;
 
-                    let trfm = get_matrix(&pcl.vl, fnth);
+                    let mut trfm = get_matrix(&pcl.vl, fnth);
                     let fnth = pcl.tm.as_ref().map_or(fnth, // handle time remapping
                         |tm| tm.get_value(fnth) * pcomp.fr);
 
+                    canvas.set_transform(&trfm.0);
+                    if let Some(ptm) = ptm { trfm.multiply(ptm) }
+                    canvas.set_global_alpha(trfm.1);
+
                     prepare_matte(canvas, &pcl.vl, &mut matte);
                     self.render_layers(canvas, Some(&trfm), &pcomp.layers, fnth);
-                     render_matte(canvas, &pcl.vl, &mut matte, &trfm, fnth);
+                    render_mattel(canvas, &pcl.vl, &mut matte, fnth);
+
+                    canvas.reset_transform();    canvas.set_transform(&last_trfm);
                 }   // clipping(pcl.w, pcl.h)?
             }
             LayersItem::SolidColor(scl) => if !need_to_hide(&scl.vl, fnth) {
                 let trfm = get_matrix(&scl.vl, fnth);
-                prepare_matte(canvas, &scl.vl, &mut matte);
+                canvas.set_transform(&trfm.0);
+
+                //if let Some(ptm) = ptm { trfm.multiply(ptm) }
+                //canvas.set_global_alpha(trfm.1); // should be fixed as 1.0?
 
                 let mut path = VGPath::new();
                 path.rect((self.w as f32 - scl.sw) / 2., // 0., 0.,
-                            (self.h as f32 - scl.sh) / 2., scl.sw, scl.sh);
+                          (self.h as f32 - scl.sh) / 2., scl.sw, scl.sh);
                 let paint = VGPaint::color(VGColor::rgb(scl.sc.r, scl.sc.g, scl.sc.b));
 
-                let last_trfm =    canvas.transform();
-                canvas.set_transform(&trfm.0);  canvas.fill_path(&path, &paint);
-                canvas.reset_transform();       canvas.set_transform(&last_trfm);
-                 render_matte(canvas, &scl.vl, &mut matte, &trfm, fnth);
+                prepare_matte(canvas, &scl.vl, &mut matte);
+                canvas.fill_path(&path, &paint);
+                render_mattel(canvas, &scl.vl, &mut matte, fnth);
+
+                canvas.reset_transform();   canvas.set_transform(&last_trfm);
             }
             LayersItem::Image(_) | LayersItem::Text(_)  | LayersItem::Data(_)  |
             LayersItem::Audio(_) | LayersItem::Camera(_) => dbg!(),     // TODO:
@@ -501,100 +528,140 @@ impl Animation {
             _ => (),
         } }
     }
+}
 
-    /// collect and convert shapes to paths, modify/change the paths,
-    /// and render paths with style(fill/stroke/gradient) and transform
-    fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>,
-        ptm: &TM2DwO, coll: &[ShapeListItem], fnth: f32, ao: IntBool) {
+/// calculate transform matrix, convert shapes to paths, modify/change the paths,
+/// and convert style(fill/stroke/gradient) to draw items, recursively
+fn convert_shapes(shapes: &[ShapeListItem], fnth: f32, ao: IntBool) ->
+    (Vec<DrawItem>, TM2DwO) {
+    let trfm = if let Some(ShapeListItem::Transform(ts)) =
+        shapes.iter().rev().find(|&shape|
+        matches!(shape, ShapeListItem::Transform(ts) if !ts.elem.hd)) {
+        ts.trfm.to_matrix(fnth, ao)
+    } else { Default::default() };
 
-        let (mut path, mut trfm) = (vec![], None);
-        let  mut style = vec![];
-        let  mut repeater = vec![];
-
-        for (idx, shape) in coll.iter().enumerate() { match shape {
-            ShapeListItem::Rectangle(rect) if !rect.base.elem.hd =>
-                path.push((Box::new(rect.to_path(fnth)), idx)),
-            ShapeListItem::Polystar(star)   if !star.base.elem.hd =>
-                path.push((Box::new(star.to_path(fnth)), idx)),
-            ShapeListItem::Ellipse(elps)     if !elps.base.elem.hd =>
-                path.push((Box::new(elps.to_path(fnth)), idx)),
-            ShapeListItem::Path(curv)       if !curv.base.elem.hd =>
-                path.push((Box::new(curv.to_path(fnth)), idx)),
-
-            // styles affect on all preceding paths ever before
-            ShapeListItem::Fill(fill)   if !fill.elem.hd =>
-                style.push((Box::new(fill.to_paint(fnth)), None, idx)),
-            ShapeListItem::Stroke(line) if !line.elem.hd =>
-                style.push((Box::new(line.to_paint(fnth)),
-                       Some(Box::new(line.get_dash(fnth))), idx)),
-            ShapeListItem::GradientFill(grad)   if !grad.elem.hd =>
-                style.push((Box::new(grad.to_paint(fnth)), None, idx)),
-            ShapeListItem::GradientStroke(grad) if !grad.elem.hd =>
-                style.push((Box::new(grad.to_paint(fnth)),
-                       Some(Box::new(grad.get_dash(fnth))), idx)),
-            ShapeListItem::NoStyle(_) => eprintln!("Nothing to do here?"),
-
-            // FIXME: collect paths(with transform) from sub Group for upper Styles/Modfiers
-            ShapeListItem::Group(group) if !group.elem.hd => {
-                Self::render_shapes(canvas, trfm.as_ref().unwrap_or(ptm),
-                    &group.shapes, fnth, ao);
-            }
-
-            // TODO: move and repeat preceding (Shape/Style) items into new Groups
-            ShapeListItem::Repeater(mdfr) if !mdfr.elem.hd =>
-                repeater = repeat_shape(mdfr, fnth),
-
-            // other modifiers usally just affect on all preceding paths ever before
-            ShapeListItem::Trim(mdfr) if !mdfr.elem.hd => {
-                if mdfr.multiple.is_some_and(|ml|
-                    matches!(ml, TrimMultiple::Simultaneously)) {
-                    path.iter_mut().for_each(|(path, _)|
-                        *path =        Box::new(trim_path(mdfr, path.verbs(),  fnth)));
-                } else { path = vec![ (Box::new(trim_path(mdfr,
-                            path.iter().flat_map(|(path, _)|    path.verbs()), fnth)), idx) ];
-                }
-            }
-
-            ShapeListItem::RoundedCorners(_) |  //round_corners(&mdfr, &mut path, fnth);
-            ShapeListItem::PuckerBloat(_) | ShapeListItem::Twist(_) |
-            ShapeListItem::OffsetPath(_)  | ShapeListItem::Merge(_) |
-            ShapeListItem::ZigZag(_) => dbg!(),     // TODO:
-
-            ShapeListItem::Transform(ts) if !ts.elem.hd => {
-                let mut tm = ts.trfm.to_matrix(fnth, ao);
-                tm.multiply(ptm);  trfm = Some(tm);
-            }
-
-            _ => (),
-        } }
-
-        let trfm = trfm.as_ref().unwrap_or(ptm);
-        let last_trfm = canvas.transform();     //canvas.save();
-        //canvas.global_composite_operation(CompOp::DestinationOver);
-
-        let mut do_rendering = |trfm: &TM2DwO| {
-            canvas.set_global_alpha(trfm.1);    canvas.set_transform(&trfm.0);
-
-            for (style, dash, si) in
-                 style.iter().rev() {
-                //path.binary_search_by(|(_, idx)| idx.cmp(sz)).unwrap_err();
-                for (path, _) in path.iter().filter(
-                    |(_, idx)| idx < si).rev() {
-                    if let Some(dash) = &dash {
-                        if dash.1.is_empty() {  canvas.stroke_path(path, style);
-                        } else { canvas.stroke_path(&split_dash(path, dash), style); }
-                    } else { canvas.fill_path(path, style); }
-                }
-            }   canvas.reset_transform();       canvas.set_transform(&last_trfm);
-        };
-
-        if  repeater.is_empty() { do_rendering(trfm); }
-            repeater.iter().rev().for_each(|ts| {
-            let mut ts = TM2DwO(ts.0, ts.1);
-            ts.multiply(trfm);    do_rendering(&ts);
-        }); canvas.set_global_alpha(1.);    //canvas.restore();
-        //canvas.global_composite_operation(CompOp::SourceOver);
+    fn modify_shapes(draws: &mut [DrawItem], closure: &mut impl FnMut(&mut VGPath)) {
+        draws.iter_mut().rev().for_each(|draw| match draw {
+            DrawItem::Group(grp, _) => modify_shapes(grp, closure),
+            DrawItem::Repli(grp, _) => modify_shapes(grp, closure),
+            DrawItem::Shape(path) => closure(path),
+            _ => (), // skip/ignore Style
+        });
     }
+
+    let mut draws = vec![];
+    for shape in shapes.iter() { match shape {
+        ShapeListItem::Rectangle(rect)    if !rect.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(rect.to_path(fnth)))),
+        ShapeListItem::Polystar(star) if !star.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(star.to_path(fnth)))),
+        ShapeListItem::Ellipse(elps)        if !elps.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(elps.to_path(fnth)))),
+        ShapeListItem::Path(curv)          if !curv.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(curv.to_path(fnth)))),
+
+        // styles affect on all preceding paths ever before
+        ShapeListItem::Fill(fill)   if !fill.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(fill.to_paint(fnth)), None)),
+        ShapeListItem::Stroke(line) if !line.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(line.to_paint(fnth)),
+                Some(line.get_dash(fnth)))),
+        ShapeListItem::GradientFill(grad)   if !grad.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(grad.to_paint(fnth)), None)),
+        ShapeListItem::GradientStroke(grad) if !grad.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(grad.to_paint(fnth)),
+                Some(grad.get_dash(fnth)))),
+        ShapeListItem::NoStyle(_) => eprintln!("Nothing to do here?"),
+
+        ShapeListItem::Group(group) if !group.elem.hd => {
+            let (grp, trfm) = convert_shapes(&group.shapes, fnth, ao);
+            draws.push(DrawItem::Group(grp, trfm));
+        }
+
+        ShapeListItem::Repeater(mdfr) if !mdfr.elem.hd => {
+            let grp = draws;    draws = vec![];
+            // repeat preceding (Shape/Style) items into new Groups?
+            //get_repeater(mdfr, fnth).into_iter().for_each(|ts|
+            //    draws.push(DrawItem::Group(grp.clone(), ts)));
+            draws.push(DrawItem::Repli(grp, get_repeater(mdfr, fnth)));
+        }
+
+        // other modifiers usally just affect on all preceding paths ever before
+        ShapeListItem::Trim(mdfr) if !mdfr.elem.hd => {
+            if mdfr.multiple.is_some_and(|ml|
+                matches!(ml, TrimMultiple::Simultaneously)) {
+                modify_shapes(&mut draws, &mut |path|
+                    *path = trim_path(mdfr, path.verbs(), fnth));
+            } else { todo!() }  // FIXME:
+        }
+
+        ShapeListItem::Merge (_) | ShapeListItem::OffsetPath (_) |
+        ShapeListItem::Twist (_) | ShapeListItem::PuckerBloat(_) |
+        ShapeListItem::ZigZag(_) | ShapeListItem::RoundedCorners(_) => dbg!(),  // TODO:
+
+        _ => (),
+    } }     (draws, trfm)
+}
+
+#[derive(Clone)] enum DrawItem {
+    Shape(Box<VGPath>),
+    Style(Box<VGPaint>, Option<(f32, Vec<f32>)>),
+    Repli(Vec<DrawItem>, Vec<TM2DwO>), // something like batch Groups
+    Group(Vec<DrawItem>, TM2DwO),
+}
+
+fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[DrawItem]) {
+    fn traverse_shapes<T: Renderer>(canvas: &mut Canvas<T>,
+        draws: &[DrawItem], render: &mut impl FnMut(&mut Canvas<T>, &VGPath)) {
+        let last_trfm = canvas.transform();
+        draws.iter().rev().for_each(|draw| match draw {
+            DrawItem::Shape(path) => render(canvas, path),
+
+            DrawItem::Group(grp, ts) => {
+                    canvas.set_transform(&ts.0);    traverse_shapes(canvas, grp, render);
+                    canvas.reset_transform();       canvas.set_transform(&last_trfm);
+            }   // apply transform in group-wise rather path-wise
+            DrawItem::Repli(grp, rep) =>
+                rep.iter().rev().for_each(|ts| {
+                    canvas.set_transform(&ts.0);    traverse_shapes(canvas, grp, render);
+                    canvas.reset_transform();       canvas.set_transform(&last_trfm);
+                }),
+            _ => (), // skip/ignore Style
+        });
+    }
+
+    let last_trfm = canvas.transform();
+    draws.iter().enumerate().rev().for_each(|(idx, draw)| match draw {
+        DrawItem::Style(style, dash) =>
+            traverse_shapes(canvas, &draws[0..idx], &mut |canvas, path| {
+                if let Some(dash) = dash {
+                    if dash.1.is_empty() { canvas.stroke_path(path, style);
+                    } else { canvas.stroke_path(&split_dash(path, dash), style); }
+                } else { canvas.fill_path(path, style); }
+            }),
+        DrawItem::Group(grp, ts) => {
+                canvas.set_transform(&ts.0);
+                let mut ts = ts.clone();    ts.multiply(trfm);
+
+                canvas.set_global_alpha(ts.1);
+                render_shapes(canvas, &ts, grp);
+
+                canvas.reset_transform();   canvas.set_transform(&last_trfm);
+                canvas.set_global_alpha(trfm.1);
+        }   // apply transform in group-wise rather path-wise
+        DrawItem::Repli(grp, rep) => {
+            rep.iter().rev().for_each(|ts| {
+                canvas.set_transform(&ts.0);
+                let mut ts = ts.clone();    ts.multiply(trfm);
+
+                canvas.set_global_alpha(ts.1);
+                render_shapes(canvas, &ts, grp);
+
+                canvas.reset_transform();   canvas.set_transform(&last_trfm);
+            }); canvas.set_global_alpha(trfm.1);
+        }
+        _ => (), // skip/ignore Shape
+    });
 }
 
 struct TrackMatte { mode: MatteMode, mlid: Option<u32>, imgid: femtovg::ImageId, }
@@ -650,26 +717,24 @@ fn render_masks<T: Renderer>(canvas: &mut Canvas<T>, masks_prop: &[Mask], fnth: 
 
         if let Some(_expand) = &mask.expand { todo!() }
         let opacity = mask.opacity.as_ref().map_or(1., |opacity|
-            opacity.get_value(fnth) / 100.);    //canvas.set_global_alpha(opacity);
+            opacity.get_value(fnth) / 100.);
 
         if let Some(cop) = cop { canvas.global_composite_operation(cop); }
         canvas.fill_path(&mask.shape.to_path(fnth),
             &VGPaint::color(VGColor::rgbaf(0., 0., 0., opacity)));
-    }); //canvas.set_global_alpha(1.);  // restore global alpha
+    });
 }
 
-fn  render_matte<T: Renderer>(canvas: &mut Canvas<T>, vl: &VisualLayer,
-    matte: &mut Option<TrackMatte>, trfm: &TM2DwO, fnth: f32) {
+fn render_mattel<T: Renderer>(canvas: &mut Canvas<T>,
+    vl: &VisualLayer, matte: &mut Option<TrackMatte>, fnth: f32) {
     if !vl.has_mask && (vl.tt.is_some() || matte.is_none()) { return }
     let imgid = matte.as_ref().unwrap().imgid;  *matte = None;
 
-    let last_trfm = canvas.transform();
-    canvas.reset_transform();    canvas.set_transform(&trfm.0);
     if  vl.has_mask { render_masks(canvas, &vl.masks_prop, fnth); }
-
     canvas.global_composite_operation(CompOp::SourceOver);
     canvas.set_render_target(femtovg::RenderTarget::Screen);    //canvas.restore();
 
+    let last_trfm = canvas.transform();
     let (lx, ty) = last_trfm.transform_point(0., 0.);
     let (w, h) = canvas.image_size(imgid).unwrap();
 
@@ -681,7 +746,7 @@ fn  render_matte<T: Renderer>(canvas: &mut Canvas<T>, vl: &VisualLayer,
     canvas.set_transform(&last_trfm);   canvas.flush();     canvas.delete_image(imgid);
 }
 
-fn repeat_shape(mdfr: &Repeater, fnth: f32) -> Vec<TM2DwO> {
+fn get_repeater(mdfr: &Repeater, fnth: f32) -> Vec<TM2DwO> {
     let mut opacity = mdfr.tr.so.as_ref().map_or(1.,
         |so| so.get_value(fnth) / 100.);
     let offset = mdfr.offset.as_ref().map_or(0.,
@@ -711,6 +776,7 @@ fn trim_path<I: Iterator<Item = Verb>>(mdfr: &TrimPath, path: I, fnth: f32) -> V
     use kurbo::{BezPath, ParamCurve, ParamCurveArclen};
     //let segments = kurbo::segments(path.map(convert_path_f2k));
     let path = path.map(convert_path_f2k).collect::<BezPath>();
+    // XXX: straight line close should be regarded as a segment?
 
     let total = path.segments().fold(0., |acc, seg| acc + seg.arclen(accuracy));
     let (start, mut slen) = (total * ((start + offset) % 1.)  as f64, 0.);
@@ -733,7 +799,7 @@ fn trim_path<I: Iterator<Item = Verb>>(mdfr: &TrimPath, path: I, fnth: f32) -> V
     })).iter().for_each(|el| convert_path_k2f(el, &mut fpath));  fpath
 }
 
-fn split_dash(path: &VGPath, dash: &(f32, Vec<f32>)) -> VGPath {
+#[inline] fn split_dash(path: &VGPath, dash: &(f32, Vec<f32>)) -> VGPath {
     let mut npath = VGPath::new();  debug_assert!(dash.1.len() < 5);
     kurbo::dash(path.verbs().map(convert_path_f2k), dash.0 as _,
         &dash.1.iter().map(|v| *v as f64).collect::<Vec<_>>())
