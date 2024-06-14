@@ -5,10 +5,9 @@
  * Copyright (c) 2024 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::{schema::*, helpers::{*, math::*}};
 use std::f32::consts::PI;
+use crate::{schema::*, helpers::{*, math::*}};
 
-/// https://lottiefiles.github.io/lottie-docs/rendering/
 trait PathFactory { fn to_path(&self, fnth: f32) -> VGPath; }
 
 impl PathFactory for Rectangle {
@@ -382,18 +381,10 @@ impl Transform {
     }
 }
 
-#[derive(Clone)] struct TM2DwO(TM2D, f32);
-impl Default for TM2DwO { fn default() -> Self { Self(TM2D::identity(), 1.) } }
-impl TM2DwO {
-    #[inline] fn multiply(&mut self, other: &TM2DwO) {
-        self.0  .multiply(&other.0);  self.1 *= other.1;
-    }
-}
-
 use femtovg::{Canvas, Renderer, Transform2D as TM2D, CompositeOperation as CompOp,
     Path as VGPath, Paint as VGPaint, Color as VGColor};
 
-impl Animation {
+impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
     //fn get_duration(&self) -> f32 { (self.op - self.ip) / self.fr }
     pub fn render_next_frame<T: Renderer>(&mut self,
         canvas: &mut Canvas<T>, elapsed: f32) -> bool {
@@ -478,7 +469,7 @@ impl Animation {
                 canvas.set_global_alpha(ts.1);
 
                 render_shapes(canvas, &trfm, &draws);
-                render_mattel(canvas, &shpl.vl, &mut matte, fnth);
+                render_matte (canvas, &shpl.vl, &mut matte, fnth);
 
                 canvas.reset_transform();    canvas.set_transform(&last_trfm);
             }
@@ -498,7 +489,7 @@ impl Animation {
 
                     prepare_matte(canvas, &pcl.vl, &mut matte);
                     self.render_layers(canvas, Some(&trfm), &pcomp.layers, fnth);
-                    render_mattel(canvas, &pcl.vl, &mut matte, fnth);
+                     render_matte(canvas, &pcl.vl, &mut matte, fnth);
 
                     canvas.reset_transform();    canvas.set_transform(&last_trfm);
                 }   // clipping(pcl.w, pcl.h)?
@@ -517,7 +508,7 @@ impl Animation {
 
                 prepare_matte(canvas, &scl.vl, &mut matte);
                 canvas.fill_path(&path, &paint);
-                render_mattel(canvas, &scl.vl, &mut matte, fnth);
+                 render_matte(canvas, &scl.vl, &mut matte, fnth);
 
                 canvas.reset_transform();   canvas.set_transform(&last_trfm);
             }
@@ -530,74 +521,8 @@ impl Animation {
     }
 }
 
-/// calculate transform matrix, convert shapes to paths, modify/change the paths,
-/// and convert style(fill/stroke/gradient) to draw items, recursively
-fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
-    (Vec<DrawItem>, TM2DwO) {
-    let trfm = if let Some(ShapeItem::Transform(ts)) =
-        shapes.iter().rev().find(|&shape|
-        matches!(shape, ShapeItem::Transform(ts) if !ts.elem.hd)) {
-        ts.trfm.to_matrix(fnth, ao)
-    } else { Default::default() };
-
-    let mut draws = vec![];
-    for shape in shapes.iter() { match shape {
-        ShapeItem::Rectangle(rect)    if !rect.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(rect.to_path(fnth)))),
-        ShapeItem::Polystar(star) if !star.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(star.to_path(fnth)))),
-        ShapeItem::Ellipse(elps)        if !elps.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(elps.to_path(fnth)))),
-        ShapeItem::Path(curv)          if !curv.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(curv.to_path(fnth)))),
-
-        // styles affect on all preceding paths ever before
-        ShapeItem::Fill(fill)   if !fill.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(fill.to_paint(fnth)), None)),
-        ShapeItem::Stroke(line) if !line.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(line.to_paint(fnth)),
-                Some(line.get_dash(fnth)))),
-        ShapeItem::GradientFill(grad)   if !grad.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(grad.to_paint(fnth)), None)),
-        ShapeItem::GradientStroke(grad) if !grad.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(grad.to_paint(fnth)),
-                Some(grad.get_dash(fnth)))),
-        ShapeItem::NoStyle(_) => eprintln!("Nothing to do here?"),
-
-        ShapeItem::Group(group) if !group.elem.hd => {
-            let (grp, trfm) = convert_shapes(&group.shapes, fnth, ao);
-            draws.push(DrawItem::Group(grp, trfm));
-        }
-
-        ShapeItem::Repeater(mdfr) if !mdfr.elem.hd => {
-            let grp = draws;    draws = vec![];
-            // repeat preceding (Shape/Style) items into new Groups?
-            //get_repeater(mdfr, fnth).into_iter().for_each(|ts|
-            //    draws.push(DrawItem::Group(grp.clone(), ts)));
-            draws.push(DrawItem::Repli(grp, get_repeater(mdfr, fnth)));
-        }
-
-        // other modifiers usally just affect on all preceding paths ever before
-        ShapeItem::Trim(mdfr) if !mdfr.elem.hd =>
-            trim_shapes(mdfr, &mut draws, fnth),
-
-        ShapeItem::Merge (_) | ShapeItem::OffsetPath (_) |
-        ShapeItem::Twist (_) | ShapeItem::PuckerBloat(_) |
-        ShapeItem::ZigZag(_) | ShapeItem::RoundedCorners(_) => dbg!(),  // TODO:
-
-        _ => (),
-    } }     (draws, trfm)
-}
-
-#[derive(Clone)] enum DrawItem {
-    Shape(Box<VGPath>),
-    Style(Box<VGPaint>, Option<(f32, Vec<f32>)>),
-    Repli(Vec<DrawItem>, Vec<TM2DwO>), // something like batch Groups
-    Group(Vec<DrawItem>, TM2DwO),
-}
-
 fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[DrawItem]) {
-    fn traverse_shapes<T: Renderer>(canvas: &mut Canvas<T>,
+    fn traverse_shapes<T: Renderer>(canvas:  &mut Canvas<T>,
         draws: &[DrawItem], render: &impl Fn(&mut Canvas<T>, &VGPath)) {
 
         let last_trfm = canvas.transform();
@@ -651,8 +576,6 @@ fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[Dr
     });
 }
 
-struct TrackMatte { mode: MatteMode, mlid: Option<u32>, imgid: femtovg::ImageId, }
-
 fn prepare_matte<T: Renderer>(canvas: &mut Canvas<T>,
     vl: &VisualLayer, matte: &mut Option<TrackMatte>) {
     if vl.tt.is_some() || vl.has_mask {
@@ -684,8 +607,31 @@ fn prepare_matte<T: Renderer>(canvas: &mut Canvas<T>,
     }
 }
 
-fn render_masks<T: Renderer>(canvas: &mut Canvas<T>, masks_prop: &[Mask], fnth: f32) {
-    masks_prop.iter().for_each(|mask| {
+fn  render_matte<T: Renderer>(canvas: &mut Canvas<T>,
+    vl: &VisualLayer, matte: &mut Option<TrackMatte>, fnth: f32) {
+    if !vl.has_mask && (vl.tt.is_some() || matte.is_none()) { return }
+    let imgid = matte.as_ref().unwrap().imgid;  *matte = None;
+
+    if  vl.has_mask { render_masks(canvas, &vl.masks, fnth); }
+    canvas.global_composite_operation(CompOp::SourceOver);
+    canvas.set_render_target(femtovg::RenderTarget::Screen);    //canvas.restore();
+
+    let last_trfm = canvas.transform();
+    let (lx, ty) = last_trfm.transform_point(0., 0.);
+    let (w, h) = canvas.image_size(imgid).unwrap();
+
+    let mut path = VGPath::new();
+    path.rect(lx, ty, w as f32 - lx * 2., h as f32 - ty * 2.);  // XXX:
+    let paint = VGPaint::image(imgid, 0., 0., w as _, h as _, 0., 1.);
+
+    canvas.reset_transform();           canvas.fill_path(&path, &paint);
+    canvas.set_transform(&last_trfm);   canvas.flush();     canvas.delete_image(imgid);
+}
+
+struct TrackMatte { mode: MatteMode, mlid: Option<u32>, imgid: femtovg::ImageId, }
+
+fn  render_masks<T: Renderer>(canvas: &mut Canvas<T>, masks: &[Mask], fnth: f32) {
+    masks.iter().for_each(|mask| {
         let cop = if mask.inv { match mask.mode {
             MaskMode::Subtract  => Some(CompOp::DestinationIn),
             MaskMode::Add       => Some(CompOp::DestinationOut),
@@ -712,25 +658,74 @@ fn render_masks<T: Renderer>(canvas: &mut Canvas<T>, masks_prop: &[Mask], fnth: 
     });
 }
 
-fn render_mattel<T: Renderer>(canvas: &mut Canvas<T>,
-    vl: &VisualLayer, matte: &mut Option<TrackMatte>, fnth: f32) {
-    if !vl.has_mask && (vl.tt.is_some() || matte.is_none()) { return }
-    let imgid = matte.as_ref().unwrap().imgid;  *matte = None;
+/// calculate transform matrix, convert shapes to paths, modify/change the paths,
+/// and convert style(fill/stroke/gradient) to draw items, recursively
+fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) -> (Vec<DrawItem>, TM2DwO) {
+    let (mut draws, mut trfm) = (vec![], Default::default());
+    for shape in shapes.iter() { match shape {
+        ShapeItem::Rectangle(rect)    if !rect.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(rect.to_path(fnth)))),
+        ShapeItem::Polystar(star) if !star.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(star.to_path(fnth)))),
+        ShapeItem::Ellipse(elps)        if !elps.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(elps.to_path(fnth)))),
+        ShapeItem::Path(curv)          if !curv.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(curv.to_path(fnth)))),
 
-    if  vl.has_mask { render_masks(canvas, &vl.masks_prop, fnth); }
-    canvas.global_composite_operation(CompOp::SourceOver);
-    canvas.set_render_target(femtovg::RenderTarget::Screen);    //canvas.restore();
+        // styles affect on all preceding paths ever before
+        ShapeItem::Fill(fill)   if !fill.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(fill.to_paint(fnth)), None)),
+        ShapeItem::Stroke(line) if !line.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(line.to_paint(fnth)),
+                Some(line.get_dash(fnth)))),
+        ShapeItem::GradientFill(grad)   if !grad.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(grad.to_paint(fnth)), None)),
+        ShapeItem::GradientStroke(grad) if !grad.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(grad.to_paint(fnth)),
+                Some(grad.get_dash(fnth)))),
+        ShapeItem::NoStyle(_) => eprintln!("Nothing to do here?"),
 
-    let last_trfm = canvas.transform();
-    let (lx, ty) = last_trfm.transform_point(0., 0.);
-    let (w, h) = canvas.image_size(imgid).unwrap();
+        ShapeItem::Group(group) if !group.elem.hd => {
+            let (grp, trfm) = convert_shapes(&group.shapes, fnth, ao);
+            draws.push(DrawItem::Group(grp, trfm));
+        }
 
-    let mut path = VGPath::new();
-    path.rect(lx, ty, w as f32 - lx * 2., h as f32 - ty * 2.);  // XXX:
-    let paint = VGPaint::image(imgid, 0., 0., w as _, h as _, 0., 1.);
+        ShapeItem::Repeater(mdfr) if !mdfr.elem.hd => {
+            let grp = draws;    draws = vec![];
+            // repeat preceding (Shape/Style) items into new Groups?
+            //get_repeater(mdfr, fnth).into_iter().for_each(|ts|
+            //    draws.push(DrawItem::Group(grp.clone(), ts)));
+            draws.push(DrawItem::Repli(grp, get_repeater(mdfr, fnth)));
+        }
 
-    canvas.reset_transform();           canvas.fill_path(&path, &paint);
-    canvas.set_transform(&last_trfm);   canvas.flush();     canvas.delete_image(imgid);
+        // other modifiers usally just affect on all preceding paths ever before
+        ShapeItem::Trim(mdfr) if !mdfr.elem.hd =>
+            trim_shapes(mdfr, &mut draws, fnth),
+
+        ShapeItem::Merge (_) | ShapeItem::OffsetPath (_) |
+        ShapeItem::Twist (_) | ShapeItem::PuckerBloat(_) |
+        ShapeItem::ZigZag(_) | ShapeItem::RoundedCorners(_) => dbg!(),  // TODO:
+
+        ShapeItem::Transform(ts) if !ts.elem.hd =>
+            trfm = ts.trfm.to_matrix(fnth, ao),
+
+        _ => (),
+    } }     (draws, trfm)
+}
+
+#[derive(Clone)] enum DrawItem {
+    Shape(Box<VGPath>),
+    Style(Box<VGPaint>, Option<(f32, Vec<f32>)>),
+    Repli(Vec<DrawItem>, Vec<TM2DwO>), // something like batch Groups
+    Group(Vec<DrawItem>, TM2DwO),
+}
+
+#[derive(Clone)] struct TM2DwO(TM2D, f32);
+impl Default for TM2DwO { fn default() -> Self { Self(TM2D::identity(), 1.) } }
+impl TM2DwO {
+    #[inline] fn multiply(&mut self, other: &TM2DwO) {
+        self.0  .multiply(&other.0);  self.1 *= other.1;
+    }
 }
 
 fn get_repeater(mdfr: &Repeater, fnth: f32) -> Vec<TM2DwO> {
@@ -792,7 +787,7 @@ fn trim_shapes(mdfr: &TrimPath, draws: &mut [DrawItem], fnth: f32) {
         let (start, mut trim) = (suml * start, suml * trim);
         tri0 *= suml;   suml = 0.;
 
-        traverse_shapes(draws, &mut |path: &mut VGPath| {
+        traverse_shapes(draws, &mut |path: &mut VGPath| { // same logic as in trim_path
             let len = lens[idx as usize];   idx += 1;
 
             if suml <= start &&  start < suml + len {   let start = start - suml;
@@ -818,7 +813,6 @@ fn trim_path<I: Iterator<Item = Verb>>(path: I, start: f64, mut trim: f64) -> VG
     // or use curve_length(curve, merr) and subdivide(t, seg) of flo_curves
     //let segments = kurbo::segments(path.map(convert_path_f2k));
     let path = path.map(convert_path_f2k).collect::<BezPath>();
-    // XXX: straight line close should be regarded as a segment (to fix in kurbo)?
 
     let (accuracy, mut tri0) = (1e-2, 0.);
     let mut suml = path.segments().fold(0.,

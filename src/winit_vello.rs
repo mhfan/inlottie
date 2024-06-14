@@ -144,7 +144,7 @@ fn main() -> anyhow::Result<()> {
                             let scale =  (wsize.0 / csize.0).min(wsize.1 / csize.1) * 0.95;
                             let origx = ((wsize.0 - csize.0 * scale) / 2.) as f64;
                             let origy = ((wsize.1 - csize.1 * scale) / 2.) as f64;
-                            trfm = Affine::translate((origx, origy)) * Affine::scale(scale);
+                            trfm = Affine::translate((origx, origy)) * Affine::scale(scale as _);
                         }
 
                         render_cx.resize_surface(&mut render_state.surface,
@@ -275,7 +275,7 @@ impl PerfGraph {
         let metrics = font_ref.glyph_metrics(Size::new(font_size), &var_loc);
         let charmap  = font_ref.charmap();
 
-        scene.draw_glyphs(&font).font_size(font_size).transform(trfm)
+        scene.draw_glyphs(font).font_size(font_size).transform(trfm)
              .brush(Color::rgba8(240, 240, 240, 255))
              .draw(peniko::Fill::NonZero, format!("{fps:.2} FPS").chars().rev().map(|ch| {
                 let gid =  charmap.map(ch).unwrap_or_default();

@@ -153,7 +153,7 @@ use crate::helpers::{str_to_rgba, str_from_rgba, deserialize_strarray};
     /// This is similar to mattes, but there are a few differences. With mattes, you use a
     /// layer to define the clipping area, while with masks you use an animated bezier curve.
     #[serde(default, skip_serializing_if = "Vec::is_empty",
-        rename = "masksProperties")] pub masks_prop: Vec<Mask>,
+        rename = "masksProperties")] pub masks: Vec<Mask>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     /** List of layer effects */ pub ef: Vec<Effect>,
@@ -754,7 +754,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 #[derive(Clone, Copy, Deserialize_repr, Serialize_repr)] /// Unit type for a text selector
 #[repr(u8)] pub enum TextRangeUnits { Percent = 1, Index, }
 
-/// Animated property representing the text contents
+/// Animated property representing the text contents, it's always treated as animated.
 #[derive(Deserialize, Serialize)] pub struct AnimatedTextDocument {
     /** A keyframe containing a text document */ pub k: Vec<TextDocumentKeyframe>,
     #[serde(default, skip_serializing_if = "String::is_empty")] /// Expression
@@ -763,11 +763,14 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
     #[cfg(feature = "expression")] pub sid: String,
 }
 
+/// This is similar to the `keyframe` object used by animated properties, but it doesn't
+/// have any attribute specifying interpolation as text is always animated in discrete steps.
 #[derive(Deserialize, Serialize)] pub struct TextDocumentKeyframe {
     #[serde(rename = "s")] pub value: TextDocument,
     #[serde(rename = "t")] pub start: f32, // Time
 }
 
+/// This is where the actual text data is stored.
 #[derive(Deserialize, Serialize)] pub struct TextDocument {
     /// Text, note that newlines are encoded with \r
     #[serde(rename = "t")] pub ts: String,
@@ -814,6 +817,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 #[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum TextGrouping { Characters = 1, Word, Line, All, }
 
+/// Uses the path described by a layer mask to put the text on said path.
 #[derive(Deserialize, Serialize)] pub struct TextFollowPath {
     /// Mask, Index of the mask to use
     #[serde(skip_serializing_if = "Option::is_none", rename = "m")] pub mask: Option<u32>,
@@ -908,8 +912,8 @@ type Sound = FileAsset; // External sound
 #[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum FontPathOrigin { Local = 0, CssUrl, ScriptUrl, FontUrl, }
 
-#[derive(Deserialize, Serialize)] /// Defines character shapes
-pub struct CharacterData {
+/// Defines character shapes (embedded font)
+#[derive(Deserialize, Serialize)] pub struct CharacterData {
     #[serde(rename = "fFamily")] pub family: String,
     pub style: String,
     pub    ch: String,
