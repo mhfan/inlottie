@@ -424,7 +424,7 @@ impl Animation {
     /// The render order goes from the last element to the first,
     /// items in list coming first will be rendered on top.
     fn render_layers<T: Renderer>(&self, canvas: &mut Canvas<T>,
-        ptm: Option<&TM2DwO>, layers: &[LayersItem], fnth: f32) {
+        ptm: Option<&TM2DwO>, layers: &[LayerItem], fnth: f32) {
         let mut matte: Option<TrackMatte> = None;
 
         let get_matrix = |vl: &VisualLayer, fnth: f32| {
@@ -441,18 +441,18 @@ impl Animation {
             };  trfm
         };
 
-        #[inline] fn get_visual_layer(layer: &LayersItem) -> Option<&VisualLayer> {
+        #[inline] fn get_visual_layer(layer: &LayerItem) -> Option<&VisualLayer> {
             Some(match layer {
-                LayersItem::PrecompLayer(layer) => &layer.vl,
-                LayersItem::SolidColor(layer) => &layer.vl,
-                LayersItem::Shape(layer) => &layer.vl,
+                LayerItem::PrecompLayer(layer) => &layer.vl,
+                LayerItem::SolidColor(layer) => &layer.vl,
+                LayerItem::Shape(layer) => &layer.vl,
 
-                LayersItem::Image(layer) => &layer.vl,
-                LayersItem::Text(layer) => &layer.vl,
-                LayersItem::Data(layer) => &layer.vl,
+                LayerItem::Image(layer) => &layer.vl,
+                LayerItem::Text(layer) => &layer.vl,
+                LayerItem::Data(layer) => &layer.vl,
 
-                LayersItem::Null(null) => null,
-                LayersItem::Audio(_) | LayersItem::Camera(_) => return None,
+                LayerItem::Null(null) => null,
+                LayerItem::Audio(_) | LayerItem::Camera(_) => return None,
             })
         }
 
@@ -462,7 +462,7 @@ impl Animation {
 
         let last_trfm = canvas.transform();
         for layer in layers.iter().rev() { match layer {
-            LayersItem::Shape(shpl) => if !need_to_hide(&shpl.vl, fnth) {
+            LayerItem::Shape(shpl) => if !need_to_hide(&shpl.vl, fnth) {
                 let mut trfm = get_matrix(&shpl.vl, fnth);
                 canvas.set_transform(&trfm.0);
                 //canvas.set_global_alpha(trfm.1);
@@ -482,9 +482,9 @@ impl Animation {
 
                 canvas.reset_transform();    canvas.set_transform(&last_trfm);
             }
-            LayersItem::PrecompLayer(pcl) => if !need_to_hide(&pcl.vl, fnth) {
+            LayerItem::PrecompLayer(pcl) => if !need_to_hide(&pcl.vl, fnth) {
                 if let Some(pcomp) = self.assets.iter().find_map(|asset|
-                    match asset { AssetsItem::Precomp(pcomp)
+                    match asset { AssetItem::Precomp(pcomp)
                         if pcomp.base.id == pcl.rid => Some(pcomp), _ => None }) {
                     let fnth = (fnth - pcl.vl.base.st) / pcl.vl.base.sr;
 
@@ -503,7 +503,7 @@ impl Animation {
                     canvas.reset_transform();    canvas.set_transform(&last_trfm);
                 }   // clipping(pcl.w, pcl.h)?
             }
-            LayersItem::SolidColor(scl) => if !need_to_hide(&scl.vl, fnth) {
+            LayerItem::SolidColor(scl) => if !need_to_hide(&scl.vl, fnth) {
                 let trfm = get_matrix(&scl.vl, fnth);
                 canvas.set_transform(&trfm.0);
 
@@ -521,10 +521,10 @@ impl Animation {
 
                 canvas.reset_transform();   canvas.set_transform(&last_trfm);
             }
-            LayersItem::Image(_) | LayersItem::Text(_)  | LayersItem::Data(_)  |
-            LayersItem::Audio(_) | LayersItem::Camera(_) => dbg!(),     // TODO:
+            LayerItem::Image(_) | LayerItem::Text(_)  | LayerItem::Data(_)  |
+            LayerItem::Audio(_) | LayerItem::Camera(_) => dbg!(),     // TODO:
 
-            //LayersItem::Null(_) => (),    // used as a parent, nothing to do
+            //LayerItem::Null(_) => (),    // used as a parent, nothing to do
             _ => (),
         } }
     }
@@ -532,11 +532,11 @@ impl Animation {
 
 /// calculate transform matrix, convert shapes to paths, modify/change the paths,
 /// and convert style(fill/stroke/gradient) to draw items, recursively
-fn convert_shapes(shapes: &[ShapeListItem], fnth: f32, ao: IntBool) ->
+fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
     (Vec<DrawItem>, TM2DwO) {
-    let trfm = if let Some(ShapeListItem::Transform(ts)) =
+    let trfm = if let Some(ShapeItem::Transform(ts)) =
         shapes.iter().rev().find(|&shape|
-        matches!(shape, ShapeListItem::Transform(ts) if !ts.elem.hd)) {
+        matches!(shape, ShapeItem::Transform(ts) if !ts.elem.hd)) {
         ts.trfm.to_matrix(fnth, ao)
     } else { Default::default() };
 
@@ -551,34 +551,34 @@ fn convert_shapes(shapes: &[ShapeListItem], fnth: f32, ao: IntBool) ->
 
     let mut draws = vec![];
     for shape in shapes.iter() { match shape {
-        ShapeListItem::Rectangle(rect)    if !rect.base.elem.hd =>
+        ShapeItem::Rectangle(rect)    if !rect.base.elem.hd =>
             draws.push(DrawItem::Shape(Box::new(rect.to_path(fnth)))),
-        ShapeListItem::Polystar(star) if !star.base.elem.hd =>
+        ShapeItem::Polystar(star) if !star.base.elem.hd =>
             draws.push(DrawItem::Shape(Box::new(star.to_path(fnth)))),
-        ShapeListItem::Ellipse(elps)        if !elps.base.elem.hd =>
+        ShapeItem::Ellipse(elps)        if !elps.base.elem.hd =>
             draws.push(DrawItem::Shape(Box::new(elps.to_path(fnth)))),
-        ShapeListItem::Path(curv)          if !curv.base.elem.hd =>
+        ShapeItem::Path(curv)          if !curv.base.elem.hd =>
             draws.push(DrawItem::Shape(Box::new(curv.to_path(fnth)))),
 
         // styles affect on all preceding paths ever before
-        ShapeListItem::Fill(fill)   if !fill.elem.hd =>
+        ShapeItem::Fill(fill)   if !fill.elem.hd =>
             draws.push(DrawItem::Style(Box::new(fill.to_paint(fnth)), None)),
-        ShapeListItem::Stroke(line) if !line.elem.hd =>
+        ShapeItem::Stroke(line) if !line.elem.hd =>
             draws.push(DrawItem::Style(Box::new(line.to_paint(fnth)),
                 Some(line.get_dash(fnth)))),
-        ShapeListItem::GradientFill(grad)   if !grad.elem.hd =>
+        ShapeItem::GradientFill(grad)   if !grad.elem.hd =>
             draws.push(DrawItem::Style(Box::new(grad.to_paint(fnth)), None)),
-        ShapeListItem::GradientStroke(grad) if !grad.elem.hd =>
+        ShapeItem::GradientStroke(grad) if !grad.elem.hd =>
             draws.push(DrawItem::Style(Box::new(grad.to_paint(fnth)),
                 Some(grad.get_dash(fnth)))),
-        ShapeListItem::NoStyle(_) => eprintln!("Nothing to do here?"),
+        ShapeItem::NoStyle(_) => eprintln!("Nothing to do here?"),
 
-        ShapeListItem::Group(group) if !group.elem.hd => {
+        ShapeItem::Group(group) if !group.elem.hd => {
             let (grp, trfm) = convert_shapes(&group.shapes, fnth, ao);
             draws.push(DrawItem::Group(grp, trfm));
         }
 
-        ShapeListItem::Repeater(mdfr) if !mdfr.elem.hd => {
+        ShapeItem::Repeater(mdfr) if !mdfr.elem.hd => {
             let grp = draws;    draws = vec![];
             // repeat preceding (Shape/Style) items into new Groups?
             //get_repeater(mdfr, fnth).into_iter().for_each(|ts|
@@ -587,7 +587,7 @@ fn convert_shapes(shapes: &[ShapeListItem], fnth: f32, ao: IntBool) ->
         }
 
         // other modifiers usally just affect on all preceding paths ever before
-        ShapeListItem::Trim(mdfr) if !mdfr.elem.hd => {
+        ShapeItem::Trim(mdfr) if !mdfr.elem.hd => {
             if mdfr.multiple.is_some_and(|ml|
                 matches!(ml, TrimMultiple::Simultaneously)) {
                 modify_shapes(&mut draws, &mut |path|
@@ -595,9 +595,9 @@ fn convert_shapes(shapes: &[ShapeListItem], fnth: f32, ao: IntBool) ->
             } else { todo!() }  // FIXME:
         }
 
-        ShapeListItem::Merge (_) | ShapeListItem::OffsetPath (_) |
-        ShapeListItem::Twist (_) | ShapeListItem::PuckerBloat(_) |
-        ShapeListItem::ZigZag(_) | ShapeListItem::RoundedCorners(_) => dbg!(),  // TODO:
+        ShapeItem::Merge (_) | ShapeItem::OffsetPath (_) |
+        ShapeItem::Twist (_) | ShapeItem::PuckerBloat(_) |
+        ShapeItem::ZigZag(_) | ShapeItem::RoundedCorners(_) => dbg!(),  // TODO:
 
         _ => (),
     } }     (draws, trfm)

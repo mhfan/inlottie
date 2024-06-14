@@ -152,7 +152,7 @@ impl Animation {
     }
 }
 
-impl<'de> Deserialize<'de> for LayersItem {
+impl<'de> Deserialize<'de> for LayerItem {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
         Ok( match value.get("ty").and_then(serde_json::Value::as_u64)
@@ -207,7 +207,7 @@ pub(crate) fn deserialize_strarray<'de, D: Deserializer<'de>>(d: D) ->
     }
 }
 
-impl<'de> Deserialize<'de> for EffectValuesItem {
+impl<'de> Deserialize<'de> for EffectValueItem {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
         Ok( match value.get("ty").and_then(serde_json::Value::as_u64)
@@ -263,7 +263,7 @@ impl<'de> Deserialize<'de> for LayerStyleItem {
 }
 
 #[derive(Serialize)] pub struct AnyAsset(AssetBase); //serde_json::Value
-impl<'de> Deserialize<'de> for AnyAsset {
+impl<'de> Deserialize<'de> for  AnyAsset {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
         //eprintln!("{}", value.to_string().get(0..20).unwrap());
@@ -290,7 +290,7 @@ impl<'de> Deserialize<'de> for AnyValue {
             Token::Str("layers"),
             Token::Seq { len: Some(1) },
                 Token::Map { len: None, },
-                //Token::NewtypeVariant { name: "TestLayersItem", variant: "SomeLayer" },
+                //Token::NewtypeVariant { name: "TestLayerItem", variant: "SomeLayer" },
                     //Token::Struct { name: "SomeLayer", len: 3 },
                     Token::Str("ty"),  Token::U32(0),
                     Token::Str("ind"), Token::U32(1),
@@ -302,7 +302,7 @@ impl<'de> Deserialize<'de> for AnyValue {
         ];
 
         let cont = Container { layers: vec![
-            TestLayersItem::SomeLayer( SomeLayer { ind: 1, nm: "name".to_owned() }),
+            TestLayerItem::SomeLayer( SomeLayer { ind: 1, nm: "name".to_owned() }),
         ] };
 
         assert_tokens(&cont, &tokens);
@@ -311,11 +311,11 @@ impl<'de> Deserialize<'de> for AnyValue {
     }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)] struct Container {
-    #[serde(serialize_with = "serialize_with_type")] layers: Vec<TestLayersItem>,
+    #[serde(serialize_with = "serialize_with_type")] layers: Vec<TestLayerItem>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(untagged)] enum TestLayersItem { SomeLayer(SomeLayer),
+#[serde(untagged)] enum TestLayerItem { SomeLayer(SomeLayer),
     //Color(Rgba), //IntBool(IntBool), //Vector2D(Vector2D),
 }
 
@@ -323,7 +323,7 @@ impl<'de> Deserialize<'de> for AnyValue {
     ind: u32, nm: String,
 }
 
-impl<'de> Deserialize<'de> for TestLayersItem {
+impl<'de> Deserialize<'de> for TestLayerItem {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
 
@@ -336,17 +336,17 @@ impl<'de> Deserialize<'de> for TestLayersItem {
     }
 }
 
-fn serialize_with_type<S: Serializer>(layers: &[TestLayersItem],
+fn serialize_with_type<S: Serializer>(layers: &[TestLayerItem],
     serializer: S) -> Result<S::Ok, S::Error> {
-    #[derive(Serialize)] struct TypedLayersItem<'a> { ty: u32,
-        #[serde(flatten)] content: &'a TestLayersItem,
+    #[derive(Serialize)] struct TypedLayerItem<'a> { ty: u32,
+        #[serde(flatten)] content: &'a TestLayerItem,
     }
 
     use serde::ser::SerializeSeq;
     let mut state = serializer.serialize_seq(Some(layers.len()))?;
     for layer in layers {
         let item = match layer {
-            TestLayersItem::SomeLayer(_) => TypedLayersItem { ty: 0, content: layer, },
+            TestLayerItem::SomeLayer(_) => TypedLayerItem { ty: 0, content: layer, },
                 //serializer.serialize_newtype_variant("ty", 0, "", layer),
 
             //_ => unreachable!()

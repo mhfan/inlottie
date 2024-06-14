@@ -22,9 +22,9 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset, def
     #[serde(default = "defaults::animation_wh")] pub  w: u32, // Width  of the animation
     #[serde(default = "defaults::animation_wh")] pub  h: u32, // Height of the animation
 
-    #[serde(default)] pub layers: Vec<LayersItem>,
+    #[serde(default)] pub layers: Vec<LayerItem>,
     /// List of assets that can be referenced by layers
-    #[serde(default, skip_serializing_if = "Vec::is_empty")] pub assets: Vec<AssetsItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")] pub assets: Vec<AssetItem>,
 
     #[serde(default, skip_serializing_if = "FontList::is_empty")] pub fonts: FontList,
     /// Data defining text characters as lottie shapes.
@@ -49,7 +49,7 @@ use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset, def
 }
 
 #[derive(Serialize)] #[serde(untagged)] #[allow(clippy::large_enum_variant)]
-/** Base class for layer holders */ pub enum LayersItem {
+/** Base class for layer holders */ pub enum LayerItem {
     /*  0 */PrecompLayer(PrecompLayer),
     /*  1 */SolidColor(SolidLayer),
     /*  2 */Image(ImageLayer),
@@ -369,12 +369,12 @@ pub enum ArrayScalar<T> { Array(Vec<T>), Scalar(T), }
 #[derive(Deserialize, Serialize)] /// Layer containing Shapes
 pub struct ShapeLayer { #[serde(flatten)] pub vl: VisualLayer, pub shapes: ShapeList, }
 
-type ShapeList = Vec<ShapeListItem>; // List of valid shapes
+type ShapeList = Vec<ShapeItem>; // List of valid shapes
 /// These **shapes** only define path data, to actually show something,
 /// they must be followed by some style shape.
 /// Each **style** is applied to all preceding shapes in the same group / layer.
 /// **Modifiers** process their siblings and alter the path defined by shapes.
-#[derive(Deserialize, Serialize)] #[serde(tag = "ty")] pub enum ShapeListItem {
+#[derive(Deserialize, Serialize)] #[serde(tag = "ty")] pub enum ShapeItem {
     #[serde(rename = "rc")] Rectangle(Rectangle),           // Shapes:
     #[serde(rename = "sr")] Polystar(Box<Polystar>),
     #[serde(rename = "el")] Ellipse(Ellipse),
@@ -837,7 +837,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 #[repr(u8)] pub enum TextShape { Square = 1, RampUp, RampDown, Triangle, Round, Smooth, }
 
 #[derive(Deserialize, Serialize)] #[serde(untagged)]
-pub enum AssetsItem { Image(Image), Sound(Sound), DataSource(DataSource),
+pub enum AssetItem { Image(Image), Sound(Sound), DataSource(DataSource),
     Precomp(Precomp), DebugAny(AnyAsset),
 }
 
@@ -874,7 +874,7 @@ type Sound = FileAsset; // External sound
 /// cycle. https://lottiefiles.github.io/lottie-docs/breakdown/precomps/
 #[derive(Deserialize, Serialize)] pub struct Precomp {
     #[serde(flatten)] pub base: AssetBase,
-    pub layers: Vec<LayersItem>,
+    pub layers: Vec<LayerItem>,
     #[serde(default = "defaults::animation_fr")] pub fr: f32,
     #[serde(default, rename = "xt")] /** Extra composition */ pub extra: IntBool,
 }
@@ -977,7 +977,7 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
 /// Layers can have post-processing effects applied to them.
 /// Many effects have unused values which are labeled with a number.
 #[derive(Deserialize, Serialize)] pub struct Effect { // Layer effect
-    pub ef: Vec<EffectValuesItem>,
+    pub ef: Vec<EffectValueItem>,
     pub ty: EffectType,
     #[serde(default = "defaults::effect_en")] /** Enabled */ pub en: IntBool,
 
@@ -1019,7 +1019,7 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
     // Bulge, WaveWarp, ?
 }
 
-#[derive(Serialize)] #[serde(untagged)] pub enum EffectValuesItem {
+#[derive(Serialize)] #[serde(untagged)] pub enum EffectValueItem {
     /*  0 */Slider(EffectValue<Value>),
     /*  1 */Angle (EffectValue<Value>),
     /*  3 */Point (EffectValue<Animated2D>),
