@@ -540,15 +540,6 @@ fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
         ts.trfm.to_matrix(fnth, ao)
     } else { Default::default() };
 
-    fn modify_shapes(draws: &mut [DrawItem], closure: &mut impl FnMut(&mut VGPath)) {
-        draws.iter_mut().rev().for_each(|draw| match draw {
-            DrawItem::Group(grp, _) => modify_shapes(grp, closure),
-            DrawItem::Repli(grp, _) => modify_shapes(grp, closure),
-            DrawItem::Shape(path) => closure(path),
-            _ => (), // skip/ignore Style
-        });
-    }
-
     let mut draws = vec![];
     for shape in shapes.iter() { match shape {
         ShapeItem::Rectangle(rect)    if !rect.base.elem.hd =>
@@ -587,13 +578,8 @@ fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
         }
 
         // other modifiers usally just affect on all preceding paths ever before
-        ShapeItem::Trim(mdfr) if !mdfr.elem.hd => {
-            if mdfr.multiple.is_some_and(|ml|
-                matches!(ml, TrimMultiple::Simultaneously)) {
-                modify_shapes(&mut draws, &mut |path|
-                    *path = trim_path(mdfr, path.verbs(), fnth));
-            } else { todo!() }  // FIXME:
-        }
+        ShapeItem::Trim(mdfr) if !mdfr.elem.hd =>
+            trim_shapes(mdfr, &mut draws, fnth),
 
         ShapeItem::Merge (_) | ShapeItem::OffsetPath (_) |
         ShapeItem::Twist (_) | ShapeItem::PuckerBloat(_) |
@@ -612,7 +598,8 @@ fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
 
 fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[DrawItem]) {
     fn traverse_shapes<T: Renderer>(canvas: &mut Canvas<T>,
-        draws: &[DrawItem], render: &mut impl FnMut(&mut Canvas<T>, &VGPath)) {
+        draws: &[DrawItem], render: &impl Fn(&mut Canvas<T>, &VGPath)) {
+
         let last_trfm = canvas.transform();
         draws.iter().rev().for_each(|draw| match draw {
             DrawItem::Shape(path) => render(canvas, path),
@@ -633,7 +620,7 @@ fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[Dr
     let last_trfm = canvas.transform();
     draws.iter().enumerate().rev().for_each(|(idx, draw)| match draw {
         DrawItem::Style(style, dash) =>
-            traverse_shapes(canvas, &draws[0..idx], &mut |canvas, path| {
+            traverse_shapes(canvas, &draws[0..idx], &|canvas, path| {
                 if let Some(dash) = dash {
                     if dash.1.is_empty() { canvas.stroke_path(path, style);
                     } else { canvas.stroke_path(&split_dash(path, dash), style); }
@@ -764,38 +751,97 @@ fn get_repeater(mdfr: &Repeater, fnth: f32) -> Vec<TM2DwO> {
     }   coll
 }
 
-fn trim_path<I: Iterator<Item = Verb>>(mdfr: &TrimPath, path: I, fnth: f32) -> VGPath {
+fn trim_shapes(mdfr: &TrimPath, draws: &mut [DrawItem], fnth: f32) {
+    fn modify_shapes(draws: &mut [DrawItem], closure: &mut impl FnMut(&mut VGPath)) {
+        draws.iter_mut().for_each(|draw| match draw {
+            DrawItem::Group(grp, _) => modify_shapes(grp, closure),
+            DrawItem::Repli(grp, _) => modify_shapes(grp, closure),
+            DrawItem::Shape(path) => closure(path),
+            _ => (), // skip/ignore Style
+        });
+    }       // XXX: how to treat repeated shapes?
+
+    fn traverse_shapes(draws: &mut [DrawItem], closure: &mut impl FnMut(&mut VGPath)) {
+        draws.iter_mut().for_each(|draw| match draw {
+            DrawItem::Shape(path) => closure(path),
+            DrawItem::Group(grp, _) => traverse_shapes(grp, closure),
+            DrawItem::Repli(grp, _) => traverse_shapes(grp, closure),
+            _ => (), // skip/ignore Style
+        });
+    }
+
+    let offset   = mdfr.offset.get_value(fnth) as f64 / 360.;
+    let start    = mdfr. start.get_value(fnth) as f64 / 100.;
+    let mut trim = mdfr.   end.get_value(fnth) as f64 / 100. - start;
+    if 1. < trim { trim = 1.; } //debug_assert!((0.0..=1.).contains(&trim));
+    let start = (start + offset) % 1.;
+
+    if mdfr.multiple.is_some_and(|ml| matches!(ml, TrimMultiple::Simultaneously)) {
+        modify_shapes(draws, &mut |path| *path = trim_path(path.verbs(), start, trim));
+    } else {
+        let (mut idx, mut suml, accuracy) = (0u32, 0., 1e-2);
+        let (mut lens, mut tri0) = (vec![], 0.);
+
+        traverse_shapes(draws, &mut |path| {
+            let len = kurbo::segments(path.verbs().map(convert_path_f2k)).fold(0.,
+                |acc, seg| acc + seg.arclen(accuracy));
+            lens.push(len);     suml += len;
+        });
+
+        if 1. < start + trim { tri0 = start + trim - 1.; trim = 1. - start; }
+        let (start, mut trim) = (suml * start, suml * trim);
+        tri0 *= suml;   suml = 0.;
+
+        traverse_shapes(draws, &mut |path: &mut VGPath| {
+            let len = lens[idx as usize];   idx += 1;
+
+            if suml <= start &&  start < suml + len {   let start = start - suml;
+                if  start + trim < len {
+                    *path = trim_path(path.verbs(), start / len, trim  / len);  trim = 0.;
+                } else { trim -= len - start;   let start = start / len;
+                    *path = trim_path(path.verbs(), start, 1. - start);
+                }
+            } else if start < suml && 0. < trim { if trim < len {
+                    *path = trim_path(path.verbs(), 0., (trim / len) as _);     trim = 0.;
+                } else { trim -= len; }
+            } else if 0. < tri0 { if tri0 < len {
+                    *path = trim_path(path.verbs(), 0., (tri0 / len) as _);     tri0 = 0.;
+                } else { tri0 -= len; }
+            } else { *path = VGPath::new(); }   suml += len;
+        });
+    }
+}
+
+use kurbo::{BezPath, ParamCurve, ParamCurveArclen};
+fn trim_path<I: Iterator<Item = Verb>>(path: I, start: f64, mut trim: f64) -> VGPath {
     // https://lottiefiles.github.io/lottie-docs/scripts/lottie_bezier.js
     // or use curve_length(curve, merr) and subdivide(t, seg) of flo_curves
-    let offset = mdfr.offset.get_value(fnth) / 360.;
-    let start  = mdfr. start.get_value(fnth) / 100.;
-    let trim   = mdfr.   end.get_value(fnth) / 100. - start;
-    debug_assert!(start + offset < 2. && (0.0..=1.).contains(&trim));
-
-    let accuracy = 1e-2;
-    use kurbo::{BezPath, ParamCurve, ParamCurveArclen};
     //let segments = kurbo::segments(path.map(convert_path_f2k));
     let path = path.map(convert_path_f2k).collect::<BezPath>();
-    // XXX: straight line close should be regarded as a segment?
+    // XXX: straight line close should be regarded as a segment (to fix in kurbo)?
 
-    let total = path.segments().fold(0., |acc, seg| acc + seg.arclen(accuracy));
-    let (start, mut slen) = (total * ((start + offset) % 1.)  as f64, 0.);
-    let (mut fpath, mut trim) = (VGPath::new(), total * trim as f64);
+    let (accuracy, mut tri0) = (1e-2, 0.);
+    let mut suml = path.segments().fold(0.,
+        |acc, seg| acc + seg.arclen(accuracy));
+    if 1. < start + trim { tri0 = start + trim - 1.; trim = 1. - start; }
+    let (start, mut trim) = (suml * start, suml * trim);
+    let mut fpath = VGPath::new();  tri0 *= suml;  suml = 0.;
 
-    BezPath::from_path_segments(path.segments().chain(path.segments()).filter_map(|seg| {
+    BezPath::from_path_segments(path.segments().filter_map(|seg| {
         let len = seg.arclen(accuracy);
 
-        let range = if slen <= start && start < slen + len {
-            let start = start - slen;   let end = start + trim;
+        let range = if suml <= start && start < suml + len {
+            let start = start - suml;   let end = start + trim;
             if  end < len { trim = 0.;      start / len .. end / len
             } else { trim -= len - start;   start / len .. 1. }
-        } else if start < slen && 0. < trim {
-            if trim < len {  let end = trim / len;
-                     trim  = 0.;    0.0 .. end
+        } else if start < suml && 0. < trim {
+            if trim < len { let end = trim / len;   trim = 0.;  0.0 .. end
             } else { trim -= len;   0.0 .. 1. }
-        } else {     slen += len;   return None };
-
-        slen += len;    Some(seg.subsegment(range))
+        } else if 0. < tri0 {
+            if tri0 < len { let end = tri0 / len;   tri0 = 0.;  0.0 .. end
+            } else { tri0 -= len;   0.0 .. 1. }
+        } else {     suml += len;   return None };
+        suml += len;    Some(seg.subsegment(range))
     })).iter().for_each(|el| convert_path_k2f(el, &mut fpath));  fpath
 }
 
