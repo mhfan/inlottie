@@ -462,14 +462,14 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
                 // computing alpha/opacity correctly along rendering stack
                 if let Some(ptm) = ptm { trfm.multiply(ptm) }
 
-                prepare_matte(canvas, &shpl.vl, &mut matte);
+                prepare_matte(canvas, &last_trfm, &shpl.vl, &mut matte);
                 let (draws, mut ts) =
                     convert_shapes(&shpl.shapes, fnth, shpl.vl.ao);
                 canvas.set_transform(&ts.0);    ts.multiply(&trfm);
                 canvas.set_global_alpha(ts.1);
 
                 render_shapes(canvas, &trfm, &draws);
-                render_matte (canvas, &shpl.vl, &mut matte, fnth);
+                render_matte (canvas, &last_trfm, &shpl.vl, &mut matte, fnth);
 
                 canvas.reset_transform();    canvas.set_transform(&last_trfm);
             }
@@ -487,9 +487,9 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
                     if let Some(ptm) = ptm { trfm.multiply(ptm) }
                     canvas.set_global_alpha(trfm.1);
 
-                    prepare_matte(canvas, &pcl.vl, &mut matte);
+                    prepare_matte(canvas, &last_trfm, &pcl.vl, &mut matte);
                     self.render_layers(canvas, Some(&trfm), &pcomp.layers, fnth);
-                     render_matte(canvas, &pcl.vl, &mut matte, fnth);
+                     render_matte(canvas, &last_trfm, &pcl.vl, &mut matte, fnth);
 
                     canvas.reset_transform();    canvas.set_transform(&last_trfm);
                 }   // clipping(pcl.w, pcl.h)?
@@ -506,9 +506,9 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
                           (self.h as f32 - scl.sh) / 2., scl.sw, scl.sh);
                 let paint = VGPaint::color(VGColor::rgb(scl.sc.r, scl.sc.g, scl.sc.b));
 
-                prepare_matte(canvas, &scl.vl, &mut matte);
+                prepare_matte(canvas, &last_trfm, &scl.vl, &mut matte);
                 canvas.fill_path(&path, &paint);
-                 render_matte(canvas, &scl.vl, &mut matte, fnth);
+                 render_matte(canvas, &last_trfm, &scl.vl, &mut matte, fnth);
 
                 canvas.reset_transform();   canvas.set_transform(&last_trfm);
             }
@@ -548,7 +548,7 @@ fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[Dr
             traverse_shapes(canvas, &draws[0..idx], &|canvas, path| {
                 if let Some(dash) = dash {
                     if dash.1.is_empty() { canvas.stroke_path(path, style);
-                    } else { canvas.stroke_path(&split_dash(path, dash), style); }
+                    } else { canvas.stroke_path(&path_to_dash(path, dash), style); }
                 } else { canvas.fill_path(path, style); }
             }),
         DrawItem::Group(grp, ts) => {
@@ -576,87 +576,124 @@ fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[Dr
     });
 }
 
-fn prepare_matte<T: Renderer>(canvas: &mut Canvas<T>,
+use femtovg::{PixelFormat, ImageFlags, RenderTarget};
+const CLEAR_COLOR: VGColor = VGColor::rgbaf(0., 0., 0., 0.);
+
+fn prepare_matte<T: Renderer>(canvas: &mut Canvas<T>, last_trfm: &TM2D,
     vl: &VisualLayer, matte: &mut Option<TrackMatte>) {
+	if vl.tt.is_none() && matte.is_none() { return }
+
+	// XXX: limit image to viewport/viewbox
+	let (w, h) = (canvas.width(), canvas.height());
+	let (lx, ty) = last_trfm.transform_point(0., 0.);
+	let (lx, ty) = (lx as u32, ty as u32);
+
     if vl.tt.is_some() || vl.has_mask {
-        let (w, h) = (canvas.width(), canvas.height());
         let imgid = canvas.create_image_empty(w as _, h as _,
-            femtovg::PixelFormat::Rgba8, femtovg::ImageFlags::FLIP_Y).unwrap();
+            PixelFormat::Rgba8, ImageFlags::FLIP_Y).unwrap();
+        canvas.set_render_target(RenderTarget::Image(imgid));
+        canvas.clear_rect(lx, ty, w - lx * 2, h - ty * 2, CLEAR_COLOR);
 
-        canvas.set_render_target(femtovg::RenderTarget::Image(imgid));
-        let (lx, ty) = canvas.transform().transform_point(0., 0.);
-        let (lx, ty) = (lx as u32, ty as u32);  // limit to viewport/viewbox
-        canvas.clear_rect(lx, ty, w - lx * 2, h - ty * 2, VGColor::rgbaf(0., 0., 0., 0.));
+        *matte = Some(TrackMatte { mode: vl.tt.unwrap_or(MatteMode::Normal),
+			mlid: vl.tp, imgid, mskid: None }); 	return
+    } else if vl.td.is_some_and(|td| !td.as_bool()) { return }
 
-        *matte = Some(TrackMatte {
-            mode: vl.tt.unwrap_or(MatteMode::Normal), mlid: vl.tp, imgid });
-    } else if let Some(matte) = matte {     //canvas.restore();
-        match matte.mode {  MatteMode::Normal => (),
-            MatteMode::Alpha => // XXX: femtovg seems not work correctly for DstIn
-                canvas.global_composite_operation(CompOp::DestinationIn),
-            MatteMode::InvertedAlpha =>
-                canvas.global_composite_operation(CompOp::DestinationOut),
-            MatteMode::Luma | MatteMode::InvertedLuma => unimplemented!(),
-            // https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/globalCompositeOperation
-        }
+    let matte = matte.as_mut().unwrap();
+    if vl.base.ind.is_some_and(|ind|
+        matte.mlid.is_some_and(|mlid| ind != mlid)) { return }
 
-        if vl.base.ind.is_some_and(|ind|
-            matte.mlid.is_some_and(|mlid| ind != mlid)) {
-            eprintln!("Unexpected matte layer structure!");
-        }   //debug_assert!(vl.td.is_some_and(|td| td.as_bool()));
-    }
+    let mskid = canvas.create_image_empty(w as _, h as _,
+        PixelFormat::Rgba8, ImageFlags::FLIP_Y).unwrap();
+    canvas.set_render_target(RenderTarget::Image(mskid));
+    canvas.clear_rect(lx, ty, w - lx * 2, h - ty * 2, CLEAR_COLOR);
+    matte.mskid = Some(mskid);
 }
 
-fn  render_matte<T: Renderer>(canvas: &mut Canvas<T>,
+fn  render_matte<T: Renderer>(canvas: &mut Canvas<T>, last_trfm: &TM2D,
     vl: &VisualLayer, matte: &mut Option<TrackMatte>, fnth: f32) {
-    if !vl.has_mask && (vl.tt.is_some() || matte.is_none()) { return }
-    let imgid = matte.as_ref().unwrap().imgid;  *matte = None;
+	if (vl.tt.is_some() || matte.is_none() ||
+		vl.td.is_some_and(|td| !td.as_bool())) && !vl.has_mask { return }
 
-    if  vl.has_mask { render_masks(canvas, &vl.masks, fnth); }
+    let track = matte.as_mut().unwrap();
+    if  vl.base.ind.is_some_and(|ind|
+         track.mlid.is_some_and(|mlid| ind != mlid)) { return }
+	let (imgid, mut path) = (track.imgid, VGPath::new());
+
+	// XXX: limit image to viewport/viewbox
+	//let (w, h) = canvas.image_size(imgid).unwrap();
+	let (w, h) = (canvas.width(), canvas.height());
+	let (lx, ty) = last_trfm.transform_point(0., 0.);
+	path.rect(lx, ty, w as f32 - lx * 2., h as f32 - ty * 2.);
+
+	if  vl.has_mask {
+		let mskid = canvas.create_image_empty(w as _, h as _,
+			PixelFormat::Rgba8, ImageFlags::FLIP_Y).unwrap();
+		canvas.set_render_target(RenderTarget::Image(mskid));
+		let paint = VGPaint::image(mskid, 0., 0., w as _, h as _, 0., 1.);
+		let mut mpaint = VGPaint::color(CLEAR_COLOR);
+
+		vl.masks.iter().for_each(|mask| {
+			let mut path = mask.shape.to_path(fnth);
+			if mask.inv { path.solidity(femtovg::Solidity::Hole); }
+			if let Some(_expand) = &mask.expand { todo!() }
+
+			let  opacity = mask.opacity.as_ref().map_or(1.,
+				|opacity| opacity.get_value(fnth) / 100.);
+			mpaint.set_color(VGColor::rgbaf(0., 0., 0., opacity));
+
+			canvas.clear_rect(lx as _, ty as _, w - lx as u32 * 2,
+												h - ty as u32 * 2, CLEAR_COLOR);
+			canvas.fill_path(&path, &mpaint);
+
+			let cop = match mask.mode {
+				MaskMode::Add       => Some(CompOp::DestinationIn),
+				MaskMode::Subtract  => Some(CompOp::DestinationOut),
+				MaskMode::Intersect => Some(CompOp::DestinationAtop),
+				MaskMode::Lighten   => Some(CompOp::Lighter),
+				MaskMode::Darken | MaskMode::Difference => unimplemented!(),
+				MaskMode::None => None,
+			};
+
+			if let Some(cop) = cop {
+				canvas.global_composite_operation (cop);
+				canvas.set_render_target(RenderTarget::Image(imgid));
+				let last_trfm = canvas.transform(); 	canvas.reset_transform();
+				canvas.fill_path(&path, &paint); 	canvas.flush();
+				canvas.set_transform(&last_trfm);
+			} 	canvas.set_render_target(RenderTarget::Image(mskid));
+		}); 	canvas.delete_image(mskid);
+	}
+
+	if let Some(mskid) = track.mskid {
+		// https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/
+		let cop = match track.mode {
+			MatteMode::Alpha =>         Some(CompOp::DestinationIn),
+			MatteMode::InvertedAlpha => Some(CompOp::DestinationOut),
+			MatteMode::Luma | MatteMode::InvertedLuma => unimplemented!(),
+			MatteMode::Normal => None,
+		};
+
+		if let Some(cop) = cop {
+			canvas.global_composite_operation (cop);
+			canvas.set_render_target(RenderTarget::Image(imgid));
+
+			let paint = VGPaint::image(mskid, 0., 0., w as _, h as _, 0., 1.);
+			let last_trfm = canvas.transform(); 	canvas.reset_transform();
+			canvas.fill_path(&path, &paint); 	canvas.flush();
+			canvas.set_transform(&last_trfm);
+		} 	canvas.delete_image(mskid);
+	}
+
+	canvas.set_render_target(RenderTarget::Screen);
     canvas.global_composite_operation(CompOp::SourceOver);
-    canvas.set_render_target(femtovg::RenderTarget::Screen);    //canvas.restore();
-
-    let last_trfm = canvas.transform();
-    let (lx, ty) = last_trfm.transform_point(0., 0.);
-    let (w, h) = canvas.image_size(imgid).unwrap();
-
-    let mut path = VGPath::new();
-    path.rect(lx, ty, w as f32 - lx * 2., h as f32 - ty * 2.);  // XXX:
-    let paint = VGPaint::image(imgid, 0., 0., w as _, h as _, 0., 1.);
-
-    canvas.reset_transform();           canvas.fill_path(&path, &paint);
-    canvas.set_transform(&last_trfm);   canvas.flush();     canvas.delete_image(imgid);
+	let last_trfm = canvas.transform(); 	canvas.reset_transform();
+	canvas.fill_path(&path, &VGPaint::image(imgid, 0., 0., w as _, h as _, 0., 1.));
+	canvas.flush(); 	canvas.delete_image(imgid); 	*matte = None;
+    canvas.set_transform(&last_trfm);
 }
 
-struct TrackMatte { mode: MatteMode, mlid: Option<u32>, imgid: femtovg::ImageId, }
-
-fn  render_masks<T: Renderer>(canvas: &mut Canvas<T>, masks: &[Mask], fnth: f32) {
-    masks.iter().for_each(|mask| {
-        let cop = if mask.inv { match mask.mode {
-            MaskMode::Subtract  => Some(CompOp::DestinationIn),
-            MaskMode::Add       => Some(CompOp::DestinationOut),
-            MaskMode::Intersect => Some(CompOp::DestinationAtop),
-            MaskMode::Lighten   => Some(CompOp::Lighter),
-            MaskMode::Darken | MaskMode::Difference => unimplemented!(),
-            MaskMode::None => None,
-        } } else { match mask.mode {
-            MaskMode::Add       => Some(CompOp::DestinationIn),
-            MaskMode::Subtract  => Some(CompOp::DestinationOut),
-            MaskMode::Intersect => Some(CompOp::DestinationAtop),
-            MaskMode::Lighten   => Some(CompOp::Lighter),
-            MaskMode::Darken | MaskMode::Difference => unimplemented!(),
-            MaskMode::None => None,
-        } };
-
-        if let Some(_expand) = &mask.expand { todo!() }
-        let opacity = mask.opacity.as_ref().map_or(1., |opacity|
-            opacity.get_value(fnth) / 100.);
-
-        if let Some(cop) = cop { canvas.global_composite_operation(cop); }
-        canvas.fill_path(&mask.shape.to_path(fnth),
-            &VGPaint::color(VGColor::rgbaf(0., 0., 0., opacity)));
-    });
-}
+struct TrackMatte { mode: MatteMode, mlid: Option<u32>,
+    imgid: femtovg::ImageId, mskid: Option<femtovg::ImageId> }
 
 /// calculate transform matrix, convert shapes to paths, modify/change the paths,
 /// and convert style(fill/stroke/gradient) to draw items, recursively
@@ -831,7 +868,7 @@ fn trim_path<I: Iterator<Item = Verb>>(path: I, start: f64, mut trim: f64) -> VG
         } else if start < suml && 0. < trim {
             if trim < len { let end = trim / len;   trim = 0.;  0.0 .. end
             } else { trim -= len;   0.0 .. 1. }
-        } else if 0. < tri0 {
+        } else if 0. < tri0 {   // rewound part
             if tri0 < len { let end = tri0 / len;   tri0 = 0.;  0.0 .. end
             } else { tri0 -= len;   0.0 .. 1. }
         } else {     suml += len;   return None };
@@ -839,7 +876,7 @@ fn trim_path<I: Iterator<Item = Verb>>(path: I, start: f64, mut trim: f64) -> VG
     })).iter().for_each(|el| convert_path_k2f(el, &mut fpath));  fpath
 }
 
-#[inline] fn split_dash(path: &VGPath, dash: &(f32, Vec<f32>)) -> VGPath {
+#[inline] fn path_to_dash(path: &VGPath, dash: &(f32, Vec<f32>)) -> VGPath {
     let mut npath = VGPath::new();  debug_assert!(dash.1.len() < 5);
     kurbo::dash(path.verbs().map(convert_path_f2k), dash.0 as _,
         &dash.1.iter().map(|v| *v as f64).collect::<Vec<_>>())

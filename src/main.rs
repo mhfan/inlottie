@@ -55,7 +55,7 @@ dbg!();
 
     let ctx = ContextBuilder::new()
         .with_gl_profile(GlProfile::Core).with_gl(GlRequest::Latest)
-        .build_headless(&EventLoop::new(), PhysicalSize::new(1, 1))?;
+        .build_headless(&EventLoop::new(), winit::dpi::PhysicalSize::new(1, 1))?;
     let ctx = unsafe { ctx.make_current() }.unwrap();
 
     Ok(unsafe { OpenGl::new_from_function(|s| ctx.get_proc_address(s) as *const _) }?)
@@ -139,29 +139,36 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut usvg_opts = usvg::Options::default();
     usvg_opts.fontdb_mut().load_system_fonts();     let mut tree = None;
     let path = std::env::args().nth(1).unwrap_or("data/tiger.svg".to_owned());
+    let (mut do_test, mut mouse) = (false, (0., 0.));
 
     //if fs::metadata(&path).is_ok() {} //if std::path::Path(&path).exists() {}
     match path.rfind('.').map_or("", |i| &path[1 + i..]) {
         "json" => lottie = Animation::from_reader(fs::File::open(&path)?).ok(),
+            //.map(|lottie| { expand_central(&mut canvas, window.inner_size(),
+            //        (lottie.w as _, lottie.h as _)); lottie }),
         #[cfg(feature = "rive-rs")]
-        "riv"  => scene = NanoVG::new_scene(&fs::read(&path)?),
+        "riv"  => scene = NanoVG::new_scene(&fs::read(&path)?)/*.map(|scene| {
+                let size = window.inner_size();
+                viewport.resize(size.width, size.height);
+                canvas.set_size(size.width, size.height, 1.); scene })*/,
         "svg"  => tree  = usvg::Tree::from_data(&fs::read(&path)?, &usvg_opts).ok(),
+            //.map(|tree| { expand_central(&mut canvas, window.inner_size(),
+            //        (tree.size().width(), tree.size().height())); tree }),
         _ => {  let size = window.inner_size();
-            canvas.set_size(size.width, size.height, 1.);
+            canvas.set_size(size.width, size.height, 1.);   do_test = true;
             eprintln!("File format is not supported: {path}");
         }
     }
 
     let (mut dragging, mut focused, mut paused) = (false, true, false);
     let (mut perf, mut prevt) = (PerfGraph::new(), Instant::now());
-    let  mut mouse = (0., 0.);
     //event_loop.set_control_flow(ControlFlow::Poll);
 
     event_loop.run(|event, elwt| {
-        let mut resize_canvas = |csize: (f32, f32)| {
-            let wsize = window.inner_size();
+        let mut expand_central = /*<T: Renderer>(canvas: &mut Canvas<T>,
+            wsize: winit::dpi::PhysicalSize<u32>, */|csize: (f32, f32)| {
+            canvas.reset_transform();   let wsize = window.inner_size();
             let wsize = (wsize.width as f32, wsize.height as f32);
-            canvas.reset_transform();   mouse = (0., 0.);
             let scale = (wsize.0 / csize.0).min(wsize.1  / csize.1) * 0.95;
             canvas.translate((wsize.0 - csize.0 * scale) / 2., (wsize.1 - csize.1 * scale) / 2.);
             canvas.set_size  (wsize.0 as _, wsize.1 as _, 1.);  // window.scale_factor() as _
@@ -178,15 +185,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                                             size.height.try_into().unwrap());
 
                     if let Some(tree) = &tree {
-                        resize_canvas((tree.size().width(), tree.size().height()));
+                        expand_central((tree.size().width(), tree.size().height()));
                     }
                     if let Some(lottie) = &lottie {
-                        resize_canvas((lottie.w as _, lottie.h as _));
+                        expand_central((lottie.w as _, lottie.h as _));
                     }
-                    #[cfg(feature = "rive-rs")] if scene.is_some() { //mouse = (0., 0.);
+                    #[cfg(feature = "rive-rs")] if scene.is_some() {
                         viewport.resize(size.width, size.height);
                         canvas.set_size(size.width, size.height, 1.);
-                    }
+                    }   mouse = (0., 0.);
                 }
 
                 WindowEvent::KeyboardInput { event, .. } => {
@@ -196,16 +203,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                             Key::Named(NamedKey::Space) => {
                                 prevt = Instant::now();      paused = !paused;
                             }
-                            Key::Character(char) => if paused { use std::time::Duration;
-                                match char {
-                                    "n" | "N" => {
-                                        prevt = Instant::now() - Duration::from_millis((1000. /
-                                            lottie.as_ref().map_or(60., |lottie|
-                                                lottie.fr)) as _);  // XXX:
-                                        window.request_redraw();
-                                    }   _ => (),
-                                }
-                            }   _ => (),
+                            Key::Character(char) => if paused { match char {
+                                "n" | "N" => {  use std::time::Duration;
+                                    prevt = Instant::now() - Duration::from_millis((1000. /
+                                        lottie.as_ref().map_or(60., |lottie|
+                                            lottie.fr)) as _);  // XXX:
+                                    window.request_redraw();
+                                }   _ => (),
+                            } }     _ => (),
                         }
                     }
                 }
@@ -257,16 +262,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                     match path.extension().and_then(|ext| ext.to_str()) {
                         Some("svg") => tree  = usvg::Tree::from_data(&file,
                             &usvg_opts).ok().map(|tree| {
-                                resize_canvas((tree.size().width(), tree.size().height())); tree
+                                expand_central((tree.size().width(), tree.size().height())); tree
                             }),
 
                         #[cfg(feature = "rive-rs")]
-                        Some("riv") => scene = NanoVG::new_scene(&file),
+                        Some("riv") => scene = NanoVG::new_scene(&file).map(|scene| {
+                                let size = window.inner_size();
+                                viewport.resize(size.width, size.height);
+                                canvas.set_size(size.width, size.height, 1.); scene }),
                         Some("json") => lottie = Animation::from_reader(
                             fs::File::open(&path).unwrap()).ok().map(|lottie| {
-                                resize_canvas((lottie.w as _, lottie.h as _)); lottie }),
+                                expand_central((lottie.w as _, lottie.h as _)); lottie }),
                         _ => eprintln!("File format is not supported: {}", path.display()),
-                    }
+                    }   mouse = (0., 0.);
 
                     //let mut size =  window.inner_size();  size.width += 1; size.height += 1;
                     //let _ = window.request_inner_size(size);
@@ -274,27 +282,25 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 WindowEvent::RedrawRequested => {
-                    let elapsed = prevt.elapsed();  prevt = Instant::now();
+                    let _elapsed = prevt.elapsed(); prevt = Instant::now();
                     canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
                         Color::rgbf(0.4, 0.4, 0.4));    // XXX: to clear viewport/viewbox only?
 
                     #[cfg(feature = "rive-rs")] if let Some(scene) = &mut scene {
                         if !scene.advance_and_maybe_draw(&mut NanoVG::new(&mut canvas),
-                            elapsed, &mut viewport) { return }
+                            _elapsed, &mut viewport) { return }
                     }
                     if let Some(lottie) = &mut lottie {
                         if !(lottie.render_next_frame(&mut canvas,
-                            elapsed.as_secs_f32())) { return }
+                            _elapsed.as_secs_f32())) { return }
                         // TODO: draw frame time (lottie.fnth) on screen?
                     }
                     if let Some(tree) = &tree {
                         render_nodes(&mut canvas, &mouse, tree.root(),
                             &usvg::Transform::identity());
-                    }/* else {
-                        canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
-                            Color::rgbf(0.4, 0.4, 0.4));
-                        _some_test_case(&mut canvas);
-                    } */
+                    }
+
+                    if do_test { _some_test_case(&mut canvas); }
 
                     perf.render(&mut canvas, 3., 3.);   canvas.flush();
                     // Tell renderer to execute all drawing commands
@@ -527,27 +533,34 @@ fn _some_test_case<T: Renderer>(canvas: &mut Canvas<T>) {
     let (w, h) = (canvas.width(), canvas.height());
     let (w, h) = (w as f32, h as f32);
 
+    let imgid = canvas.create_image_empty(w as _, h as _,
+        femtovg::PixelFormat::Rgba8, femtovg::ImageFlags::FLIP_Y).unwrap();
+    canvas.set_render_target(femtovg::RenderTarget::Image(imgid));
+    canvas.clear_rect(0, 0, w as _, h as _, femtovg::Color::rgbaf(0., 0., 0., 0.));
+
     let (lx, ty) = (w / 4., h / 4.);
     let mut path = Path::new();     path.rect(lx, ty, w / 2., h / 2.);
     canvas.stroke_path(&path, &Paint::color(Color::rgbaf(0., 0., 1., 1.)).with_line_width(1.));
+    canvas.  fill_path(&path, &Paint::color(Color::rgbaf(1., 0.5, 0.5, 1.)));
 
-    /* let imgid = canvas.create_image_empty(w as _, h as _,
+    let mskid = canvas.create_image_empty(w as _, h as _,
         femtovg::PixelFormat::Rgba8, femtovg::ImageFlags::FLIP_Y).unwrap();
-    canvas.set_render_target(femtovg::RenderTarget::Image(imgid));
-    canvas.clear_rect(0, 0, w as _, h as _, femtovg::Color::rgbaf(0., 0., 0., 0.)); */
+    canvas.set_render_target(femtovg::RenderTarget::Image(mskid));
+    canvas.clear_rect(0, 0, w as _, h as _, femtovg::Color::rgbaf(0., 0., 0., 0.));
 
-    canvas.fill_path(&path, &Paint::color(Color::rgbaf(1., 0.5, 0.5, 1.)));
-    canvas.global_composite_operation(femtovg::CompositeOperation::DestinationIn);
-    let mut path = Path::new();
-
-    let (rx, by) = (w - lx, h - ty - 10.);
+    let (mut path, rx, by) = (Path::new(), w - lx, h - ty - 10.);
     path.move_to(w / 2., ty); path.line_to(rx, by); path.line_to(lx, by); path.close();
     canvas.fill_path(&path, &Paint::color(Color::rgbaf(0., 1., 0., 1.)));
 
+    path = Path::new();  path.rect(0., 0., w, h);
+    canvas.global_composite_operation(femtovg::CompositeOperation::DestinationIn);
+    canvas.set_render_target(femtovg::RenderTarget::Image(imgid));
+    let paint = femtovg::Paint::image(mskid, 0., 0., w, h, 0., 1.);
+    canvas.fill_path(&path, &paint);    canvas.flush();     canvas.delete_image(mskid);
+
     canvas.global_composite_operation(femtovg::CompositeOperation::SourceOver);
-    /* let mut path = Path::new(); path.rect(0., 0., w, h);
-    let paint = femtovg::Paint::image(imgid, 0., 0., w, h, 0., 1.);
     canvas.set_render_target(femtovg::RenderTarget::Screen);
-    canvas.fill_path(&path, &paint);    canvas.flush();     canvas.delete_image(imgid); */
+    let paint = femtovg::Paint::image(imgid, 0., 0., w, h, 0., 1.);
+    canvas.fill_path(&path, &paint);    canvas.flush();     canvas.delete_image(imgid);
 }
 
