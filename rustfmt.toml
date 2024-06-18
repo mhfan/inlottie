@@ -1,0 +1,29 @@
+
+# adjust default configurations to preferred by mhfan: https://rust-lang.github.io/rustfmt
+# rustfmt --print-config default    # rustfmt --print-config current rustfmt.toml
+
+unstable_features = true
+edition = "2021"
+version = "Two"
+binop_separator = "Back"
+fn_params_layout = "Compressed"
+brace_style = "PreferSameLine"
+condense_wildcard_suffixes  = true
+format_code_in_doc_comments = true
+format_macro_matchers = true
+format_strings = true
+fn_single_line = true
+#imports_indent = "Visual"
+#indent_style   = "Visual"
+match_arm_blocks  = false
+where_single_line = true
+overflow_delimited_expr  = true
+use_field_init_shorthand = true
+normalize_doc_attributes = true
+imports_granularity = "Module"
+group_imports = "StdExternalCrate"
+short_array_element_width_threshold = 20
+enum_discrim_align_threshold = 20
+inline_attribute_width = 80
+struct_lit_width = 50
+

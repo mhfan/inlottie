@@ -1,0 +1,124 @@
+
+name: Rust CI   # https://docs.github.com/en/actions, https://course.rs/test/ci.html
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+  #schedule: -cron:'0 0 * * *'
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  testbuild:
+    #name: Build Rust Project
+    runs-on: ubuntu-latest  # https://github.com/actions/virtual-environments
+
+    #strategy:
+    #  matrix:
+    #    toolchain:
+    #      - stable
+    #      - nightly
+    #
+    #    compiler: [gcc, clang]
+    #    build: [linux, macos, windows]
+    #    include:
+    #      - build: linux
+    #        os: ubuntu-latest
+    #        target: x86_64-unknown-linux-musl
+    #      - build: macos
+    #        os: macos-latest
+    #        target: aarch64-apple-darwin
+    #      - build: windows
+    #        os: windows-latest
+    #        target: x86_64-pc-windows-msvc
+    #  fail-fast: false
+
+    steps:
+    #- run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+    - run: rustup update # some packages required by vello requires rustc v1.79
+
+    #- name: Install toolchain
+    #  uses: dtolnay/rust-toolchain@stable
+    #- uses: Swatinem/rust-cache@v2
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - run: git clone https://github.com/zimond/lottie-rs # for lottie-rs/fixtures
+
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Run tests
+    #  uses: taiki-e/install-action@nextest
+      run: cargo t -- --nocapture #cargo nextest r
+
+    - name: Build
+      run: |
+        cargo b -F "b2d" --bin blend2d
+        cargo b -F "vello" --bin vello
+      #  cargo b -F "rive-rs"
+
+    #- name: Benchmark
+    #  run: |
+    #    cargo bench -F "evg,b2d" # --all-features
+    #  #  sudo cargo flamegraph --bench engine_2d
+
+    #- name: Publish to crates-io
+    #  uses: katyo/publish-crates@v2
+    #  with:
+    #    registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  #coverage:   # https://github.com/xd009642/tarpaulin
+  #  runs-on: ubuntu-latest
+  #  #container:
+  #  #  image: xd009642/tarpaulin:develop-nightly
+  #  #  options: --security-opt seccomp=unconfined
+  #
+  #  steps:
+  #  - name: Checkout repository
+  #    uses: actions/checkout@v4
+
+    - run: rustup toolchain install nightly --profile minimal --component llvm-tools
+    - uses: Swatinem/rust-cache@v2 # should be after rustup
+
+    - uses: taiki-e/install-action@cargo-llvm-cov # https://github.com/taiki-e/cargo-llvm-cov
+    - name: Generate code coverage  # https://github.com/actions-rs/tarpaulin
+      env:
+        CC:  clang
+        CXX: clang++
+      run: cargo +nightly llvm-cov --doctests --lcov --output-path lcov.info #--workspace --all-features --include-ffi
+      #  cargo tarpaulin --run-types 'Tests,Doctests' --out Lcov --exclude-files 'inperse/src/*'
+      #  cargo install tarpaulin
+      #uses: actions-rs/tarpaulin@v0.1    # XXX: no more working
+      #with:
+      #  #version: '0.20.1'
+      #  #args: '-- --test-threads 1'
+      #  run-types: 'Tests,Doctests'
+
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{secrets.CODECOV_TOKEN}}  # not required for public repos
+      #  fail_ci_if_error: true
+        files: lcov.info
+
+    #- name: Archive code coverage results
+    #  uses: actions/upload-artifact@v3
+    #  with:
+    #    name: code-coverage-report
+    #    path: cobertura.xml
+

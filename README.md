@@ -1,4 +1,9 @@
 
+![Build status](https://github.com/mhfan/inlottie/actions/workflows/rust-ci.yml/badge.svg)
+[![Crates.io](https://img.shields.io/crates/v/inlottie.svg)](https://crates.io/crates/inlottie)
+[![dependency status](https://deps.rs/repo/github/mhfan/inlottie/status.svg)](https://deps.rs/repo/github/mhfan/inlottie)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+
 # lib/tool in Rust for [Lottie (Bodymovin) Animation](https://lottiefiles.com)
 
 The original [Lottie json shema](https://lottiefiles.github.io/lottie-docs/schema/) file was slightly modified so that the great [typify](https://github.com/oxidecomputer/typify) tool could run and convert it into Rust codebase. After extensive manual simplification and optimization efforts, finally, the `parser` seems to be very compatible to accept most of the [realword sample json files](https://github.com/zimond/lottie-rs/blob/main/fixtures) of [Lottie Animation](https://airbnb.design/lottie/) without too much compromise.
