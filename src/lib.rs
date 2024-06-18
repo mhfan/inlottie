@@ -1,5 +1,5 @@
 
-mod helpers;
+pub mod helpers;
 pub mod schema;
 pub mod render;
 

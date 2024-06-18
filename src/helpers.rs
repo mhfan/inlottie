@@ -379,7 +379,7 @@ pub mod math {  use super::*;
 
 ```
     use core::f32::consts::PI;
-    use inlottie::render::fast_atan2;
+    use inlottie::helpers::math::fast_atan2;
     assert_eq!(fast_atan2( 0.,  0.),   0.);
 
     assert_eq!(fast_atan2( 0.,  1.),   0.);
