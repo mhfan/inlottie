@@ -8,17 +8,17 @@ use serde_path_to_error::deserialize as deserial_err;
 // XXX: get resources from https://github.com/zimond/lottie-rs/tree/main/fixtures
 
 #[test] pub fn parse_ui_samples() -> Result<(), Box<dyn StdErr>> {  let mut cnt = 0u32;
-    for path in glob::glob("fixtures/ui/**/*.json")?.filter_map(Result::ok) {
+    for path in glob::glob("lottie-rs/fixtures/ui/**/*.json")?.filter_map(Result::ok) {
                 //.chain(glob::glob("fixtures/unit/simple/*.json")?)
-        let _: Animation = deserial_err(&mut json_des::from_reader(
-            File::open(&path)?)).map_err(|err| {
-                eprintln!("Failed parsing {}", path.display()); err })?;    cnt += 1;
+        if path.ends_with("issue_1460.json") { continue } // ignore malformed file
+        println!("Parsing {} ...", path.display());     cnt += 1;
+        let _: Animation = deserial_err(&mut json_des::from_reader(File::open(&path)?))?;
     }   println!("Succeed to parse {cnt} lottie json files!");  Ok(())
 }
 
 #[test] pub fn parse_segments() -> Result<(), Box<dyn StdErr>> {
     fn segparse<'de, T: serde::de::Deserialize<'de>>(sfn: &str) -> Result<T, Box<dyn StdErr>> {
-        let path = format!("fixtures/segments/{}.json", sfn);
+        let path = format!("lottie-rs/fixtures/segments/{}.json", sfn);
         Ok(deserial_err(&mut json_des::from_reader(File::open(&path)?))
             .map_err(|err| { eprintln!("Failed parsing {path}"); err })?)
     }   use inlottie::schema::{FillStrokeGrad, TextRange, Transform};

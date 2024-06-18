@@ -105,7 +105,11 @@ impl<'de> Deserialize<'de> for ColorList {
             data[0..cnt].chunks(4).zip(data[cnt..].chunks(2))
                 .map(|(chunk, opacity)| (chunk[0], // == opacity[0]
                 Rgba::new_f32(chunk[1], chunk[2], chunk[3], opacity[1]))).collect()
-        } else { unreachable!() })) // issue_1732.json
+        } else {    // issue_1732.json
+            eprintln!("Inconsistent ColorList: {cnt} * 4 != {}", data.len());
+            data.chunks_exact(4).map(|chunk| (chunk[0],
+                Rgba::new_f32(chunk[1], chunk[2], chunk[3], 1.))).collect()
+        }))
     }
 }
 
@@ -267,7 +271,7 @@ impl<'de> Deserialize<'de> for  AnyAsset {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
         //eprintln!("{}", value.to_string().get(0..20).unwrap());
-        //let _ = Precomposition::deserialize(&value).unwrap();
+        //let _ = Precomp::deserialize(&value).unwrap();
         let value = AssetBase::deserialize(value).unwrap();
         eprintln!("Failed with asset: {}", value.id);   Ok(AnyAsset(value))
     }
@@ -583,8 +587,10 @@ impl<T: Clone + Lerp> AnimatedProperty<T> {
                     ((get_scalar(&eh.to.time) as _, get_scalar(&eh.to.factor) as _),
                      (get_scalar(&eh.ti.time) as _, get_scalar(&eh.ti.factor) as _))) {
 
-                /*  https://github.com/gre/bezier-easing, https://lib.rs/keywords/cubic,
-                    https://github.com/hannesmann/keyframe
+                /*  https://github.com/orhanbalci/rust-easing,
+                //  https://github.com/hlhr202/bezier-easing-rs, https://easings.net
+                //  https://github.com/hannesmann/keyframe, https://lib.rs/keywords/easing
+
                     use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
                     let curve = Curve::from_points( (0., 0.).into(), (Coord2::from(ctrl.0),
                         Coord2::from(ctrl.1)), (1., 1.).into());

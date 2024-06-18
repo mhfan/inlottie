@@ -300,7 +300,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             &usvg::Transform::identity());
                     }
 
-                    if do_test { _some_test_case(&mut canvas); }
+                    if do_test { some_test_case(&mut canvas); }
 
                     perf.render(&mut canvas, 3., 3.);   canvas.flush();
                     // Tell renderer to execute all drawing commands
@@ -529,7 +529,7 @@ fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: &(f32, f32),
     } }
 }
 
-fn _some_test_case<T: Renderer>(canvas: &mut Canvas<T>) {
+fn some_test_case<T: Renderer>(canvas: &mut Canvas<T>) {
     let (w, h) = (canvas.width(), canvas.height());
     let (w, h) = (w as f32, h as f32);
 

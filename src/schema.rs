@@ -841,8 +841,8 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 #[repr(u8)] pub enum TextShape { Square = 1, RampUp, RampDown, Triangle, Round, Smooth, }
 
 #[derive(Deserialize, Serialize)] #[serde(untagged)]
-pub enum AssetItem { Image(Image), Sound(Sound), DataSource(DataSource),
-    Precomp(Precomp), DebugAny(AnyAsset),
+pub enum AssetItem { Precomp(Precomp), Image(Image), Sound(Sound),
+    DataSource(DataSource), DebugAny(AnyAsset),
 }
 
 #[derive(Deserialize, Serialize)] pub struct Image { // External image
