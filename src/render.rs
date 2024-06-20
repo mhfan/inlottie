@@ -12,66 +12,66 @@ trait PathFactory { fn to_path(&self, fnth: f32) -> VGPath; }
 
 impl PathFactory for Rectangle {
     fn to_path(&self, fnth: f32) -> VGPath {
-        let mut path = VGPath::new();
         let center = self. pos.get_value(fnth);
-        let half   = self.size.get_value(fnth) / 2.;    //let  half = size / 2.;
-        let radius = self.rcr.get_value(fnth).min(half.x).min(half.y);
-
-        let (elx, ety) = (center.x - half.x, center.y - half.y); // center - half
-        let (erx, eby) = (center.x + half.x, center.y + half.y); // center + half
+        let  halfs = self.size.get_value(fnth) / 2.;
+        let radius = self.rcr.get_value(fnth).min(halfs.x).min(halfs.y);
+        let (elt, erb) = (center - halfs, center + halfs);
 
         // Note that unlike other shapes, on lottie web when the `d` attribute is missing,
         // the rectangle defaults as being reversed.
         //let is_ccw = self.base.dir.map_or(true, |d| matches!(d, ShapeDirection::Reversed));
 
-        if radius < f32::EPSILON {      path.move_to(erx, ety);
+        let mut path = VGPath::new();
+        if radius < f32::EPSILON {      	path.move_to(erb.x, elt.y);
             if self.base.is_ccw() {
-                path.line_to(elx, ety); path.line_to(elx, eby); path.line_to(erx, eby);
+                path.line_to(elt.x, elt.y); path.line_to(elt.x, erb.y);
+				path.line_to(erb.x, erb.y);
             } else {
-                path.line_to(erx, eby); path.line_to(elx, eby); path.line_to(elx, ety);
-            }   path.close();   return  path
-            //path.rect(elx, ety, size.x, size.y);    return;
+                path.line_to(erb.x, erb.y); path.line_to(elt.x, erb.y);
+				path.line_to(elt.x, elt.y);
+            }   path.close();   	 return path;
+            //path.rect(elt.x, elt.y, size.x, size.y); 	return;
         }
 
-        //path.rounded_rect(elx, ety, size.x, size.y, radius);  return;
-        let (clx, cty) = (elx + radius, ety + radius); // elt + radius
-        let (crx, cby) = (erx - radius, eby - radius); // erb - radius
-            path.move_to(erx, cty);
+        //path.rounded_rect(elt.x, elt.y, size.x, size.y, radius); 	return;
+        let (clt, crb) = (elt + radius, erb - radius);
+            path.move_to(erb.x, clt.y);
 
         /* let tangent = radius * 0.5519;   // approximate with cubic Bezier curve
-        let (tlx, tty) = (clx - tangent, cty - tangent); // clt - tangent
-        let (trx, tby) = (crx + tangent, cby + tangent); // crb + tangent
+        let (tlx, tty) = (clx - tangent, cty - tangent); // clt - tangent;
+        let (trx, tby) = (crx + tangent, cby + tangent); // crb + tangent;
+		let (tlt, trb) = (clt - tangent, crb + tangent);
 
         if self.base.is_ccw() {
-            path.bezier_to(erx, tty, trx, ety, crx, ety);     path.line_to(clx, ety);
-            path.bezier_to(tlx, ety, elx, tty, elx, cty);     path.line_to(elx, cby);
-            path.bezier_to(elx, tby, tlx, eby, clx, eby);     path.line_to(crx, eby);
-            path.bezier_to(trx, eby, erx, tby, erx, cby);     //path.line_to(erx, cty);
+            path.bezier_to(erb.x, tlt.y, trb.x, elt.y, crb.x, elt.y); path.line_to(clt.x, elt.y);
+            path.bezier_to(tlt.x, elt.y, elt.x, tlt.y, elt.x, clt.y); path.line_to(elt.x, crb.y);
+            path.bezier_to(elt.x, trb.y, tlt.x, erb.y, clt.x, erb.y); path.line_to(crb.x, erb.y);
+            path.bezier_to(trb.x, erb.y, erb.x, trb.y, erb.x, crb.y); //path.line_to(erb.x, clt.y);
         } else {
-            path.line_to(erx, cby);     path.bezier_to(erx, tby, trx, eby, crx, eby);
-            path.line_to(clx, eby);     path.bezier_to(tlx, eby, elx, tby, elx, cby);
-            path.line_to(elx, cty);     path.bezier_to(elx, tty, tlx, ety, clx, ety);
-            path.line_to(crx, ety);     path.bezier_to(trx, ety, erx, tty, erx, cty);
-        }   path.close(); */
+            path.line_to(erb.x, crb.y); path.bezier_to(erb.x, trb.y, trb.x, erb.y, crb.x, erb.y);
+            path.line_to(clt.x, erb.y); path.bezier_to(tlt.x, erb.y, elt.x, trb.y, elt.x, crb.y);
+            path.line_to(elt.x, clt.y); path.bezier_to(elt.x, tlt.y, tlt.x, elt.y, clt.x, elt.y);
+            path.line_to(crb.x, elt.y); path.bezier_to(trb.x, elt.y, erb.x, tlt.y, erb.x, clt.y);
+        }   path.close(); 	return; */
 
         if self.base.is_ccw() {     let dir = femtovg::Solidity::Solid;
-            //path.arc_to(erx, ety, crx, ety, radius);
-            path.arc(crx, cty, radius,  0.,  PI / 2., dir);     path.line_to(clx, ety);
-            //path.arc_to(elx, ety, elx, cty, radius);
-            path.arc(clx, cty, radius,  PI / 2.,  PI, dir);     path.line_to(elx, cby);
-            //path.arc_to(elx, eby, clx, eby, radius);
-            path.arc(clx, cby, radius,  PI, -PI / 2., dir);     path.line_to(crx, eby);
-            //path.arc_to(erx, eby, erx, cby, radius);
-            path.arc(crx, cby, radius, -PI / 2.,  0., dir);     //path.line_to(erx, cty);
+            //path.arc_to(erb.x, elt.y, crb.x, elt.y, radius);
+            path.arc(crb.x, clt.y, radius,  0.,  PI / 2., dir); path.line_to(clt.x, elt.y);
+            //path.arc_to(elt.x, elt.y, elt.x, clt.y, radius);
+            path.arc(clt.x, clt.y, radius,  PI / 2.,  PI, dir); path.line_to(elt.x, crb.y);
+            //path.arc_to(elt.x, erb.y, clt.x, erb.y, radius);
+            path.arc(clt.x, crb.y, radius,  PI, -PI / 2., dir); path.line_to(crb.x, erb.y);
+            //path.arc_to(erb.x, erb.y, erb.x, crb.y, radius);
+            path.arc(crb.x, crb.y, radius, -PI / 2.,  0., dir); //path.line_to(erb.x, clt.y);
         } else {                    let dir = femtovg::Solidity::Hole; // XXX:
-            path.line_to(erx, cby);     path.arc(crx, cby, radius,  0., -PI / 2., dir);
-                                        //path.arc_to(erx, cby, crx, eby, radius);
-            path.line_to(clx, eby);     path.arc(clx, cby, radius, -PI / 2.,  PI, dir);
-                                        //path.arc_to(elx, eby, elx, cby, radius);
-            path.line_to(elx, cty);     path.arc(clx, cty, radius,  PI,  PI / 2., dir);
-                                        //path.arc_to(elx, ety, clx, ety, radius);
-            path.line_to(crx, ety);     path.arc(crx, cty, radius,  PI / 2.,  0., dir);
-                                        //path.arc_to(erx, ety, erx, cty, radius);
+            path.line_to(erb.x, crb.y); path.arc(crb.x, crb.y, radius,  0., -PI / 2., dir);
+                                        //path.arc_to(erb.x, crb.y, crb.x, erb.y, radius);
+            path.line_to(clt.x, erb.y); path.arc(clt.x, crb.y, radius, -PI / 2.,  PI, dir);
+                                        //path.arc_to(elt.x, erb.y, elt.x, crb.y, radius);
+            path.line_to(elt.x, clt.y); path.arc(clt.x, clt.y, radius,  PI,  PI / 2., dir);
+                                        //path.arc_to(elt.x, elt.y, clt.x, elt.y, radius);
+            path.line_to(crb.x, elt.y); path.arc(crb.x, clt.y, radius,  PI / 2.,  0., dir);
+                                        //path.arc_to(erb.x, elt.y, erb.x, clt.y, radius);
         }   path.close();   path
     }
 }
@@ -79,36 +79,35 @@ impl PathFactory for Rectangle {
 impl PathFactory for Polystar {
     fn to_path(&self, fnth: f32) -> VGPath {
         let center = self.pos.get_value(fnth);
-        let nvp = self.pt.get_value(fnth) as u32;
-        let or  = self.or.get_value(fnth);
-        let orr = self.os.get_value(fnth) * PI / 2. / 100. / nvp as f32;  // XXX:
+        let (or, nvp) = (self.or.get_value(fnth), self.pt.get_value(fnth));
+        let orr = self.os.get_value(fnth) * PI / 2. / 100. / nvp;  // XXX:
 
         let ir  = self.ir.as_ref().map_or(0.,   // self.sy == StarType::Star
             |ir| ir.get_value(fnth));
         let irr = self.is.as_ref().map_or(0.,
-            |is| is.get_value(fnth) * PI / 2. / 100. / nvp as f32);
+            |is| is.get_value(fnth) * PI / 2. / 100. / nvp);
 
         let mut angle = -PI / 2. + self.rotation.get_value(fnth) * PI / 180.;
         let angle_step = if matches!(self.sy, StarType::Star) { PI } else { PI * 2. } /
-            if self.base.is_ccw() { -(nvp as f32) } else { nvp as _ };
+            if self.base.is_ccw() { -nvp } else { nvp };
 
-        let (rpx, rpy) = (angle.cos() * or, angle.sin() * or); // rpt * or
-        let (ptx, pty) = (center.x + rpx, center.y + rpy); // center + rpt
-        let mut path = VGPath::new();   path.move_to(ptx, pty);
+		let rp = Vector2D::from_polar(angle) * or;
+		let pt = center + rp; 	//let rp = rp * orr;
+        let mut path = VGPath::new();   path.move_to(pt.x, pt.y);
 
-        let (mut lotx, mut loty) = (ptx - rpy * orr, pty + rpx * orr);
+        let (mut lotx, mut loty) = (pt.x - rp.y * orr, pt.y + rp.x * orr);
         let  mut add_bezier_to = |radius, rr| {
-            angle += angle_step;    // rpt * radius
+            angle += angle_step;
 
-            let (rpx, rpy): (f32, _) = (angle.cos() * radius, angle.sin() * radius);
-            let (ptx, pty) = (center.x + rpx, center.y + rpy); // center + rpt
-            let (rdx, rdy) = (rpy * rr, -rpx * rr);
+			let rp = Vector2D::from_polar(angle) * radius;
+			let pt = center + rp; 	//let rp = rp * rr;
+            let (rdx, rdy) = (rp.y * rr, -rp.x * rr);
 
-            path.bezier_to(lotx, loty, ptx + rdx, pty + rdy, ptx, pty); // pt + rd
-            (lotx, loty) = (ptx - rdx, pty - rdy); // pt - rd
+            path.bezier_to(lotx, loty,  pt.x + rdx, pt.y + rdy, pt.x, pt.y); // pt + rd
+            (lotx, loty) = (pt.x - rdx, pt.y - rdy); // pt - rd
         };
 
-        for _ in 0..nvp {
+        for _ in 0..nvp as u32 {
             if matches!(self.sy, StarType::Star) { add_bezier_to(ir, irr); }
             add_bezier_to(or, orr);
         }   path.close();   path
@@ -124,22 +123,20 @@ impl PathFactory for Ellipse {
         //  Approximate a circle with cubic Bézier curves
         //  https://spencermortensen.com/articles/bezier-circle/
         let tangent = radius * 0.5519;  // a magic number
-        let (elx, ety) = (center.x -  radius.x, center.y -  radius.y); // center -  radius
-        let (erx, eby) = (center.x +  radius.x, center.y +  radius.y); // center +  radius
-        let (tlx, tty) = (center.x - tangent.x, center.y - tangent.y); // center - tangent
-        let (trx, tby) = (center.x + tangent.x, center.y + tangent.y); // center + tangent
+        let (elt, tlt) = (center - radius, center - tangent);
+        let (erb, trb) = (center + radius, center + tangent);
+        let mut path = VGPath::new();   path.move_to(center.x, elt.y);
 
-        let mut path = VGPath::new();   path.move_to(center.x, ety);
         if self.base.is_ccw() {
-            path.bezier_to(tlx, ety, elx, tty, elx, center.y);
-            path.bezier_to(elx, tby, tlx, eby, center.x, eby);
-            path.bezier_to(trx, eby, erx, tby, erx, center.y);
-            path.bezier_to(erx, tty, trx, ety, center.x, ety);
+            path.bezier_to(tlt.x, elt.y, elt.x, tlt.y, elt.x, center.y);
+            path.bezier_to(elt.x, trb.y, tlt.x, erb.y, center.x, erb.y);
+            path.bezier_to(trb.x, erb.y, erb.x, trb.y, erb.x, center.y);
+            path.bezier_to(erb.x, tlt.y, trb.x, elt.y, center.x, elt.y);
         } else {
-            path.bezier_to(trx, ety, erx, tty, erx, center.y);
-            path.bezier_to(erx, tby, trx, eby, center.x, eby);
-            path.bezier_to(tlx, eby, elx, tby, elx, center.y);
-            path.bezier_to(elx, tty, tlx, ety, center.x, ety);
+            path.bezier_to(trb.x, elt.y, erb.x, tlt.y, erb.x, center.y);
+            path.bezier_to(erb.x, trb.y, trb.x, erb.y, center.x, erb.y);
+            path.bezier_to(tlt.x, erb.y, elt.x, trb.y, elt.x, center.y);
+            path.bezier_to(elt.x, tlt.y, tlt.x, elt.y, center.x, elt.y);
         }   path.close();   path
     }
 }

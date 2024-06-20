@@ -445,6 +445,9 @@ impl Sub for Vector2D {  type Output = Vector2D;
         Self::Output { x: self.x - rhs.x, y: self.y - rhs.y }
     }
 }
+impl Vector2D {
+    #[inline] pub fn from_polar(angle: f32) -> Self { Self { x: angle.cos(), y: angle.sin() } }
+}
 
 pub trait Lerp { fn lerp(&self, other: &Self, t: f32) -> Self;  // Linear intERPolation
     fn bezc(&self, _: &Self, _: f32, _: &PositionExtra) -> Self
