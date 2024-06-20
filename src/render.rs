@@ -91,7 +91,7 @@ impl PathFactory for Polystar {
         let angle_step = if matches!(self.sy, StarType::Star) { PI } else { PI * 2. } /
             if self.base.is_ccw() { -nvp } else { nvp };
 
-		let rp = Vector2D::from_polar(angle) * or;
+		let rp = Vec2D::from_polar(angle) * or;
 		let pt = center + rp; 	//let rp = rp * orr;
         let mut path = VGPath::new();   path.move_to(pt.x, pt.y);
 
@@ -99,7 +99,7 @@ impl PathFactory for Polystar {
         let  mut add_bezier_to = |radius, rr| {
             angle += angle_step;
 
-			let rp = Vector2D::from_polar(angle) * radius;
+			let rp = Vec2D::from_polar(angle) * radius;
 			let pt = center + rp; 	//let rp = rp * rr;
             let (rdx, rdy) = (rp.y * rr, -rp.x * rr);
 
@@ -320,9 +320,9 @@ impl Transform {
             }
 
             Some(Translation::Split(sv)) => {   debug_assert!(sv.split);
-                let pos = Vector2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) };
+                let pos = Vec2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) };
                 if  ao.as_bool() {
-                    let orient = Vector2D { x: pos.x - sv.x.get_value(fnth - 1.),
+                    let orient = Vec2D { x: pos.x - sv.x.get_value(fnth - 1.),
                                                       y: pos.y - sv.y.get_value(fnth - 1.) };
                     ts.rotate(fast_atan2(orient.y, orient.x));  trfm.multiply(&ts);
                 }   trfm.multiply(&TM2D::new_translation(pos.x, pos.y));
@@ -337,7 +337,7 @@ impl Transform {
         let anchor = if let Some(anchor) = &self.anchor {
             let anchor = anchor.get_value(fnth);
             trfm.multiply(&TM2D::new_translation(-anchor.x, -anchor.y));    anchor
-        } else { Vector2D { x: 0., y: 0. } };
+        } else { Vec2D { x: 0., y: 0. } };
 
         if  let Some(scale) = &self.scale {
             let scale = scale.get_value(fnth) / 100.;
@@ -369,8 +369,8 @@ impl Transform {
         let pos = match &self.position {
             Some(Translation::Normal(apos)) => apos.get_value(fnth),
             Some(Translation::Split(sv)) => {   debug_assert!(sv.split);
-                Vector2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) }
-            }   _ => Vector2D { x: 0., y: 0. },
+                Vec2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) }
+            }   _ => Vec2D { x: 0., y: 0. },
         };  // XXX: shouldn't need to deal with auto orient?
 
         trfm.multiply(&TM2D::new_translation(pos.x * offset + anchor.x,

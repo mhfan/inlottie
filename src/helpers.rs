@@ -67,14 +67,13 @@ impl core::fmt::Display for Rgba {
 #[inline] pub(crate) fn str_from_rgba<S: Serializer>(c: &Rgba, serializer: S) ->
     Result<S::Ok, S::Error> { serializer.serialize_str(&c.to_string()) }
 
-// euclid::default::Vector2D<f32>;  // Point/Size, Position/Scale
-#[derive(Clone, Copy)] pub struct Vector2D { pub x: f32, pub y: f32 }
-//impl From<Vector2D> for (f32, f32) { fn from(val: Vector2D) -> Self { (val.x, val.y) } }
-impl From<(f32, f32)> for Vector2D {
+#[derive(Clone, Copy)] pub struct Vec2D { pub x: f32, pub y: f32 }
+//impl From<Vec2D> for (f32, f32) { fn from(val: Vec2D) -> Self { (val.x, val.y) } }
+impl From<(f32, f32)> for Vec2D {   // for Point/Size/Position/Scale
     #[inline] fn from(val: (f32, f32)) -> Self { Self { x: val.0, y: val.1 } }
 }
 
-impl<'de> Deserialize<'de> for Vector2D {
+impl<'de> Deserialize<'de> for Vec2D {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let v = Vec::<f32>::deserialize(deserializer)?;
         debug_assert!(!v.is_empty() && v.len() < 4); // XXX: ignore extra 3rd value?
@@ -82,7 +81,7 @@ impl<'de> Deserialize<'de> for Vector2D {
     }
 }
 
-impl Serialize for Vector2D {
+impl Serialize for Vec2D {
     #[inline] fn serialize<S: Serializer>(&self, serializer: S) ->
         Result<S::Ok, S::Error> { [self.x, self.y].serialize(serializer) }
 }
@@ -320,7 +319,7 @@ impl<'de> Deserialize<'de> for AnyValue {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)] enum TestLayerItem { SomeLayer(SomeLayer),
-    //Color(Rgba), //IntBool(IntBool), //Vector2D(Vector2D),
+    //Color(Rgba), //IntBool(IntBool), //Vec2D(Vec2D),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)] struct SomeLayer {
@@ -415,37 +414,37 @@ pub fn fast_atan2(y: f32, x: f32) -> f32 {  use core::f32::consts::PI;
 }
 
 use core::ops::{Div, Mul, Add, Sub};
-impl Div<f32> for Vector2D {  type Output = Vector2D;
+impl Div<f32> for Vec2D {  type Output = Vec2D;
     #[inline] fn div(self, scale: f32) -> Self::Output {
         Self::Output { x: self.x / scale, y: self.y / scale }
     }
 }
-impl Mul<f32> for Vector2D {  type Output = Vector2D;
+impl Mul<f32> for Vec2D {  type Output = Vec2D;
     #[inline] fn mul(self, scale: f32) -> Self::Output {
         Self::Output { x: self.x * scale, y: self.y * scale }
     }
 }
-impl Add<f32> for Vector2D {  type Output = Vector2D;
+impl Add<f32> for Vec2D {  type Output = Vec2D;
     #[inline] fn add(self, offset: f32) -> Self::Output {
         Self::Output { x: self.x + offset, y: self.y + offset }
     }
 }
-impl Sub<f32> for Vector2D {  type Output = Vector2D;
+impl Sub<f32> for Vec2D {  type Output = Vec2D;
     #[inline] fn sub(self, offset: f32) -> Self::Output {
         Self::Output { x: self.x - offset, y: self.y - offset }
     }
 }
-impl Add for Vector2D {  type Output = Vector2D;
+impl Add for Vec2D {  type Output = Vec2D;
     #[inline] fn add(self, rhs: Self) -> Self::Output {
         Self::Output { x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }
-impl Sub for Vector2D {  type Output = Vector2D;
+impl Sub for Vec2D {  type Output = Vec2D;
     #[inline] fn sub(self, rhs: Self) -> Self::Output {
         Self::Output { x: self.x - rhs.x, y: self.y - rhs.y }
     }
 }
-impl Vector2D {
+impl Vec2D {
     #[inline] pub fn from_polar(angle: f32) -> Self { Self { x: angle.cos(), y: angle.sin() } }
 }
 
@@ -458,7 +457,7 @@ impl Lerp for f32 {
     #[inline] fn lerp(&self, other: &Self, t: f32) -> Self { self + (other - self) * t }
 }
 
-impl Lerp for Vector2D {
+impl Lerp for Vec2D {
     fn lerp(&self, other: &Self, t: f32) -> Self {
         Self {  x: self.x + (other.x - self.x) * t,
                 y: self.y + (other.y - self.y) * t, }
@@ -466,8 +465,8 @@ impl Lerp for Vector2D {
 
     fn bezc(&self, other: &Self, t: f32, extra: &PositionExtra) -> Self
         where Self: std::marker::Sized {
-        /* impl From<&Vector2D> for Coord2 {
-            #[inline] fn from(val: &Vector2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
+        /* impl From<&Vec2D> for Coord2 {
+            #[inline] fn from(val: &Vec2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
         }   use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
         let bezier = Curve::from_points((*self).into(), ((*self + extra.to).into(),
             (*other + extra.ti).into()), (*other).into());
@@ -480,8 +479,8 @@ impl Lerp for Vector2D {
                 tmin = tmid; } else { tmax = tmid; }
         }   let pt = bezier.point_at_pos((tmin + tmax) / 2.); */
 
-        impl From<Vector2D> for Point {
-            #[inline] fn from(val: Vector2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
+        impl From<Vec2D> for Point {
+            #[inline] fn from(val: Vec2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
         }   use kurbo::{CubicBez, ParamCurve, ParamCurveArclen, Point};
         let curve = CubicBez::new::<Point>((*self).into(), (*self + extra.to).into(),
             (*other + extra.ti).into(), (*other).into());
@@ -511,7 +510,7 @@ impl Lerp for Rgba {
 impl Lerp for Bezier {
     fn lerp(&self, other: &Self, t: f32) -> Self {
         let closure =
-            |val: (&Vector2D, &Vector2D)| val.0.lerp(val.1, t);
+            |val: (&Vec2D, &Vec2D)| val.0.lerp(val.1, t);
         Self { closed: self.closed,
             vp: self.vp.iter().zip(other.vp.iter()).map(closure).collect(),
             it: self.it.iter().zip(other.it.iter()).map(closure).collect(),
@@ -614,7 +613,7 @@ impl<T: Clone + Lerp> AnimatedProperty<T> {
 
                 let (kf_prev, kf_next) = (kf.as_scalar(), coll[len + 1].as_scalar());
                 if let Some(extra) = &kf.pextra {
-                    //debug_assert!(std::any::TypeId::of::<T>() == TypeId::of::<Vector2D>());
+                    //debug_assert!(std::any::TypeId::of::<T>() == TypeId::of::<Vec2D>());
                     kf_prev.bezc(kf_next, time, extra)
                 } else { kf_prev.lerp(kf_next, time) }
             }   _ => unreachable!(),

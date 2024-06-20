@@ -6,7 +6,7 @@
  ****************************************************************/
 
 //#![allow(unused)]
-use crate::helpers::Vector2D;
+use crate::helpers::Vec2D;
 use rive_rs::{path as rpath, Scene, Instantiate, File, Artboard, Handle,
     renderer::{self, PaintStyle, BlendMode, BufferType, BufferFlags}};
 use femtovg::{Renderer, FillRule, CompositeOperation as CompOp,
@@ -108,7 +108,7 @@ impl<T: Renderer + 'static> renderer::Renderer for NanoVG<T> { // aka Femtovg
                 //center.0 += pt.0; center.1 += pt.1;
                 path.line_to(pt.0, pt.1);
 
-                (Vector2D { x: pt.0, y: pt.1 }, Vector2D { x: tp.0, y: tp.1 })
+                (Vec2D { x: pt.0, y: pt.1 }, Vec2D { x: tp.0, y: tp.1 })
             }).collect::<Vec<_>>(); //path.close();
 
             //center.0 /= 3.; center.1 /= 3.;
@@ -299,7 +299,7 @@ impl renderer::Image for Image {
 ///
 /// [Simplex Affine Mapping]: https://www.researchgate.net/publication/332410209_Beginner%27s_guide_to_mapping_simplexes_affinely
 /// [Swift implementation]: https://rethunk.medium.com/finding-an-affine-transform-using-three-2d-point-correspondences-using-simplex-affine-mapping-255aeb4e8055
-fn simplex_affine_mapping(mesh: &[(Vector2D, Vector2D)]) -> TM2D {
+fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
     //debug_assert!(mesh.len() == 3);
     let (a, d) = mesh[0];
     let (b, e) = mesh[1];

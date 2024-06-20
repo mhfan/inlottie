@@ -1,7 +1,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_repr::{Serialize_repr, Deserialize_repr}; // for the underlying repr of a C-like enum
-use crate::helpers::{IntBool, Rgba, Vector2D, ColorList, AnyValue, AnyAsset, defaults};
+use crate::helpers::{IntBool, Rgba, Vec2D, ColorList, AnyValue, AnyAsset, defaults};
 
 /// Top level object, describing the animation.
 /// https://lottiefiles.github.io/lottie-docs/schema/
@@ -254,10 +254,10 @@ pub enum TransRotation {    Split3D(Box<SplitRotation>),
 
 /// (In/Out) tangent for values (eg: moving position around a curved path)
 #[derive(Deserialize, Serialize)] pub struct PositionExtra {
-    //#[serde(flatten)] pub kf: KeyframeBase<Vector2D>, // PositionKeyframe
+    //#[serde(flatten)] pub kf: KeyframeBase<Vec2D>, // PositionKeyframe
 
-    pub ti: Vector2D, //Vec<f32>,
-    pub to: Vector2D, //Vec<f32>,
+    pub ti: Vec2D, //Vec<f32>,
+    pub to: Vec2D, //Vec<f32>,
 }
 
 /// An animatable property that is split into individually anaimated components
@@ -268,8 +268,8 @@ pub enum TransRotation {    Split3D(Box<SplitRotation>),
 }
 
 pub type Value = AnimatedProperty<f32>;
-pub type Position   = AnimatedProperty<Vector2D>;
-pub type Animated2D = AnimatedProperty<Vector2D>;
+pub type Position   = AnimatedProperty<Vec2D>;
+pub type Animated2D = AnimatedProperty<Vec2D>;
 pub type ColorValue = AnimatedProperty<Color>;
 pub type MultiD = AnimatedProperty<Vec<f32>>;
 
@@ -569,11 +569,11 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 #[derive(Clone, Deserialize, Serialize)] /** Single bezier curve */ pub struct Bezier {
     #[serde(rename = "c", default)] pub closed: bool,
     /// These points are along the bezier path.
-    #[serde(rename = "v")] pub vp: Vec<Vector2D>,
+    #[serde(rename = "v")] pub vp: Vec<Vec2D>,
     /// These points are along the `in`  tangents relative to the corresponding `v`.
-    #[serde(rename = "i")] pub it: Vec<Vector2D>, // Cubic control points, incoming tangent
+    #[serde(rename = "i")] pub it: Vec<Vec2D>, // Cubic control points, incoming tangent
     /// These points are along the `out` tangents relative to the corresponding `v`.
-    #[serde(rename = "o")] pub ot: Vec<Vector2D>, // Cubic control points, outgoing tangent
+    #[serde(rename = "o")] pub ot: Vec<Vec2D>, // Cubic control points, outgoing tangent
 }
 
 #[derive(Deserialize, Serialize)] /** Group transform */ pub struct TransformShape {
@@ -786,9 +786,9 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
     #[serde(skip_serializing_if = "Option::is_none")] pub of: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")] /** Line Height */ pub lh: Option<f32>,
     /// Wrap size of the box containing the text
-    #[serde(skip_serializing_if = "Option::is_none")] pub sz: Option<Vector2D>,
+    #[serde(skip_serializing_if = "Option::is_none")] pub sz: Option<Vec2D>,
     /// Wrap position of the box containing the text
-    #[serde(skip_serializing_if = "Option::is_none")] pub ps: Option<Vector2D>,
+    #[serde(skip_serializing_if = "Option::is_none")] pub ps: Option<Vec2D>,
     #[serde(skip_serializing_if = "Option::is_none")] pub ca: Option<TextCaps>,
     #[serde(skip_serializing_if = "Option::is_none")] /** Tracking */ pub tr: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")] /// Baseline Shift
