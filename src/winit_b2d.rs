@@ -144,7 +144,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?; Ok(())
 }
 
-fn blend2d_logo(ctx: &mut BLContext) {  ctx.clearAll();
+fn blend2d_logo(ctx: &mut BLContext) {  // Pixel color format: 0xAARRGGBB
+    //let mut img = BLImage::new(480, 480, BLFormat::BL_FORMAT_PRGB32);
+    ctx.clearAll();     //let mut ctx = BLContext::new(&mut img);
     let mut radial = BLGradient::new(&BLRadialGradientValues::new(
         &(180, 180).into(), &(180, 180).into(), 180.0, 0.));
     radial.addStop(0.0, 0xFFFFFFFF.into());

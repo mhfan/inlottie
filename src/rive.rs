@@ -5,12 +5,11 @@
  * Copyright (c) 2024 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-//#![allow(unused)]
 use crate::helpers::Vec2D;
 use rive_rs::{path as rpath, Scene, Instantiate, File, Artboard, Handle,
     renderer::{self, PaintStyle, BlendMode, BufferType, BufferFlags}};
 use femtovg::{Renderer, FillRule, CompositeOperation as CompOp,
-     Transform2D as TM2D, Path as VGPath, Paint as VGPaint};
+    Transform2D as TM2D, Path as VGPath, Paint as VGPaint};
 
 pub struct NanoVG<T: Renderer + 'static>(&'static mut femtovg::Canvas<T>);
 
@@ -301,18 +300,16 @@ impl renderer::Image for Image {
 /// [Swift implementation]: https://rethunk.medium.com/finding-an-affine-transform-using-three-2d-point-correspondences-using-simplex-affine-mapping-255aeb4e8055
 fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
     //debug_assert!(mesh.len() == 3);
-    let (a, d) = mesh[0];
-    let (b, e) = mesh[1];
-    let (c, f) = mesh[2];
+    let ((a, d), (b, e), (c, f)) = (mesh[0], mesh[1], mesh[2]);
 
     let det_recip = (a.x * b.y + b.x * c.y + c.x * a.y -
-                          a.x * c.y - b.x * a.y - c.x * b.y).recip();
+                     a.x * c.y - b.x * a.y - c.x * b.y).recip();
 
     let p = (d * (b.y - c.y) - e * (a.y - c.y) + f * (a.y - b.y)) * det_recip;
     let q = (e * (a.x - c.x) - d * (b.x - c.x) - f * (a.x - b.x)) * det_recip;
 
     let t = (d * (b.x * c.y - b.y * c.x) - e * (a.x * c.y - a.y * c.x) +
-                       f * (a.x * b.y - a.y * b.x)) * det_recip;
+             f * (a.x * b.y - a.y * b.x)) * det_recip;
 
     TM2D::identity().new(p.x, p.y, q.x, q.y, t.x, t.y)
 }

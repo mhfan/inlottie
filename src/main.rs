@@ -169,7 +169,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             wsize: winit::dpi::PhysicalSize<u32>, */|csize: (f32, f32)| {
             canvas.reset_transform();   let wsize = window.inner_size();
             let wsize = (wsize.width as f32, wsize.height as f32);
-            let scale = (wsize.0 / csize.0).min(wsize.1  / csize.1) * 0.95;
+            let scale = (wsize.0 / csize.0).min(wsize.1  / csize.1) * 0.95;     // XXX:
             canvas.translate((wsize.0 - csize.0 * scale) / 2., (wsize.1 - csize.1 * scale) / 2.);
             canvas.set_size  (wsize.0 as _, wsize.1 as _, 1.);  // window.scale_factor() as _
             canvas.scale(scale, scale);
@@ -178,6 +178,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         match event {
             Event::WindowEvent { window_id: _, event } => match event {
                 WindowEvent::CloseRequested | WindowEvent::Destroyed => elwt.exit(),
+                WindowEvent::Focused(bl) => focused = bl,
 
                 #[cfg(not(target_arch = "wasm32"))]     // first occur on window creation
                 WindowEvent::Resized(size) => {
@@ -229,7 +230,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                 },
 
-                WindowEvent::Focused(bl) => focused = bl,
                 WindowEvent::MouseWheel { device_id: _, delta:
                     winit::event::MouseScrollDelta::LineDelta(_, y), .. } => {
                     let pt = canvas.transform().inversed()
@@ -397,7 +397,8 @@ impl PerfGraph {
         let mut paint = Paint::color(Color::rgba(0, 0, 0, 99));
         path.rect(0., 0., rw, rh);
 
-        canvas.save();  canvas.reset_transform();   canvas.translate(x, y);
+        let last_trfm = canvas.transform();     //canvas.save();
+        canvas.reset_transform();    canvas.translate(x, y);
         canvas.fill_path(&path, &paint);    // to clear the exact area?
 
         path = Path::new();     path.move_to(0., rh);
@@ -413,7 +414,7 @@ impl PerfGraph {
 
         let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
         let _ = canvas.fill_text(rw - 10., 0., &format!("{fps:.2} FPS"), &paint);
-        canvas.restore();
+        canvas.reset_transform();   canvas.set_transform(&last_trfm);   //ctx2d.restore();
     }
 }
 
@@ -450,6 +451,7 @@ fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: &(f32, f32),
     for child in parent.children() { match child {
         usvg::Node::Group(group) =>     // trfm is needed on rendering only
             render_nodes(canvas, mouse, group, &trfm.pre_concat(group.transform())),
+            // TODO: deal with group.clip_path()/mask()/filters()
 
         usvg::Node::Path(path) => if path.is_visible() {
             let tpath = if trfm.is_identity() { None
@@ -518,8 +520,7 @@ fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: &(f32, f32),
             match img.kind() {            usvg::ImageKind::JPEG(_) |
                 usvg::ImageKind::PNG(_) | usvg::ImageKind::GIF(_) => todo!(),
                 // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
-                usvg::ImageKind::SVG(svg) =>
-                    render_nodes(canvas, mouse, svg.root(), trfm),
+                usvg::ImageKind::SVG(svg) => render_nodes(canvas, mouse, svg.root(), trfm),
             }
         }
 

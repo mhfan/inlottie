@@ -1,6 +1,8 @@
 
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
+//  https://rust-lang.github.io/api-guidelines/
+
 //  Represents boolean values as an integer. 0 is false, 1 is true.
 #[derive(Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
 #[serde(transparent)] pub struct IntBool(u8);
@@ -589,9 +591,9 @@ impl<T: Clone + Lerp> AnimatedProperty<T> {
                     ((get_scalar(&eh.to.time) as _, get_scalar(&eh.to.factor) as _),
                      (get_scalar(&eh.ti.time) as _, get_scalar(&eh.ti.factor) as _))) {
 
-                /*  https://github.com/orhanbalci/rust-easing,
+                /*  https://github.com/orhanbalci/rust-easing, https://lib.rs/keywords/easing
                 //  https://github.com/hlhr202/bezier-easing-rs, https://easings.net
-                //  https://github.com/hannesmann/keyframe, https://lib.rs/keywords/easing
+                //  https://github.com/hannesmann/keyframe, https://github.com/sanbox-irl/tween
 
                     use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
                     let curve = Curve::from_points( (0., 0.).into(), (Coord2::from(ctrl.0),

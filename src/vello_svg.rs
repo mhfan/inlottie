@@ -81,11 +81,11 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node) -> Result<(), E>, E>(
                 if let Some(clip_path) = group.clip_path() {
                     if let Some(usvg::Node::Path(clip_path)) =
                         clip_path.root().children().first() {
-                        // support clip-path with a single path
+                        // XXX: support clip-path with a single path only
                         scene.push_layer(DEFAULT_BM, 1.0, util::to_affine(ts),
                             &util::to_bez_path(clip_path));     pushed_clip = true;
                     }
-                }
+                }   // TODO: deal with group.mask()/filters()
 
                 render_group(scene, group, &ts.pre_concat(group.transform()), error_handler)?;
                 if pushed_clip { scene.pop_layer(); }
