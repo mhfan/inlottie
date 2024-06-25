@@ -7,7 +7,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use std::{collections::VecDeque, time::Instant, error::Error, fs};
+use std::{collections::VecDeque, time::Instant, error::Error, fs, env};
 use femtovg::{renderer::OpenGl, Renderer, Canvas, Path, Paint, Color};
 
 /* fn render_offs() -> Result<(), Box<dyn Error>> {   // FIXME: offscreen not work
@@ -98,284 +98,288 @@ fn get_renderer() -> Result<OpenGl, Box<dyn Error>> {
 } */
 
 use winit::{window::Window, event_loop::EventLoop};
+#[cfg(not(target_arch = "wasm32"))]
+use glutin::{surface::{Surface, WindowSurface}, context::PossiblyCurrentContext, prelude::*};
 
 #[cfg_attr(coverage_nightly, coverage(off))] //#[cfg(not(tarpaulin_include))]
 fn main() -> Result<(), Box<dyn Error>> {
     eprintln!(r"{} v{}-g{}, {}, {} 🦀", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"),
         env!("BUILD_GIT_HASH"), env!("BUILD_TIMESTAMP"), env!("CARGO_PKG_AUTHORS"));
         //build_time::build_time_local!("%H:%M:%S%:z %Y-%m-%d"), //option_env!("ENV_VAR_NAME");
-    println!("Usage: {} [<path-to-file>]", std::env::args().next().unwrap());
+    println!("Usage: {} [<path-to-file>]", env::args().next().unwrap());
 
     let event_loop = EventLoop::new()?;
-    use winit::event::{Event, WindowEvent, MouseButton, ElementState};
+    let mut app = WinitApp::new();
+    app.init_state(&event_loop, "SVG Renderer - Femtovg")?;
+    app.load_file(env::args().nth(1).unwrap_or("".to_owned()))?;
+    use winit::{keyboard::{Key, NamedKey}, event::*};
+    //event_loop.set_control_flow(ControlFlow::Poll);
+    //event_loop.run_app(&mut app)?;
 
+    event_loop.run(|event, elwt| { match event {
+        Event::WindowEvent { window_id: _, event } => match event {
+            //WindowEvent::Destroyed => dbg!(),
+            WindowEvent::CloseRequested => elwt.exit(),
+            WindowEvent::Focused(bl) => app.focused = bl,
+
+            #[cfg(not(target_arch = "wasm32"))] WindowEvent::Resized(size) => {
+                let Some((surface,
+                    glctx)) = &app.state else { return };
+                surface.resize(glctx, size.width .try_into().unwrap(),
+                                      size.height.try_into().unwrap());
+                app.expand_central(Some((size.width as _, size.height as _)));
+                app.mouse_pos = Default::default();
+            }   // first occur on window creation
+            WindowEvent::KeyboardInput { event: KeyEvent { logical_key,
+                state: ElementState::Pressed, .. }, .. } => match logical_key.as_ref() {
+                Key::Named(NamedKey::Escape) => elwt.exit(),
+                Key::Named(NamedKey::Space) => {    app.paused = !app.paused;
+                                                    app.prevt = Instant::now(); }
+
+                #[cfg(feature =  "lottie")] Key::Character(ch) => if app.paused { match ch {
+                    "n" | "N" => {  use std::time::Duration;  // XXX:
+                        let AnimGraph::Lottie(lottie) =
+                            &app.graph else { return };
+                        app.prevt = Instant::now() -
+                            Duration::from_millis((1000. / lottie.fr) as _);
+                        if let Some(window) = &app.window { window.request_redraw(); }
+                    }   _ => (),
+                } }     _ => (),
+            }
+            WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
+                app.dragging = matches!(state, ElementState::Pressed);
+                #[cfg(feature = "rive-rs")]
+                if let AnimGraph::Rive((scene, viewport)) = &mut app.graph {
+                    match state {
+                        ElementState::Pressed  =>
+                            scene.pointer_down(app.mouse_pos.0, app.mouse_pos.1, viewport),
+                        ElementState::Released =>
+                            scene.pointer_up  (app.mouse_pos.0, app.mouse_pos.1, viewport),
+                    }
+                }
+            }
+            WindowEvent::MouseWheel { delta: MouseScrollDelta::LineDelta(_, y), .. } => {
+                let Some(canvas) = &mut app.canvas else { return };
+                let pt = canvas.transform().inversed()
+                    .transform_point(app.mouse_pos.0, app.mouse_pos.1);
+                let scale = y / 10. + 1.;  canvas.translate( pt.0,  pt.1);
+                canvas.scale(scale, scale);     canvas.translate(-pt.0, -pt.1);
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if app.dragging {
+                    let Some(canvas) = &mut app.canvas else { return };
+                    let trfm = canvas.transform().inversed();
+                    let p0 = trfm.transform_point(app.mouse_pos.0, app.mouse_pos.1);
+                    let p1 = trfm.transform_point(position.x as _, position.y as _);
+                    canvas.translate(p1.0 - p0.0, p1.1 - p0.1);
+                }   app.mouse_pos = (position.x as _, position.y as _);
+
+                #[cfg(feature = "rive-rs")]
+                if let AnimGraph::Rive((scene, viewport)) = &mut app.graph {
+                    scene.pointer_move(app.mouse_pos.0, app.mouse_pos.1, viewport);
+                }
+            }
+            WindowEvent::DroppedFile(path) => {
+                app.mouse_pos = Default::default();
+                let _ = app.load_file(path);    app.expand_central(None);
+                if let Some(window) = &app.window { window.request_redraw(); }
+            }
+            WindowEvent::RedrawRequested =>     app.redraw(),
+            _ => ()
+        },
+        Event::AboutToWait => if app.focused && !app.paused {
+            if let Some(window) = &app.window { window.request_redraw(); }
+        },
+        Event::LoopExiting => elwt.exit(),
+        _ => () //println!("{:?}", event)
+    } })?;  Ok(())  //loop {}
+}
+
+struct WinitApp {
+    //exit: bool,
+    paused: bool,
+    focused: bool,
+    dragging: bool,
+    mouse_pos: (f32, f32),
+
+    prevt: Instant,
+    perf: PerfGraph,
+    graph: AnimGraph,
+
+    canvas: Option<Canvas<OpenGl>>,
     #[cfg(not(target_arch = "wasm32"))]
-    let (window, surface, glctx,
-        mut canvas) = create_window(&event_loop, "SVG Renderer - Femtovg")?;
+    state: Option<(Surface<WindowSurface>, PossiblyCurrentContext)>,
+    window: Option<Window>,
+}
 
-    #[cfg(target_arch = "wasm32")] let (window, mut canvas) = {
-        use winit::platform::web::WindowBuilderExtWebSys;
-        use wasm_bindgen::JsCast;
+#[cfg(feature =  "lottie")] use inlottie::schema::Animation;
+#[cfg(feature = "rive-rs")] use inlottie::rive_nvg::RiveNVG;
 
-        let canvas = web_sys::window().unwrap()     //  XXX: HTML5/canvas API
-            .document().unwrap().get_element_by_id("canvas").unwrap()
-            .dyn_into::<web_sys::HtmlCanvasElement>().unwrap();
+enum AnimGraph {
+    #[cfg(feature =  "lottie")] Lottie(Box<Animation>),
+    #[cfg(feature = "rive-rs")]
+    Rive((Box<dyn rive_rs::Scene<RiveNVG<OpenGl>>>, rive_rs::Viewport)),
+    #[allow(clippy::upper_case_acronyms)] SVG(Box<usvg::Tree>),
+    None, // for logo/testcase
+}
 
-        let window = winit::window::WindowBuilder::new()
-            .with_canvas(Some(canvas)).build(&event_loop).unwrap();
-        let canvas = Canvas::new(OpenGl::new_from_html_canvas(&canvas)
-            .expect("Cannot create renderer")).expect("Cannot create canvas");
-
-        (window, canvas)    // need to resize canvas
-    };
-
-    #[cfg(feature = "rive-rs")] let mut viewport = rive_rs::Viewport::default();
-    #[cfg(feature = "rive-rs")] let mut scene = None;
-    #[cfg(feature = "rive-rs")] use inlottie::rive::NanoVG;
-
-    let mut lottie = None;
-    use inlottie::schema::Animation;
-
-    let mut usvg_opts = usvg::Options::default();
-    usvg_opts.fontdb_mut().load_system_fonts();     let mut tree = None;
-    let path = std::env::args().nth(1).unwrap_or("data/tiger.svg".to_owned());
-    let (mut do_test, mut mouse) = (false, (0., 0.));
-
-    //if fs::metadata(&path).is_ok() {} //if std::path::Path(&path).exists() {}
-    match path.rfind('.').map_or("", |i| &path[1 + i..]) {
-        "json" => lottie = Animation::from_reader(fs::File::open(&path)?).ok(),
-            //.map(|lottie| { expand_central(&mut canvas, window.inner_size(),
-            //        (lottie.w as _, lottie.h as _)); lottie }),
-        #[cfg(feature = "rive-rs")]
-        "riv"  => scene = NanoVG::new_scene(&fs::read(&path)?)/*.map(|scene| {
-                let size = window.inner_size();
-                viewport.resize(size.width, size.height);
-                canvas.set_size(size.width, size.height, 1.); scene })*/,
-        "svg"  => tree  = usvg::Tree::from_data(&fs::read(&path)?, &usvg_opts).ok(),
-            //.map(|tree| { expand_central(&mut canvas, window.inner_size(),
-            //        (tree.size().width(), tree.size().height())); tree }),
-        _ => {  let size = window.inner_size();
-            canvas.set_size(size.width, size.height, 1.);   do_test = true;
-            eprintln!("File format is not supported: {path}");
+impl WinitApp {
+    fn new() -> Self {
+        Self { graph: AnimGraph::None, canvas: None, window: None, state: None,
+            perf: PerfGraph::new(), mouse_pos: Default::default(), prevt: Instant::now(),
+            paused: false, focused: true, dragging: false, //exit: false,
         }
     }
 
-    let (mut dragging, mut focused, mut paused) = (false, true, false);
-    let (mut perf, mut prevt) = (PerfGraph::new(), Instant::now());
-    //event_loop.set_control_flow(ControlFlow::Poll);
+    // https://github.com/rust-windowing/glutin/blob/master/glutin_examples/src/lib.rs
+    fn init_state<T>(&mut self, event_loop: &EventLoop<T>, title: &str) ->
+        Result<(), Box<dyn Error>> {
+        use glutin::{config::ConfigTemplateBuilder, surface::SurfaceAttributesBuilder,
+            context::{ContextApi, ContextAttributesBuilder}, display::GetGlDisplay};
+        use {raw_window_handle::HasRawWindowHandle, glutin_winit::DisplayBuilder};
 
-    event_loop.run(|event, elwt| {
-        let mut expand_central = /*<T: Renderer>(canvas: &mut Canvas<T>,
-            wsize: winit::dpi::PhysicalSize<u32>, */|csize: (f32, f32)| {
-            canvas.reset_transform();   let wsize = window.inner_size();
-            let wsize = (wsize.width as f32, wsize.height as f32);
-            let scale = (wsize.0 / csize.0).min(wsize.1  / csize.1) * 0.95;     // XXX:
-            canvas.translate((wsize.0 - csize.0 * scale) / 2., (wsize.1 - csize.1 * scale) / 2.);
-            canvas.set_size  (wsize.0 as _, wsize.1 as _, 1.);  // window.scale_factor() as _
-            canvas.scale(scale, scale);
+        let mut wsize = event_loop.primary_monitor().unwrap().size();
+        wsize.width  /= 2;  wsize.height /= 2;   use std::num::NonZeroU32;
+
+        let (window, gl_config) = DisplayBuilder::new()
+            .with_window_builder(Some(winit::window::WindowBuilder::new()
+                .with_inner_size(wsize).with_resizable(true).with_title(title)))
+            .build(event_loop, ConfigTemplateBuilder::new().with_alpha_size(8),
+                |configs|
+                    // Find the config with the maximum number of samples,
+                    // so our triangle will be smooth.
+                    configs.reduce(|config, accum| {
+                        if (config.supports_transparency().unwrap_or(false) &
+                            !accum.supports_transparency().unwrap_or(false)) ||
+                            config.num_samples() < accum.num_samples() { config } else { accum }
+                    }).unwrap())?;
+
+        let window = window.unwrap(); //let size = window.inner_size();
+        let raw_window_handle = window.raw_window_handle();
+        let gl_display = gl_config.display();
+
+        let surf_attr =
+            SurfaceAttributesBuilder::<WindowSurface>::new()
+                .build(raw_window_handle, NonZeroU32::new(wsize. width).unwrap(),
+                                        NonZeroU32::new(wsize.height).unwrap());
+        let surface = unsafe {
+            gl_display.create_window_surface(&gl_config, &surf_attr)? };
+
+        let glctx = Some(unsafe {
+            gl_display.create_context(&gl_config,
+                &ContextAttributesBuilder::new()
+                    .build(Some(raw_window_handle)))
+                .unwrap_or_else(|_| gl_display.create_context(&gl_config,
+                    &ContextAttributesBuilder::new()
+                        .with_context_api(ContextApi::Gles(None))
+                        .build(Some(raw_window_handle))).expect("Failed to create context"))
+        }).take().unwrap().make_current(&surface)?;
+
+        self.window = Some(window);
+        self.state  = Some((surface, glctx));
+        let mut canvas = Canvas::new(unsafe { OpenGl::new_from_function_cstr(
+            |s| gl_display.get_proc_address(s) as *const _) }?)?;
+        #[cfg(target_os = "macos")] let _ = canvas.add_font_dir("/Library/fonts");
+        canvas.add_font_dir("data/fonts")?;
+        self.canvas = Some(canvas);     Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn init_state<T>(&mut self, _event_loop: &EventLoop<T>) -> Result<(), Box<dyn Error>> {
+        use winit::platform::web::WindowBuilderExtWebSys;
+        use wasm_bindgen::JsCast;
+
+        let canvas = web_sys::window().unwrap() .document().unwrap()
+            .get_element_by_id("canvas").unwrap()   // XXX: HTML5/canvas API
+            .dyn_into::<web_sys::HtmlCanvasElement>().unwrap();
+
+        self.state = Some(winit::window::WindowBuilder::new()
+            .with_canvas(Some(canvas)).build(&event_loop).unwrap());
+        self.canvas = Some(Canvas::new(OpenGl::new_from_html_canvas(&canvas)
+            .expect("Cannot create renderer")).expect("Cannot create canvas"));
+        // XXX: need to resize canvas?
+    }
+
+    fn load_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<(), Box<dyn Error>> {
+        let path = path.as_ref();
+
+        //path.rfind('.').map_or("", |i| &path[1 + i..])
+        //if fs::metadata(&path).is_ok() {} //if path.exists() {}
+        self.graph = match path.extension().and_then(|ext| ext.to_str()) {
+            #[cfg(feature =  "lottie")] Some("json") =>
+                AnimGraph::Lottie(Box::new(Animation::from_reader(fs::File::open(path)?)?)),
+
+            #[cfg(feature = "rive-rs")] Some("riv")  =>
+                AnimGraph::Rive((RiveNVG::new_scene(
+                    &fs::read(path)?).unwrap(), Default::default())),
+
+            Some("svg") => {
+                let mut usvg_opts = usvg::Options::default();
+                        usvg_opts.fontdb_mut().load_system_fonts();
+                AnimGraph::SVG(Box::new(usvg::Tree::from_data(&fs::read(path)?, &usvg_opts)?))
+            }
+            _ => { eprintln!("File format isn't supported: {}", path.display()); AnimGraph::None }
+        };  Ok(())
+    }
+
+    fn expand_central(&mut self, wsize: Option<(f32, f32)>) {   // maximize viewport
+        let Some(canvas) = &mut self.canvas else { return };
+        let wsize = if let Some(wsize) = wsize {
+            canvas.set_size(wsize.0 as _, wsize.1 as _, 1.);    wsize
+        } else { (canvas.width() as _, canvas.height() as _) };
+
+        let csize = match &mut self.graph {
+            #[cfg(feature =  "lottie")]
+            AnimGraph::Lottie(lottie) => (lottie.w as _, lottie.h as _),
+
+            #[cfg(feature = "rive-rs")] AnimGraph::Rive((_, viewport)) => {
+                viewport.resize(wsize.0 as _, wsize.1 as _);
+                canvas.reset_transform();   return
+            }
+            AnimGraph::SVG(tree) => (tree.size().width(), tree.size().height()),
+            AnimGraph::None => { canvas.reset_transform();  return }    // (480., 480.)?
         };
 
-        match event {
-            Event::WindowEvent { window_id: _, event } => match event {
-                WindowEvent::CloseRequested | WindowEvent::Destroyed => elwt.exit(),
-                WindowEvent::Focused(bl) => focused = bl,
+        canvas.reset_transform();
+        let scale = (wsize.0 / csize.0).min(wsize.1  / csize.1) * 0.98;     // XXX:
+        canvas.translate((wsize.0 - csize.0 * scale) / 2.,
+                         (wsize.1 - csize.1 * scale) / 2.);
+        canvas.scale(scale, scale);
+    }
 
-                #[cfg(not(target_arch = "wasm32"))]     // first occur on window creation
-                WindowEvent::Resized(size) => {
-                    surface.resize(&glctx,  size.width .try_into().unwrap(),
-                                            size.height.try_into().unwrap());
+    fn redraw(&mut self) {
+        let Some(canvas) = &mut self.canvas else { return };
+        let _elapsed = self.prevt.elapsed();    self.prevt = Instant::now();
 
-                    if let Some(tree) = &tree {
-                        expand_central((tree.size().width(), tree.size().height()));
-                    }
-                    if let Some(lottie) = &lottie {
-                        expand_central((lottie.w as _, lottie.h as _));
-                    }
-                    #[cfg(feature = "rive-rs")] if scene.is_some() {
-                        viewport.resize(size.width, size.height);
-                        canvas.set_size(size.width, size.height, 1.);
-                    }   mouse = (0., 0.);
-                }
+        match &mut self.graph {
+            #[cfg(feature =  "lottie")] AnimGraph::Lottie(lottie) =>
+                if !(lottie.render_next_frame(canvas, _elapsed.as_secs_f32())) { return }
+                // TODO: draw frame time (lottie.fnth) on screen?
 
-                WindowEvent::KeyboardInput { event, .. } => {
-                    if event.state == ElementState::Pressed {
-                        use winit::keyboard::{Key, NamedKey};
-                        match event.logical_key.as_ref() {
-                            Key::Named(NamedKey::Space) => {
-                                prevt = Instant::now();      paused = !paused;
-                            }
-                            Key::Character(char) => if paused { match char {
-                                "n" | "N" => {  use std::time::Duration;
-                                    prevt = Instant::now() - Duration::from_millis((1000. /
-                                        lottie.as_ref().map_or(60., |lottie|
-                                            lottie.fr)) as _);  // XXX:
-                                    window.request_redraw();
-                                }   _ => (),
-                            } }     _ => (),
-                        }
-                    }
-                }
+            #[cfg(feature = "rive-rs")]
+            AnimGraph::Rive((scene, viewport)) =>
+                if !scene.advance_and_maybe_draw(&mut RiveNVG::new(canvas),
+                    _elapsed, viewport) { return }
 
-                WindowEvent::MouseInput { button: MouseButton::Left,
-                    state, .. } => match state {
-                    ElementState::Pressed  => { dragging = true;
-                        #[cfg(feature = "rive-rs")] if let Some(scene) = &mut scene {
-                            scene.pointer_down(mouse.0, mouse.1, &viewport);
-                        }
-                    }
-                    ElementState::Released => { dragging = false;
-                        #[cfg(feature = "rive-rs")] if let Some(scene) = &mut scene {
-                            scene.pointer_up  (mouse.0, mouse.1, &viewport);
-                        }
-                    }
-                },
+            AnimGraph::SVG(tree) => {
+                canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
+                    Color::rgbf(0.4, 0.4, 0.4)); // XXX: to clear viewport/viewbox only?
+                render_nodes(canvas, //canvas.transform().inversed().transform_point()
+                    self.mouse_pos, tree.root(), &usvg::Transform::identity());
+            }
 
-                WindowEvent::MouseWheel { device_id: _, delta:
-                    winit::event::MouseScrollDelta::LineDelta(_, y), .. } => {
-                    let pt = canvas.transform().inversed()
-                        .transform_point(mouse.0, mouse.1);
-                    canvas.translate( pt.0,  pt.1);
-                    canvas.scale(1. + (y / 10.), 1. + (y / 10.));
-                    canvas.translate(-pt.0, -pt.1);
-                }
+            AnimGraph::None => some_test_case(canvas),
+        }
 
-                WindowEvent::CursorMoved { device_id: _,
-                    position, .. } => {
-                    if dragging {
-                        let p0 = canvas.transform().inversed()
-                            .transform_point(mouse.0, mouse.1);
-                        let p1 = canvas.transform().inversed()
-                            .transform_point(position.x as _, position.y as _);
-                        canvas.translate(p1.0 - p0.0, p1.1 - p0.1);
-                    }   mouse = (position.x as _, position.y as _);
+        self.perf.render(canvas, (3., 3.));
+        canvas.flush(); // Tell renderer to execute all drawing commands
+        self.perf.update(self.prevt.elapsed().as_secs_f32());
 
-                    #[cfg(feature = "rive-rs")] if let Some(scene) = &mut scene {
-                        scene.pointer_move(mouse.0, mouse.1, &viewport);
-                    }
-                }
-
-                WindowEvent::DroppedFile(path) => {
-                    tree = None;    lottie = None;
-                    #[cfg(feature = "rive-rs")] { scene = None; }
-
-                    let file = fs::read(&path).unwrap_or(vec![]);
-                    match path.extension().and_then(|ext| ext.to_str()) {
-                        Some("svg") => tree  = usvg::Tree::from_data(&file,
-                            &usvg_opts).ok().map(|tree| {
-                                expand_central((tree.size().width(), tree.size().height())); tree
-                            }),
-
-                        #[cfg(feature = "rive-rs")]
-                        Some("riv") => scene = NanoVG::new_scene(&file).map(|scene| {
-                                let size = window.inner_size();
-                                viewport.resize(size.width, size.height);
-                                canvas.set_size(size.width, size.height, 1.); scene }),
-                        Some("json") => lottie = Animation::from_reader(
-                            fs::File::open(&path).unwrap()).ok().map(|lottie| {
-                                expand_central((lottie.w as _, lottie.h as _)); lottie }),
-                        _ => eprintln!("File format is not supported: {}", path.display()),
-                    }   mouse = (0., 0.);
-
-                    //let mut size =  window.inner_size();  size.width += 1; size.height += 1;
-                    //let _ = window.request_inner_size(size);
-                    window.request_redraw();
-                }
-
-                WindowEvent::RedrawRequested => {
-                    let _elapsed = prevt.elapsed(); prevt = Instant::now();
-                    canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
-                        Color::rgbf(0.4, 0.4, 0.4));    // XXX: to clear viewport/viewbox only?
-
-                    #[cfg(feature = "rive-rs")] if let Some(scene) = &mut scene {
-                        if !scene.advance_and_maybe_draw(&mut NanoVG::new(&mut canvas),
-                            _elapsed, &mut viewport) { return }
-                    }
-                    if let Some(lottie) = &mut lottie {
-                        if !(lottie.render_next_frame(&mut canvas,
-                            _elapsed.as_secs_f32())) { return }
-                        // TODO: draw frame time (lottie.fnth) on screen?
-                    }
-                    if let Some(tree) = &tree {
-                        render_nodes(&mut canvas, &mouse, tree.root(),
-                            &usvg::Transform::identity());
-                    }
-
-                    if do_test { some_test_case(&mut canvas); }
-
-                    perf.render(&mut canvas, 3., 3.);   canvas.flush();
-                    // Tell renderer to execute all drawing commands
-                    perf.update(prevt.elapsed().as_secs_f32());
-
-                    #[cfg(not(target_arch = "wasm32"))] // Display what just rendered
-                    surface.swap_buffers(&glctx).expect("Could not swap buffers");
-                    //if focused { window.request_redraw(); }
-                }
-
-                _ => ()
-            },
-
-            Event::AboutToWait => if focused && !paused { window.request_redraw() },
-            Event::LoopExiting => elwt.exit(),
-            _ => () //println!("{:?}", event)
-    }})?;   Ok(())  //loop {}
-}
-
-//  https://github.com/rust-windowing/glutin/blob/master/glutin_examples/examples/egl_device.rs
-
-#[cfg(not(target_arch = "wasm32"))]
-use glutin::{surface::{Surface, WindowSurface}, context::PossiblyCurrentContext, prelude::*};
-
-#[allow(clippy::type_complexity)] #[cfg(not(target_arch = "wasm32"))]
-fn create_window(event_loop: &EventLoop<()>, title: &str) -> Result<(Window,
-    Surface<WindowSurface>, PossiblyCurrentContext, Canvas<OpenGl>), Box<dyn Error>> {
-    use glutin::{config::ConfigTemplateBuilder, surface::SurfaceAttributesBuilder,
-        context::{ContextApi, ContextAttributesBuilder}, display::GetGlDisplay};
-    use {raw_window_handle::HasRawWindowHandle, glutin_winit::DisplayBuilder};
-
-    let mut wsize = event_loop.primary_monitor().unwrap().size();
-    wsize.width  /= 2;  wsize.height /= 2;   use std::num::NonZeroU32;
-
-    let (window, gl_config) = DisplayBuilder::new()
-        .with_window_builder(Some(winit::window::WindowBuilder::new()
-            .with_inner_size(wsize).with_resizable(true).with_title(title)))
-        .build(event_loop, ConfigTemplateBuilder::new().with_alpha_size(8),
-            |configs|
-                // Find the config with the maximum number of samples,
-                // so our triangle will be smooth.
-                configs.reduce(|config, accum| {
-                    if (config.supports_transparency().unwrap_or(false) &
-                        !accum.supports_transparency().unwrap_or(false)) ||
-                        config.num_samples() < accum.num_samples() { config } else { accum }
-                }).unwrap())?;
-
-    let window = window.unwrap(); //let size = window.inner_size();
-    let raw_window_handle = window.raw_window_handle();
-    let gl_display = gl_config.display();
-
-    let surf_attr =
-        SurfaceAttributesBuilder::<WindowSurface>::new()
-            .build(raw_window_handle, NonZeroU32::new(wsize. width).unwrap(),
-                                      NonZeroU32::new(wsize.height).unwrap());
-    let surface = unsafe {
-        gl_display.create_window_surface(&gl_config, &surf_attr)? };
-
-    let glctx = Some(unsafe {
-        gl_display.create_context(&gl_config,
-            &ContextAttributesBuilder::new()
-                .build(Some(raw_window_handle)))
-            .unwrap_or_else(|_| gl_display.create_context(&gl_config,
-                &ContextAttributesBuilder::new()
-                    .with_context_api(ContextApi::Gles(None))
-                    .build(Some(raw_window_handle))).expect("Failed to create context"))
-    }).take().unwrap().make_current(&surface)?;
-
-    let mut canvas = Canvas::new(unsafe {
-        OpenGl::new_from_function_cstr(|s|
-            gl_display.get_proc_address(s) as *const _) }?)?;
-    #[cfg(target_os = "macos")] let _ = canvas.add_font_dir("/Library/fonts");
-    canvas.add_font_dir("data/fonts").expect("Cannot add font dir/files");
-
-    Ok((window, surface, glctx, canvas))
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((surface, glctx)) = &self.state {
+            surface.swap_buffers(glctx).expect("Could not swap buffers");
+        }   // Display what just rendered
+    }
 }
 
 pub struct PerfGraph { que: VecDeque<f32>, max: f32, sum: f32/*, time: Instant*/ }
@@ -392,13 +396,13 @@ impl PerfGraph {
         self.que.push_back(fps);    self.sum += fps;
     }
 
-    pub fn render<T: Renderer>(&self, canvas: &mut Canvas<T>, x: f32, y: f32) {
+    pub fn render<T: Renderer>(&self, canvas: &mut Canvas<T>, pos: (f32, f32)) {
         let (rw, rh, mut path) = (100., 20., Path::new());
         let mut paint = Paint::color(Color::rgba(0, 0, 0, 99));
         path.rect(0., 0., rw, rh);
 
         let last_trfm = canvas.transform();     //canvas.save();
-        canvas.reset_transform();    canvas.translate(x, y);
+        canvas.reset_transform();    canvas.translate(pos.0, pos.1);
         canvas.fill_path(&path, &paint);    // to clear the exact area?
 
         path = Path::new();     path.move_to(0., rh);
@@ -414,11 +418,11 @@ impl PerfGraph {
 
         let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
         let _ = canvas.fill_text(rw - 10., 0., &format!("{fps:.2} FPS"), &paint);
-        canvas.reset_transform();   canvas.set_transform(&last_trfm);   //ctx2d.restore();
+        canvas.reset_transform();   canvas.set_transform(&last_trfm);   //canvas.restore();
     }
 }
 
-fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: &(f32, f32),
+fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: (f32, f32),
     parent: &usvg::Group, trfm: &usvg::Transform) {
     fn convert_paint(paint: &usvg::Paint, opacity: usvg::Opacity,
         _trfm: &usvg::Transform) -> Option<Paint> {

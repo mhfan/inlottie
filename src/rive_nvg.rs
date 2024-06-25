@@ -11,9 +11,9 @@ use rive_rs::{path as rpath, Scene, Instantiate, File, Artboard, Handle,
 use femtovg::{Renderer, FillRule, CompositeOperation as CompOp,
     Transform2D as TM2D, Path as VGPath, Paint as VGPaint};
 
-pub struct NanoVG<T: Renderer + 'static>(&'static mut femtovg::Canvas<T>);
+pub struct RiveNVG<T: Renderer + 'static>(&'static mut femtovg::Canvas<T>);
 
-impl<T: Renderer> NanoVG<T> {
+impl<T: Renderer> RiveNVG<T> {
     #[inline] pub fn new(canvas: &mut femtovg::Canvas<T>) -> Self {
         Self(unsafe { std::mem::transmute(canvas) }) // force pretend to be 'static
     }
@@ -27,7 +27,7 @@ impl<T: Renderer> NanoVG<T> {
     }
 }
 
-impl<T: Renderer + 'static> renderer::Renderer for NanoVG<T> { // aka Femtovg
+impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
     type Path  = Path;
     type Paint = Paint;
     type Gradient = Gradient;

@@ -396,13 +396,14 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
             self.elapsed -= elapsed;
         }
 
-        let trfm = canvas.transform();
+        /* let trfm = canvas.transform();
         let pt = trfm.transform_point(self.w as _, self.h as _);
         let ltrb = (trfm[4] as u32, trfm[5] as u32,
-                pt.0.ceil() as u32,   pt.1.ceil() as u32); // viewport/viewbox
+                pt.0.ceil() as u32,   pt.1.ceil() as u32); // viewport/viewbox */
 
-        canvas.clear_rect(//0, 0, canvas.width(), canvas.height(),
-            ltrb.0, ltrb.1, ltrb.2 - ltrb.0, ltrb.3 - ltrb.1, VGColor::rgbf(0.4, 0.4, 0.4));
+        canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
+            //ltrb.0, ltrb.1, ltrb.2 - ltrb.0, ltrb.3 - ltrb.1,
+            VGColor::rgbf(0.4, 0.4, 0.4));
         self.render_layers(canvas, None, &self.layers, self.fnth);
 
         self.elapsed -= 1.;       self.fnth += 1.;

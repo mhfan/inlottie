@@ -16,7 +16,8 @@ keywords = [ "Lottie", "Rive", "Animation", "vector-graphic" ]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-#default = [ "rive-rs" ]
+default = [ "lottie" ] #, "rive-rs"
+lottie  = []
 b2d = [ "intvg", "pixels" ]
 vello = [ "dep:vello", "image", "wgpu", "anyhow", "pollster" ]
 
