@@ -6,10 +6,9 @@ edition = "2021"
 default-run = "inlottie"
 license = "MIT OR Apache-2.0"
 authors = [ "MeiHui FAN <mhfan@ustc.edu>" ]
- repository = "https://github.com/mhfan/inlottie"
-description = "lib/tool in Rust to load/save/parse/render lottie animation files"
-categories  = [ "parser-implementations", "rendering::data-formats", "graphics",
-     "multimedia::images" ]     # https://crates.io/category_slugs
+repository  = "https://github.com/mhfan/inlottie"   # https://crates.io/category_slugs
+categories  = [ "parser-implementations", "rendering", "graphics", "multimedia::images" ]
+description = "lib/tool in Rust to load/parse/render lottie animation files"
 keywords = [ "Lottie", "Rive", "Animation", "vector-graphic" ]
 #exclude  = [ "examples" ]
 
@@ -20,6 +19,7 @@ default = [ "lottie" ] #, "rive-rs"
 lottie  = []
 b2d = [ "intvg", "pixels" ]
 vello = [ "dep:vello", "image", "wgpu", "anyhow", "pollster" ]
+#glutin = [ "dep:glutin", "glutin-winit", "raw-window-handle" ]
 
 [[bin]]
 name = "vello"
@@ -36,11 +36,7 @@ serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 serde_repr = "0.1"
 
-#read_color = "1.0"
-# geometric types with a focus on 2d graphics and layout
-#euclid = "0.22" # { version = "0.22", features = [ "serde" ] }
 #flo_curves = "0.7"
-
 kurbo = "0.11"
 usvg  = "0.42"
 
@@ -53,15 +49,15 @@ anyhow = { version = "1.0", optional = true }
 image = { version = "0.25", optional = true } #features = [ "png", "jpeg", "gif" ]
 wgpu  = { version = "0.20", optional = true }
 
-winit = "0.29"
+winit = "0.30"
 femtovg = { version = "0.9", features = [ "image-loading" ]}
 
 #rive-rs = { optional = true, git = "https://github.com/rive-app/rive-rs" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-glutin = "0.31" # offscreen@v0.29
-glutin-winit = "0.4"
-raw-window-handle = "0.5" # HasRawWindowHandle
+glutin = "0.32"	    # offscreen@v0.29?
+glutin-winit = "0.5"
+raw-window-handle = "0.6"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web_sys = { version = "0.3", package = "web-sys", features = [
@@ -78,7 +74,7 @@ chrono = "0.4"
 
 [profile.dev]
 #incremental = false
-opt-level = 1   # Enable a small amount of optimization in debug mode
+opt-level = 2   # Enable a small amount of optimization in debug mode
 
 [profile.dev.package."*"]
 opt-level = 3   # Enable high optimizations for dependencies, but not for own code.

@@ -10,94 +10,7 @@
 use std::{collections::VecDeque, time::Instant, error::Error, fs, env};
 use femtovg::{renderer::OpenGl, Renderer, Canvas, Path, Paint, Color};
 
-/* fn render_offs() -> Result<(), Box<dyn Error>> {   // FIXME: offscreen not work
-    let mut canvas = Canvas::new(get_renderer()?)?;
-
-    let (width, height) = (640, 480);
-    canvas.set_size(width, height, 1.);
-    canvas.clear_rect(0, 0, width * 4, height * 4, Color::rgbf(0.9, 0.0, 0.9));
-
-    let mut path = Path::new();
-    path.rect(0., 0., width as _, height as _);
-    canvas.fill_path(&path, &Paint::linear_gradient(0., 0., width as _, 0.,
-        Color::rgba(255, 0, 0, 255), Color::rgba(0, 0, 255, 255)));
-dbg!();
-    canvas.flush();
-dbg!();
-
-    //let buf = canvas.screenshot()?.pixels().flat_map(|pixel|
-    //    pixel.iter()).collect::<Vec<_>>();
-    let buf = canvas.screenshot()?.into_contiguous_buf();
-    let buf = unsafe { std::slice::from_raw_parts(buf.0.as_ptr() as *const u8,
-        (width * height * 4) as _) };
-
-    let mut encoder = png::Encoder::new(
-        std::io::BufWriter::new(fs::File::create("target/foo.png")?), width, height);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-
-    encoder.set_source_gamma(png::ScaledFloat::new(1. / 2.2));
-    //    png::ScaledFloat::from_scaled(45455)  // 1. / 2.2 scaled by 100000
-    //let source_chromaticities = png::SourceChromaticities::new( // unscaled instant
-    //    (0.3127, 0.3290), (0.6400, 0.3300), (0.3000, 0.6000), (0.1500, 0.0600));
-    //encoder.set_source_chromaticities(source_chromaticities);
-    encoder.write_header()?.write_image_data(buf)?;
-
-    Ok(())
-}
-
-// https://github.com/Ionizing/femtovg-offscreen/blob/master/src/main.rs
-// https://github.com/servo/surfman/blob/master/surfman/examples/offscreen.rs
-// https://github.com/nobuyuki83/del-gl/blob/master/src/glutin/off_screen_render.rs
-#[cfg(target_os = "macos")] fn get_renderer() -> Result<OpenGl, Box<dyn Error>> {
-    //use glutin::{Context, ContextCurrentState, CreationError};
-    use glutin::{context::GlProfile, ContextBuilder, GlRequest};
-
-    let ctx = ContextBuilder::new()
-        .with_gl_profile(GlProfile::Core).with_gl(GlRequest::Latest)
-        .build_headless(&EventLoop::new(), winit::dpi::PhysicalSize::new(1, 1))?;
-    let ctx = unsafe { ctx.make_current() }.unwrap();
-
-    Ok(unsafe { OpenGl::new_from_function(|s| ctx.get_proc_address(s) as *const _) }?)
-}
-
-#[cfg(not(target_arch = "wasm32"))] #[cfg(not(target_os = "macos"))]
-fn get_renderer() -> Result<OpenGl, Box<dyn Error>> {
-    use glutin::config::{ConfigSurfaceTypes, ConfigTemplateBuilder};
-    use glutin::context::{ContextApi, ContextAttributesBuilder};
-    use glutin::api::egl::{device::Device, display::Display};
-    use glutin::{display::GetGlDisplay, prelude::*};
-
-    let devices = Device::query_devices()
-        .expect("Failed to query devices").collect::<Vec<_>>();
-    devices.iter().enumerate().for_each(|(index, device)|
-        println!("Device {}: Name: {} Vendor: {}", index,
-            device.name().unwrap_or("UNKNOWN"), device.vendor().unwrap_or("UNKNOWN")));
-
-    let display = unsafe { Display::with_device(devices.first()
-        .expect("No available devices"), None) }?;
-
-    let config = unsafe { display.find_configs(
-        ConfigTemplateBuilder::default().with_alpha_size(8)
-            .with_surface_type(ConfigSurfaceTypes::empty()).build()) }.unwrap()
-        .reduce(|config, accum| {
-            if (config.supports_transparency().unwrap_or(false) &
-                !accum.supports_transparency().unwrap_or(false)) ||
-                config.num_samples() < accum.num_samples() { config } else { accum }
-        })?;    println!("Picked a config with {} samples", config.num_samples());
-
-    let _context = unsafe { display.create_context(&config,
-        &ContextAttributesBuilder::new().build(None))
-            .unwrap_or_else(|_| display.create_context(&config,
-                &ContextAttributesBuilder::new()
-                    .with_context_api(ContextApi::Gles(None)).build(None))
-                .expect("failed to create context"))
-    }.make_current_surfaceless()?;
-
-    Ok(unsafe { OpenGl::new_from_function_cstr(|s| display.get_proc_address(s) as *const _) }?)
-} */
-
-use winit::{window::Window, event_loop::EventLoop};
+use winit::{window::Window, event_loop::{EventLoop, ActiveEventLoop}};
 #[cfg(not(target_arch = "wasm32"))]
 use glutin::{surface::{Surface, WindowSurface}, context::PossiblyCurrentContext, prelude::*};
 
@@ -108,15 +21,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         //build_time::build_time_local!("%H:%M:%S%:z %Y-%m-%d"), //option_env!("ENV_VAR_NAME");
     println!("Usage: {} [<path-to-file>]", env::args().next().unwrap());
 
-    let event_loop = EventLoop::new()?;
     let mut app = WinitApp::new();
-    app.init_state(&event_loop, "SVG Renderer - Femtovg")?;
     app.load_file(env::args().nth(1).unwrap_or("".to_owned()))?;
     use winit::{keyboard::{Key, NamedKey}, event::*};
+    let event_loop = EventLoop::new()?;
     //event_loop.set_control_flow(ControlFlow::Poll);
     //event_loop.run_app(&mut app)?;
 
+    #[allow(deprecated)]
     event_loop.run(|event, elwt| { match event {
+        Event::Resumed => if let Err(err) =
+            app.init_state(elwt, "Lottie/SVG Viewer - Femtovg") {
+                eprintln!("Failed to initialize: {err:?}"); },
+
         Event::WindowEvent { window_id: _, event } => match event {
             //WindowEvent::Destroyed => dbg!(),
             WindowEvent::CloseRequested => elwt.exit(),
@@ -232,50 +149,49 @@ impl WinitApp {
     }
 
     // https://github.com/rust-windowing/glutin/blob/master/glutin_examples/src/lib.rs
-    fn init_state<T>(&mut self, event_loop: &EventLoop<T>, title: &str) ->
+    fn init_state(&mut self, event_loop: &ActiveEventLoop, title: &str) ->
         Result<(), Box<dyn Error>> {
         use glutin::{config::ConfigTemplateBuilder, surface::SurfaceAttributesBuilder,
             context::{ContextApi, ContextAttributesBuilder}, display::GetGlDisplay};
-        use {raw_window_handle::HasRawWindowHandle, glutin_winit::DisplayBuilder};
+        use {raw_window_handle::HasWindowHandle, glutin_winit::DisplayBuilder};
 
         let mut wsize = event_loop.primary_monitor().unwrap().size();
         wsize.width  /= 2;  wsize.height /= 2;   use std::num::NonZeroU32;
 
         let (window, gl_config) = DisplayBuilder::new()
-            .with_window_builder(Some(winit::window::WindowBuilder::new()
-                .with_inner_size(wsize).with_resizable(true).with_title(title)))
-            .build(event_loop, ConfigTemplateBuilder::new().with_alpha_size(8),
+            .with_window_attributes(Some(Window::default_attributes()
+                .with_transparent(true).with_inner_size(wsize).with_title(title)))
+            .build(event_loop, ConfigTemplateBuilder::new()
+                .with_transparency(cfg!(cgl_backend)).with_alpha_size(8),
+                // Find the config with maximum number of samples, so our triangle will be smooth.
                 |configs|
-                    // Find the config with the maximum number of samples,
-                    // so our triangle will be smooth.
                     configs.reduce(|config, accum| {
                         if (config.supports_transparency().unwrap_or(false) &
                             !accum.supports_transparency().unwrap_or(false)) ||
                             config.num_samples() < accum.num_samples() { config } else { accum }
                     }).unwrap())?;
 
-        let window = window.unwrap(); //let size = window.inner_size();
-        let raw_window_handle = window.raw_window_handle();
+        self.window = window;   let window = self.window.as_ref().unwrap();
+        let raw_window_handle = window.window_handle()
+            .ok().map(|handle| handle.as_raw());
         let gl_display = gl_config.display();
 
-        let surf_attr =
-            SurfaceAttributesBuilder::<WindowSurface>::new()
-                .build(raw_window_handle, NonZeroU32::new(wsize. width).unwrap(),
-                                        NonZeroU32::new(wsize.height).unwrap());
+        let wsize = window.inner_size();
         let surface = unsafe {
-            gl_display.create_window_surface(&gl_config, &surf_attr)? };
+            gl_display.create_window_surface(&gl_config,
+                &SurfaceAttributesBuilder::<WindowSurface>::new().build(
+                    raw_window_handle.unwrap(), NonZeroU32::new(wsize. width).unwrap(),
+                                                NonZeroU32::new(wsize.height).unwrap()))?
+        };
 
-        let glctx = Some(unsafe {
+        let glctx = unsafe {
             gl_display.create_context(&gl_config,
-                &ContextAttributesBuilder::new()
-                    .build(Some(raw_window_handle)))
-                .unwrap_or_else(|_| gl_display.create_context(&gl_config,
-                    &ContextAttributesBuilder::new()
-                        .with_context_api(ContextApi::Gles(None))
-                        .build(Some(raw_window_handle))).expect("Failed to create context"))
-        }).take().unwrap().make_current(&surface)?;
+                &ContextAttributesBuilder::new().build(raw_window_handle)).or_else(|_|
+            gl_display.create_context(&gl_config,
+                &ContextAttributesBuilder::new().with_context_api(
+                         ContextApi::Gles(None)).build(raw_window_handle)))?
+        }.make_current(&surface)?;
 
-        self.window = Some(window);
         self.state  = Some((surface, glctx));
         let mut canvas = Canvas::new(unsafe { OpenGl::new_from_function_cstr(
             |s| gl_display.get_proc_address(s) as *const _) }?)?;
@@ -286,19 +202,103 @@ impl WinitApp {
 
     #[cfg(target_arch = "wasm32")]
     fn init_state<T>(&mut self, _event_loop: &EventLoop<T>) -> Result<(), Box<dyn Error>> {
-        use winit::platform::web::WindowBuilderExtWebSys;
+        use winit::platform::web::WindowAttributesExtWebSys;
         use wasm_bindgen::JsCast;
 
-        let canvas = web_sys::window().unwrap() .document().unwrap()
-            .get_element_by_id("canvas").unwrap()   // XXX: HTML5/canvas API
-            .dyn_into::<web_sys::HtmlCanvasElement>().unwrap();
+        let  canvas = web_sys::window().unwrap().document().unwrap()
+            .get_element_by_id("canvas").unwrap().dyn_into::<web_sys::HtmlCanvasElement>();
+        self.canvas = Canvas::new(OpenGl::new_from_html_canvas(
+             canvas.as_ref().unwrap())?).ok();
 
-        self.state = Some(winit::window::WindowBuilder::new()
-            .with_canvas(Some(canvas)).build(&event_loop).unwrap());
-        self.canvas = Some(Canvas::new(OpenGl::new_from_html_canvas(&canvas)
-            .expect("Cannot create renderer")).expect("Cannot create canvas"));
+        self.state = event_loop.create_window(Window::default_attributes()
+            .with_title("Winit window").with_append(true).with_canvas(canvas)).ok();
         // XXX: need to resize canvas?
     }
+
+    /* fn draw_offscreen(&mut self/*, path: P*/) -> Result<(), Box<dyn Error>> {
+        self.canvas = Some(Canvas::new(Self::get_renderer()?)?);
+        let  canvas = self.canvas.as_mut().unwrap();
+        self.expand_central(Some(1024.0, 768.0));
+        self.redraw();
+
+        /* let (width, height, mut path) = (640, 480, Path::new());
+        canvas.set_size(width, height, 1.);
+        canvas.clear_rect(0, 0, width * 4, height * 4, Color::rgbf(0.9, 0.0, 0.9));
+
+        path.rect(0., 0., width as _, height as _);
+        canvas.fill_path(&path, &Paint::linear_gradient(0., 0., width as _, 0.,
+            Color::rgba(255, 0, 0, 255), Color::rgba(0, 0, 255, 255)));
+        canvas.flush(); */
+
+        //let buf = canvas.screenshot()?.pixels().flat_map(|pixel|
+        //    pixel.iter()).collect::<Vec<_>>();
+        let buf = canvas.screenshot()?.into_contiguous_buf();
+        let buf = unsafe { std::slice::from_raw_parts(buf.0.as_ptr() as *const u8,
+            (width * height * 4) as _) };
+
+        let mut encoder = png::Encoder::new(std::io::BufWriter::new(
+            fs::File::create("target/foo.png")?), width, height);   // env!("OUT_DIR")
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+
+        encoder.set_source_gamma(png::ScaledFloat::new(1. / 2.2));
+        //    png::ScaledFloat::from_scaled(45455)  // 1. / 2.2 scaled by 100000
+        //let source_chromaticities = png::SourceChromaticities::new( // unscaled instant
+        //    (0.3127, 0.3290), (0.6400, 0.3300), (0.3000, 0.6000), (0.1500, 0.0600));
+        //encoder.set_source_chromaticities(source_chromaticities);
+        encoder.write_header()?.write_image_data(buf)?;
+
+        Ok(())
+    }
+
+    // https://github.com/Ionizing/femtovg-offscreen/blob/master/src/main.rs
+    // https://github.com/servo/surfman/blob/master/surfman/examples/offscreen.rs
+    // https://github.com/nobuyuki83/del-gl/blob/master/src/glutin/off_screen_render.rs
+    #[cfg(target_os = "macos")] fn get_renderer() -> Result<OpenGl, Box<dyn Error>> {
+        //use glutin::{Context, ContextCurrentState, CreationError};
+        use glutin::{context::GlProfile, ContextBuilder, GlRequest};
+
+        let ctx = ContextBuilder::new()
+            .with_gl_profile(GlProfile::Core).with_gl(GlRequest::Latest)
+            .build_headless(&EventLoop::new(), winit::dpi::PhysicalSize::new(1, 1))?;
+
+        Ok(unsafe { OpenGl::new_from_function_cstr(|s|
+            ctx.make_current()?.get_proc_address(s) as *const _) }?)
+    }
+
+    // https://github.com/rust-windowing/glutin/blob/master/glutin_examples/examples/egl_device.rs
+    #[cfg(not(target_arch = "wasm32"))] #[cfg(not(target_os = "macos"))]
+    fn get_renderer() -> Result<OpenGl, Box<dyn Error>> {
+        use glutin::config::{ConfigSurfaceTypes, ConfigTemplateBuilder};
+        use glutin::context::{ContextApi, ContextAttributesBuilder};
+        use glutin::api::egl::{device::Device, display::Display};
+        use glutin::{display::GetGlDisplay, prelude::*};
+
+        let devices = Device::query_devices()?.collect::<Vec<_>>();
+        devices.iter().enumerate().for_each(|(index, device)|
+            println!("Device {}: Name: {} Vendor: {}", index,
+                device.name().unwrap_or("UNKNOWN"), device.vendor().unwrap_or("UNKNOWN")));
+        let display = unsafe { Display::with_device(devices.first()?, None) }?;
+
+        let config = unsafe { display.find_configs(
+            ConfigTemplateBuilder::default().with_alpha_size(8)
+                .with_surface_type(ConfigSurfaceTypes::empty()).build()) }.unwrap()
+            .reduce(|config, accum| {
+                if (config.supports_transparency().unwrap_or(false) &
+                    !accum.supports_transparency().unwrap_or(false)) ||
+                    config.num_samples() < accum.num_samples() { config } else { accum }
+            })?;    println!("Picked a config with {} samples", config.num_samples());
+
+        let _context = unsafe { display.create_context(&config,
+            &ContextAttributesBuilder::new().build(None))
+                .or_else(|_| display.create_context(&config,
+            &ContextAttributesBuilder::new()
+                .with_context_api(ContextApi::Gles(None)).build(None)))?
+        }.make_current_surfaceless()?;
+
+        Ok(unsafe { OpenGl::new_from_function_cstr(|s|
+            display.get_proc_address(s) as *const _) }?)
+    } */
 
     fn load_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<(), Box<dyn Error>> {
         let path = path.as_ref();
