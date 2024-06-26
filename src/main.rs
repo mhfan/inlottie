@@ -12,7 +12,8 @@ use femtovg::{renderer::OpenGl, Renderer, Canvas};
 #[cfg(feature = "b2d")] use {intvg::blend2d::*, std::rc::Rc};
 use std::{collections::VecDeque, time::Instant, error::Error, fs, env};
 
-use winit::{window::Window, event_loop::{EventLoop, ActiveEventLoop}};
+use winit::{application::ApplicationHandler, window::{Window, WindowId},
+    event_loop::{ActiveEventLoop, EventLoop}, event::WindowEvent};
 #[cfg(not(target_arch = "wasm32"))]
 use glutin::{surface::{Surface, WindowSurface}, context::PossiblyCurrentContext, prelude::*};
 
@@ -25,99 +26,106 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut app = WinitApp::new();
     app.load_file(env::args().nth(1).unwrap_or("".to_owned()))?;
-    use winit::{keyboard::{Key, NamedKey}, event::*};
     let event_loop = EventLoop::new()?;
+    //use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
     //event_loop.set_control_flow(ControlFlow::Poll);
-    //event_loop.run_app(&mut app)?;
+    event_loop.run_app(&mut app)?;  Ok(())
+}
 
-    #[allow(deprecated)]
-    event_loop.run(|event, elwt| { match event {
-        Event::Resumed => {
-            #[cfg(feature = "b2d")] {
-                app.init_blctx(elwt, "SVG Viewer - Blend2D demo").unwrap(); return
-            }
-            if let Err(err) =
-                app.init_state(elwt, "Lottie/SVG Viewer - Femtovg") {
-                    eprintln!("Failed to initialize: {err:?}"); };
+impl ApplicationHandler for WinitApp {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(feature = "b2d")] {
+            self.init_blctx(event_loop, "SVG Viewer - Blend2D demo").unwrap(); return
         }
+        if let Err(err) =
+            self.init_state(event_loop, "Lottie/SVG Viewer - Femtovg") {
+                eprintln!("Failed to initialize: {err:?}"); };
+    }
 
-        Event::WindowEvent { window_id: _, event } => match event {
-            //WindowEvent::Destroyed => dbg!(),
-            WindowEvent::CloseRequested => elwt.exit(),
-            WindowEvent::Focused(bl) => app.focused = bl,
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _wid: WindowId, event: WindowEvent) {
+        //if !self.window.as_ref().is_some_and(|window| window.id() == wid) { return }
+        use winit::{keyboard::{Key, NamedKey}, event::*};
+
+        match event {   //WindowEvent::Destroyed => dbg!(),
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::Focused(bl) => self.focused = bl,
 
             #[cfg(not(target_arch = "wasm32"))] WindowEvent::Resized(size) => {
                 if let Some((surface, // move into resize_viewport?
-                    glctx)) = &app.state {
+                    glctx)) = &self.state {
                     surface.resize(glctx, size.width .try_into().unwrap(),
                                           size.height.try_into().unwrap());
-                }   app.mouse_pos = Default::default();
-                app.resize_viewport(Some((size.width as _, size.height as _)));
+                }   self.mouse_pos = Default::default();
+                self.resize_viewport(Some((size.width as _, size.height as _)));
             }   // first occur on window creation
             WindowEvent::KeyboardInput { event: KeyEvent { logical_key,
                 state: ElementState::Pressed, .. }, .. } => match logical_key.as_ref() {
-                Key::Named(NamedKey::Escape) => elwt.exit(),
-                Key::Named(NamedKey::Space)  => {   app.paused = !app.paused;
-                                                    app.prevt = Instant::now(); }
-
-                #[cfg(feature =  "lottie")] Key::Character(ch) => if app.paused { match ch {
+                Key::Named(NamedKey::Escape) => event_loop.exit(),
+                Key::Named(NamedKey::Space)  => {   self.paused = !self.paused;
+                                                    self.prevt = Instant::now(); }
+                #[cfg(feature =  "lottie")]
+                Key::Character(ch) => if self.paused { match ch {
                     "n" | "N" => {  use std::time::Duration;  // XXX:
                         let AnimGraph::Lottie(lottie) =
-                            &app.graph else { return };
-                        app.prevt = Instant::now() -
+                            &self.graph else { return };
+                        self.prevt = Instant::now() -
                             Duration::from_millis((1000. / lottie.fr) as _);
-                        app.request_redraw();
+                        self.request_redraw();
                     }   _ => (),
                 } }     _ => (),
             }
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
-                app.dragging = matches!(state, ElementState::Pressed);
+                self.dragging = matches!(state, ElementState::Pressed);
                 #[cfg(feature = "rive-rs")]
-                if let AnimGraph::Rive((scene, viewport)) = &mut app.graph {
+                if let AnimGraph::Rive((scene, viewport)) = &mut self.graph {
                     match state {
                         ElementState::Pressed  =>
-                            scene.pointer_down(app.mouse_pos.0, app.mouse_pos.1, viewport),
+                            scene.pointer_down(self.mouse_pos.0, self.mouse_pos.1, viewport),
                         ElementState::Released =>
-                            scene.pointer_up  (app.mouse_pos.0, app.mouse_pos.1, viewport),
+                            scene.pointer_up  (self.mouse_pos.0, self.mouse_pos.1, viewport),
                     }
                 }
             }
             WindowEvent::MouseWheel { delta: MouseScrollDelta::LineDelta(_, y), .. } => {
-                let Some(canvas) = &mut app.canvas else { return };
-                let pt = canvas.transform().inversed()
-                    .transform_point(app.mouse_pos.0, app.mouse_pos.1);
-                let scale = y / 10. + 1.;  canvas.translate( pt.0,  pt.1);
-                canvas.scale(scale, scale);     canvas.translate(-pt.0, -pt.1);
+                let Some(ctx2d) = &mut self.ctx2d else { return };
+                let pt = ctx2d.transform().inversed()
+                    .transform_point(self.mouse_pos.0, self.mouse_pos.1);
+                let scale = y / 10. + 1.;   ctx2d.translate( pt.0,  pt.1);
+                ctx2d.scale(scale, scale);       ctx2d.translate(-pt.0, -pt.1);
             }
             WindowEvent::CursorMoved { position, .. } => {
-                if app.dragging {
-                    let Some(canvas) = &mut app.canvas else { return };
-                    let trfm = canvas.transform().inversed();
-                    let p0 = trfm.transform_point(app.mouse_pos.0, app.mouse_pos.1);
-                    let p1 = trfm.transform_point(position.x as _, position.y as _);
-                    canvas.translate(p1.0 - p0.0, p1.1 - p0.1);
-                }   app.mouse_pos = (position.x as _, position.y as _);
+                if self.dragging {
+                    if let Some(ctx2d) = &mut self.ctx2d {
+                        let trfm = ctx2d.transform().inversed();
+                        let p0 = trfm.transform_point(
+                            self.mouse_pos.0, self.mouse_pos.1);
+                        let p1 = trfm.transform_point(
+                            position.x as _, position.y as _);
+                        ctx2d.translate(p1.0 - p0.0, p1.1 - p0.1);
+                    }
+                }   self.mouse_pos = (position.x as _, position.y as _);
 
                 #[cfg(feature = "rive-rs")]
-                if let AnimGraph::Rive((scene, viewport)) = &mut app.graph {
-                    scene.pointer_move(app.mouse_pos.0, app.mouse_pos.1, viewport);
+                if let AnimGraph::Rive((scene, viewport)) = &mut self.graph {
+                    scene.pointer_move(self.mouse_pos.0, self.mouse_pos.1, viewport);
                 }
             }
             WindowEvent::DroppedFile(path) => {
-                app.mouse_pos = Default::default();     let _ = app.load_file(path);
-                app.resize_viewport(None);                      app.request_redraw();
+                self.mouse_pos = Default::default();     let _ = self.load_file(path);
+                self.resize_viewport(None);                      self.request_redraw();
             }
-            WindowEvent::RedrawRequested => {   app.redraw();
-                #[cfg(feature = "b2d")] app.redraw_b2d();
+            WindowEvent::RedrawRequested => {   self.redraw();
+                #[cfg(feature = "b2d")] self.redraw_b2d();
             }   _ => ()
-        },
-        Event::AboutToWait => if !app.paused && app.focused {   app.request_redraw(); },
-         _ => () //println!("{:?}", event)
-    } })?;  Ok(())  //loop {}
+        }
+    }
+
+    fn about_to_wait(&mut self, _loop: &ActiveEventLoop) {
+        if !self.paused && self.focused { self.request_redraw(); }
+    }
 }
 
 struct WinitApp {
-    //exit: bool,
     paused: bool,
     focused: bool,
     dragging: bool,
@@ -130,7 +138,7 @@ struct WinitApp {
     #[cfg(feature = "b2d")] blctx: Option<(BLContext, BLImage)>,
     #[cfg(feature = "b2d")] surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
 
-    canvas: Option<Canvas<OpenGl>>,
+    ctx2d: Option<Canvas<OpenGl>>,
     #[cfg(not(target_arch = "wasm32"))]
     state: Option<(Surface<WindowSurface>, PossiblyCurrentContext)>,
     window: Option<Window>,
@@ -149,10 +157,10 @@ enum AnimGraph {
 
 impl WinitApp {
     fn new() -> Self {
-        Self { graph: AnimGraph::None, canvas: None, window: None, state: None,
+        Self { paused: false, focused: true, dragging: false, //exit: false,
             #[cfg(feature = "b2d")] surface: None, #[cfg(feature = "b2d")] blctx: None,
             perf: PerfGraph::new(), mouse_pos: Default::default(), prevt: Instant::now(),
-            paused: false, focused: true, dragging: false, //exit: false,
+            graph: AnimGraph::None, ctx2d: None, state: None, window: None,
         }
     }
 
@@ -188,13 +196,13 @@ impl WinitApp {
             (wsize.width as _, wsize.height as _)
         };
 
-        let csize = match &mut self.graph {
+        let csize = match &self.graph {
             AnimGraph::SVG(tree) => (tree.size().width(), tree.size().height()),
             AnimGraph::None => (480., 480.),    // for Blend2D logo
             _ => return,
         };
 
-        let scale = (wsize.0 / csize.0).min(wsize.1 / csize.1) * 0.98;
+        let scale = (wsize.0 / csize.0).min(wsize.1 / csize.1) * 0.98;  // XXX:
         let csize = (csize.0 * scale, csize.1 * scale);
 
         /* let mut buffer = surface.buffer_mut().unwrap();
@@ -253,6 +261,7 @@ impl WinitApp {
         }   let _ = buffer.present();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     // https://github.com/rust-windowing/glutin/blob/master/glutin_examples/src/lib.rs
     fn init_state(&mut self, event_loop: &ActiveEventLoop, title: &str) ->
         Result<(), Box<dyn Error>> {
@@ -298,11 +307,11 @@ impl WinitApp {
         }.make_current(&surface)?;
 
         self.state  = Some((surface, glctx));
-        let mut canvas = Canvas::new(unsafe { OpenGl::new_from_function_cstr(
+        let mut ctx2d = Canvas::new(unsafe { OpenGl::new_from_function_cstr(
             |s| gl_display.get_proc_address(s) as *const _) }?)?;
-        #[cfg(target_os = "macos")] let _ = canvas.add_font_dir("/Library/fonts");
-        canvas.add_font_dir("data/fonts")?;
-        self.canvas = Some(canvas);     Ok(())
+        #[cfg(target_os = "macos")] let _ = ctx2d.add_font_dir("/Library/fonts");
+        let _ = ctx2d.add_font_dir("data/fonts")?;
+        self.ctx2d = Some(ctx2d);   Ok(())
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -321,28 +330,28 @@ impl WinitApp {
         canvas.set_height((canvas.client_height() as f64 * scale) as _);
         // XXX: this is matter for hidpi/retina rendering
 
-        self.canvas = Canvas::new(OpenGl::new_from_html_canvas(
-             canvas.as_ref().unwrap())?).ok();
+        self.ctx2d = Canvas::new(OpenGl::new_from_html_canvas(
+             ctx2d.as_ref().unwrap())?).ok();
     }
 
     /* fn draw_offscreen(&mut self/*, path: P*/) -> Result<(), Box<dyn Error>> {
-        self.canvas = Some(Canvas::new(Self::get_renderer()?)?);
-        let  canvas = self.canvas.as_mut().unwrap();
+        self.ctx2d = Some(Canvas::new(Self::get_renderer()?)?);
+        let  ctx2d = self.ctx2d.as_mut().unwrap();
         self.resize_viewport(Some(1024.0, 768.0));
         self.redraw();
 
         /* let (width, height, mut path) = (640, 480, Path::new());
-        canvas.set_size(width, height, 1.);
-        canvas.clear_rect(0, 0, width * 4, height * 4, Color::rgbf(0.9, 0.0, 0.9));
+        ctx2d.set_size(width, height, 1.);
+        ctx2d.clear_rect(0, 0, width * 4, height * 4, Color::rgbf(0.9, 0.0, 0.9));
 
         path.rect(0., 0., width as _, height as _);
-        canvas.fill_path(&path, &Paint::linear_gradient(0., 0., width as _, 0.,
+        ctx2d.fill_path(&path, &Paint::linear_gradient(0., 0., width as _, 0.,
             Color::rgba(255, 0, 0, 255), Color::rgba(0, 0, 255, 255)));
-        canvas.flush(); */
+        ctx2d.flush(); */
 
-        //let buf = canvas.screenshot()?.pixels().flat_map(|pixel|
+        //let buf = ctx2d.screenshot()?.pixels().flat_map(|pixel|
         //    pixel.iter()).collect::<Vec<_>>();
-        let buf = canvas.screenshot()?.into_contiguous_buf();
+        let buf = ctx2d.screenshot()?.into_contiguous_buf();
         let buf = unsafe { std::slice::from_raw_parts(buf.0.as_ptr() as *const u8,
             (width * height * 4) as _) };
 
@@ -426,17 +435,17 @@ impl WinitApp {
                         usvg_opts.fontdb_mut().load_system_fonts();
                 AnimGraph::SVG(Box::new(usvg::Tree::from_data(&fs::read(path)?, &usvg_opts)?))
             }
-            _ => { eprintln!("File format isn't supported: {}", path.display()); AnimGraph::None }
+            _ => { eprintln!("No file or unsupported: {}", path.display());  AnimGraph::None }
         };  Ok(())
     }
 
     fn resize_viewport(&mut self, wsize: Option<(f32, f32)>) {  // maximize & centralize
         #[cfg(feature = "b2d")] { self.resize_b2d(wsize); return }
-        let Some(canvas) = &mut self.canvas else { return };
+        let Some(ctx2d) = &mut self.ctx2d else { return };
 
         let wsize = if let Some(wsize) = wsize {
-            canvas.set_size(wsize.0 as _, wsize.1 as _, 1.);    wsize
-        } else { (canvas.width() as _, canvas.height() as _) };
+            ctx2d.set_size(wsize.0 as _, wsize.1 as _, 1.);    wsize
+        } else { (ctx2d.width() as _, ctx2d.height() as _) };
 
         let csize = match &mut self.graph {
             #[cfg(feature =  "lottie")]
@@ -444,45 +453,45 @@ impl WinitApp {
 
             #[cfg(feature = "rive-rs")] AnimGraph::Rive((_, viewport)) => {
                 viewport.resize(wsize.0 as _, wsize.1 as _);
-                canvas.reset_transform();   return
+                ctx2d.reset_transform();    return
             }
             AnimGraph::SVG(tree) => (tree.size().width(), tree.size().height()),
-            AnimGraph::None => { canvas.reset_transform();  return }    // (480., 480.)?
+            AnimGraph::None => { ctx2d.reset_transform();   return }    // (480., 480.)?
         };
 
-        canvas.reset_transform();
+        ctx2d.reset_transform();
         let scale = (wsize.0 / csize.0).min(wsize.1  / csize.1) * 0.98;     // XXX:
-        canvas.translate((wsize.0 - csize.0 * scale) / 2.,
+        ctx2d.translate( (wsize.0 - csize.0 * scale) / 2.,
                          (wsize.1 - csize.1 * scale) / 2.);
-        canvas.scale(scale, scale);
+        ctx2d.scale(scale, scale);
     }
 
     fn redraw(&mut self) {
-        let Some(canvas) = &mut self.canvas else { return };
+        let Some(ctx2d) = &mut self.ctx2d else { return };
         let _elapsed = self.prevt.elapsed();    self.prevt = Instant::now();
 
         match &mut self.graph {
             #[cfg(feature =  "lottie")] AnimGraph::Lottie(lottie) =>
-                if !(lottie.render_next_frame(canvas, _elapsed.as_secs_f32())) { return }
+                if !(lottie.render_next_frame(ctx2d, _elapsed.as_secs_f32())) { return }
                 // TODO: draw frame time (lottie.fnth) on screen?
 
             #[cfg(feature = "rive-rs")]
             AnimGraph::Rive((scene, viewport)) =>
-                if !scene.advance_and_maybe_draw(&mut RiveNVG::new(canvas),
+                if !scene.advance_and_maybe_draw(&mut RiveNVG::new(ctx2d),
                     _elapsed, viewport) { return }
 
             AnimGraph::SVG(tree) => {
-                canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
+                ctx2d.clear_rect(0, 0, ctx2d.width(), ctx2d.height(),
                     femtovg::Color::rgbf(0.4, 0.4, 0.4)); // XXX: limit to viewport/viewbox?
-                render_nodes(canvas, //canvas.transform().inversed().transform_point()
+                render_nodes(ctx2d, //ctx2d.transform().inversed().transform_point()
                     self.mouse_pos, tree.root(), &usvg::Transform::identity());
             }
 
-            AnimGraph::None => some_test_case(canvas),
+            AnimGraph::None => some_test_case(ctx2d),
         }
 
-        self.perf.render(canvas, (3., 3.));
-        canvas.flush(); // Tell renderer to execute all drawing commands
+        self.perf.render(ctx2d, (3., 3.));
+        ctx2d.flush(); // Tell renderer to execute all drawing commands
         self.perf.update(self.prevt.elapsed().as_secs_f32());
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -512,20 +521,20 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
         self.que.push_back(fps);    self.sum += fps;
     }
 
-    pub fn render<T: Renderer>(&self, canvas: &mut Canvas<T>, pos: (f32, f32)) {
+    pub fn render<T: Renderer>(&self, ctx2d: &mut Canvas<T>, pos: (f32, f32)) {
         let (rw, rh, mut path) = (100., 20., Path::new());
         let mut paint = Paint::color(Color::rgba(0, 0, 0, 99));
         path.rect(0., 0., rw, rh);  use femtovg::{Path, Color, Paint};
 
-        let last_trfm = canvas.transform();     //canvas.save();
-        canvas.reset_transform();    canvas.translate(pos.0, pos.1);
-        canvas.fill_path(&path, &paint);    // to clear the exact area?
+        let last_trfm = ctx2d.transform();  //ctx2d.save();
+        ctx2d.reset_transform();     ctx2d.translate(pos.0, pos.1);
+        ctx2d.fill_path(&path, &paint);    // to clear the exact area?
 
         path = Path::new();     path.move_to(0., rh);
         for i in 0..self.que.len() {  // self.que[i].min(100.) / 100.
             path.line_to(rw * i as f32 / self.que.len() as f32, rh - rh * self.que[i] / self.max);
         }   path.line_to(rw, rh);   paint.set_color(Color::rgba(255, 192, 0, 128));
-        canvas.fill_path(&path, &paint);
+        ctx2d.fill_path(&path, &paint);
 
         paint.set_color(Color::rgba(240, 240, 240, 255));
         paint.set_text_baseline(femtovg::Baseline::Top);
@@ -533,8 +542,8 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
         paint.set_font_size(14.0); // some fixed values can be moved into the structure
 
         let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
-        let _ = canvas.fill_text(rw - 10., 0., &format!("{fps:.2} FPS"), &paint);
-        canvas.reset_transform();   canvas.set_transform(&last_trfm);   //canvas.restore();
+        let _ = ctx2d.fill_text(rw - 10., 0., &format!("{fps:.2} FPS"), &paint);
+        ctx2d.reset_transform();    ctx2d.set_transform(&last_trfm);    //ctx2d.restore();
     }
 
     #[cfg(feature = "b2d")] pub fn render_b2d(&self, blctx: &mut BLContext, pos: (f32, f32)) {
@@ -564,7 +573,7 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
 
 }
 
-fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: (f32, f32),
+fn render_nodes<T: Renderer>(ctx2d: &mut Canvas<T>, mouse: (f32, f32),
     parent: &usvg::Group, trfm: &usvg::Transform) {
     use femtovg::{Path, Color, Paint};
 
@@ -598,7 +607,7 @@ fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: (f32, f32),
 
     for child in parent.children() { match child {
         usvg::Node::Group(group) =>     // trfm is needed on rendering only
-            render_nodes(canvas, mouse, group, &trfm.pre_concat(group.transform())),
+            render_nodes(ctx2d, mouse, group, &trfm.pre_concat(group.transform())),
             // TODO: deal with group.clip_path()/mask()/filters()
 
         usvg::Node::Path(path) => if path.is_visible() {
@@ -649,18 +658,18 @@ fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: (f32, f32),
 
             match path.paint_order() {
                 usvg::PaintOrder::FillAndStroke => {
-                    if let Some(paint) = fpaint { canvas.  fill_path(&fpath, &paint); }
-                    if let Some(paint) = lpaint { canvas.stroke_path(&fpath, &paint); }
+                    if let Some(paint) = fpaint { ctx2d.  fill_path(&fpath, &paint); }
+                    if let Some(paint) = lpaint { ctx2d.stroke_path(&fpath, &paint); }
                 }
                 usvg::PaintOrder::StrokeAndFill => {
-                    if let Some(paint) = lpaint { canvas.stroke_path(&fpath, &paint); }
-                    if let Some(paint) = fpaint { canvas.  fill_path(&fpath, &paint); }
+                    if let Some(paint) = lpaint { ctx2d.stroke_path(&fpath, &paint); }
+                    if let Some(paint) = fpaint { ctx2d.  fill_path(&fpath, &paint); }
                 }
             }
 
-            if  canvas.contains_point(&fpath, mouse.0, mouse.1, FillRule::NonZero) {
-                canvas.stroke_path(&fpath, &Paint::color(Color::rgb(32, 240, 32))
-                    .with_line_width(1. / canvas.transform()[0]));
+            if  ctx2d.contains_point(&fpath, mouse.0, mouse.1, FillRule::NonZero) {
+                ctx2d.stroke_path(&fpath, &Paint::color(Color::rgb(32, 240, 32))
+                    .with_line_width(1. / ctx2d.transform()[0]));
             }
         }
 
@@ -668,50 +677,50 @@ fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: (f32, f32),
             match img.kind() {            usvg::ImageKind::JPEG(_) |
                 usvg::ImageKind::PNG(_) | usvg::ImageKind::GIF(_) => todo!(),
                 // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
-                usvg::ImageKind::SVG(svg) => render_nodes(canvas, mouse, svg.root(), trfm),
+                usvg::ImageKind::SVG(svg) => render_nodes(ctx2d, mouse, svg.root(), trfm),
             }
         }
 
         usvg::Node::Text(text) => { let group = text.flattened();
-            render_nodes(canvas, mouse, group, &trfm.pre_concat(group.transform()));
+            render_nodes(ctx2d, mouse, group, &trfm.pre_concat(group.transform()));
         }
     } }
 }
 
-fn some_test_case<T: Renderer>(canvas: &mut Canvas<T>) {
-    let (w, h) = (canvas.width(), canvas.height());
+fn some_test_case<T: Renderer>(ctx2d: &mut Canvas<T>) {
+    let (w, h) = (ctx2d.width(), ctx2d.height());
     let (w, h) = (w as f32, h as f32);
     use femtovg::{Path, Color, Paint};
 
-    let imgid = canvas.create_image_empty(w as _, h as _,
+    let imgid = ctx2d.create_image_empty(w as _, h as _,
         femtovg::PixelFormat::Rgba8, femtovg::ImageFlags::FLIP_Y).unwrap();
-    canvas.set_render_target(femtovg::RenderTarget::Image(imgid));
-    canvas.clear_rect(0, 0, w as _, h as _, femtovg::Color::rgbaf(0., 0., 0., 0.));
+    ctx2d.set_render_target(femtovg::RenderTarget::Image(imgid));
+    ctx2d.clear_rect(0, 0, w as _, h as _, femtovg::Color::rgbaf(0., 0., 0., 0.));
 
     let (lx, ty) = (w / 4., h / 4.);
     let mut path = Path::new();     path.rect(lx, ty, w / 2., h / 2.);
-    canvas.stroke_path(&path, &Paint::color(Color::rgbaf(0., 0., 1., 1.)).with_line_width(1.));
-    canvas.  fill_path(&path, &Paint::color(Color::rgbaf(1., 0.5, 0.5, 1.)));
+    ctx2d.stroke_path(&path, &Paint::color(Color::rgbaf(0., 0., 1., 1.)).with_line_width(1.));
+    ctx2d.  fill_path(&path, &Paint::color(Color::rgbaf(1., 0.5, 0.5, 1.)));
 
-    let mskid = canvas.create_image_empty(w as _, h as _,
+    let mskid = ctx2d.create_image_empty(w as _, h as _,
         femtovg::PixelFormat::Rgba8, femtovg::ImageFlags::FLIP_Y).unwrap();
-    canvas.set_render_target(femtovg::RenderTarget::Image(mskid));
-    canvas.clear_rect(0, 0, w as _, h as _, femtovg::Color::rgbaf(0., 0., 0., 0.));
+    ctx2d.set_render_target(femtovg::RenderTarget::Image(mskid));
+    ctx2d.clear_rect(0, 0, w as _, h as _, femtovg::Color::rgbaf(0., 0., 0., 0.));
 
     let (mut path, rx, by) = (Path::new(), w - lx, h - ty - 10.);
     path.move_to(w / 2., ty); path.line_to(rx, by); path.line_to(lx, by); path.close();
-    canvas.fill_path(&path, &Paint::color(Color::rgbaf(0., 1., 0., 1.)));
+    ctx2d.fill_path(&path, &Paint::color(Color::rgbaf(0., 1., 0., 1.)));
 
     path = Path::new();  path.rect(0., 0., w, h);
-    canvas.global_composite_operation(femtovg::CompositeOperation::DestinationIn);
-    canvas.set_render_target(femtovg::RenderTarget::Image(imgid));
+    ctx2d.global_composite_operation(femtovg::CompositeOperation::DestinationIn);
+    ctx2d.set_render_target(femtovg::RenderTarget::Image(imgid));
     let paint = femtovg::Paint::image(mskid, 0., 0., w, h, 0., 1.);
-    canvas.fill_path(&path, &paint);    canvas.flush();     canvas.delete_image(mskid);
+    ctx2d.fill_path(&path, &paint);     ctx2d.flush();  ctx2d.delete_image(mskid);
 
-    canvas.global_composite_operation(femtovg::CompositeOperation::SourceOver);
-    canvas.set_render_target(femtovg::RenderTarget::Screen);
+    ctx2d.global_composite_operation(femtovg::CompositeOperation::SourceOver);
+    ctx2d.set_render_target(femtovg::RenderTarget::Screen);
     let paint = femtovg::Paint::image(imgid, 0., 0., w, h, 0., 1.);
-    canvas.fill_path(&path, &paint);    canvas.flush();     canvas.delete_image(imgid);
+    ctx2d.fill_path(&path, &paint);     ctx2d.flush();  ctx2d.delete_image(imgid);
 }
 
 #[cfg(feature = "b2d")] mod b2d_svg {   use intvg::blend2d::*;
