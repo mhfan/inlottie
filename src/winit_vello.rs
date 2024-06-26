@@ -64,6 +64,7 @@ fn main() -> anyhow::Result<()> {
     let mut focused = true;
     // Create and run a winit event loop
     let event_loop = winit::event_loop::EventLoop::new()?;
+    #[allow(deprecated)]
     event_loop.run(move |event, elwt| match event {
             // Setup renderer. In winit apps it is recommended to do setup in Event::Resumed
             // for best cross-platform compatibility
@@ -76,11 +77,10 @@ fn main() -> anyhow::Result<()> {
 
                 // Get the window cached in a previous Suspended event or else create a new one
                 let window = cached_window.take().unwrap_or_else(|| Arc::new(
-                    winit::window::WindowBuilder::new().with_resizable(true)
-                        .with_inner_size(wsize).with_title("Vello Demo").build(elwt).unwrap()
-                    /*elwt.create_window(Window::default_attributes()
-                        .with_inner_size(LogicalSize::new(1044, 800)) // XXX: winit v0.30
-                        .with_resizable(true).with_title("Vello Shapes")).unwrap() */
+                    //winit::window::WindowBuilder::new().with_resizable(true) // winit 0.29
+                    //    .with_inner_size(wsize).with_title("Vello Demo").build(elwt).unwrap()
+                    elwt.create_window(Window::default_attributes()
+                        .with_inner_size(wsize).with_title("Vello Demo")).unwrap()
                 ));
 
                 // Create a vello Surface
