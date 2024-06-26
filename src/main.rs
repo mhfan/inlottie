@@ -6,9 +6,11 @@
  ****************************************************************/
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![allow(unreachable_code)]
 
+use femtovg::{renderer::OpenGl, Renderer, Canvas};
+#[cfg(feature = "b2d")] use {intvg::blend2d::*, std::rc::Rc};
 use std::{collections::VecDeque, time::Instant, error::Error, fs, env};
-use femtovg::{renderer::OpenGl, Renderer, Canvas, Path, Paint, Color};
 
 use winit::{window::Window, event_loop::{EventLoop, ActiveEventLoop}};
 #[cfg(not(target_arch = "wasm32"))]
@@ -30,9 +32,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     #[allow(deprecated)]
     event_loop.run(|event, elwt| { match event {
-        Event::Resumed => if let Err(err) =
-            app.init_state(elwt, "Lottie/SVG Viewer - Femtovg") {
-                eprintln!("Failed to initialize: {err:?}"); },
+        Event::Resumed => {
+            #[cfg(feature = "b2d")] {
+                app.init_blctx(elwt, "SVG Viewer - Blend2D demo").unwrap(); return
+            }
+            if let Err(err) =
+                app.init_state(elwt, "Lottie/SVG Viewer - Femtovg") {
+                    eprintln!("Failed to initialize: {err:?}"); };
+        }
 
         Event::WindowEvent { window_id: _, event } => match event {
             //WindowEvent::Destroyed => dbg!(),
@@ -40,17 +47,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             WindowEvent::Focused(bl) => app.focused = bl,
 
             #[cfg(not(target_arch = "wasm32"))] WindowEvent::Resized(size) => {
-                let Some((surface,
-                    glctx)) = &app.state else { return };
-                surface.resize(glctx, size.width .try_into().unwrap(),
-                                      size.height.try_into().unwrap());
-                app.expand_central(Some((size.width as _, size.height as _)));
-                app.mouse_pos = Default::default();
+                if let Some((surface, // move into resize_viewport?
+                    glctx)) = &app.state {
+                    surface.resize(glctx, size.width .try_into().unwrap(),
+                                          size.height.try_into().unwrap());
+                }   app.mouse_pos = Default::default();
+                app.resize_viewport(Some((size.width as _, size.height as _)));
             }   // first occur on window creation
             WindowEvent::KeyboardInput { event: KeyEvent { logical_key,
                 state: ElementState::Pressed, .. }, .. } => match logical_key.as_ref() {
                 Key::Named(NamedKey::Escape) => elwt.exit(),
-                Key::Named(NamedKey::Space) => {    app.paused = !app.paused;
+                Key::Named(NamedKey::Space)  => {   app.paused = !app.paused;
                                                     app.prevt = Instant::now(); }
 
                 #[cfg(feature =  "lottie")] Key::Character(ch) => if app.paused { match ch {
@@ -59,7 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             &app.graph else { return };
                         app.prevt = Instant::now() -
                             Duration::from_millis((1000. / lottie.fr) as _);
-                        if let Some(window) = &app.window { window.request_redraw(); }
+                        app.request_redraw();
                     }   _ => (),
                 } }     _ => (),
             }
@@ -97,18 +104,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             WindowEvent::DroppedFile(path) => {
-                app.mouse_pos = Default::default();
-                let _ = app.load_file(path);    app.expand_central(None);
-                if let Some(window) = &app.window { window.request_redraw(); }
+                app.mouse_pos = Default::default();     let _ = app.load_file(path);
+                app.resize_viewport(None);                      app.request_redraw();
             }
-            WindowEvent::RedrawRequested =>     app.redraw(),
-            _ => ()
+            WindowEvent::RedrawRequested => {   app.redraw();
+                #[cfg(feature = "b2d")] app.redraw_b2d();
+            }   _ => ()
         },
-        Event::AboutToWait => if app.focused && !app.paused {
-            if let Some(window) = &app.window { window.request_redraw(); }
-        },
-        Event::LoopExiting => elwt.exit(),
-        _ => () //println!("{:?}", event)
+        Event::AboutToWait => if !app.paused && app.focused {   app.request_redraw(); },
+         _ => () //println!("{:?}", event)
     } })?;  Ok(())  //loop {}
 }
 
@@ -122,6 +126,9 @@ struct WinitApp {
     prevt: Instant,
     perf: PerfGraph,
     graph: AnimGraph,
+
+    #[cfg(feature = "b2d")] blctx: Option<(BLContext, BLImage)>,
+    #[cfg(feature = "b2d")] surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
 
     canvas: Option<Canvas<OpenGl>>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -143,9 +150,107 @@ enum AnimGraph {
 impl WinitApp {
     fn new() -> Self {
         Self { graph: AnimGraph::None, canvas: None, window: None, state: None,
+            #[cfg(feature = "b2d")] surface: None, #[cfg(feature = "b2d")] blctx: None,
             perf: PerfGraph::new(), mouse_pos: Default::default(), prevt: Instant::now(),
             paused: false, focused: true, dragging: false, //exit: false,
         }
+    }
+
+    #[inline] fn request_redraw(&self) {
+        #[cfg(feature = "b2d")] if let Some(surface) =
+            &self.surface { surface.window().request_redraw(); }
+        if let Some(window) = &self.window { window.request_redraw(); }
+    }
+
+    #[cfg(feature = "b2d")] fn init_blctx(&mut self, event_loop: &ActiveEventLoop,
+        title: &str) -> Result<(), Box<dyn Error>> {
+        let mut wsize = event_loop.primary_monitor().unwrap().size();
+        wsize.width  /= 2;  wsize.height /= 2;
+
+        let window = Rc::new(event_loop.create_window(
+            Window::default_attributes().with_transparent(true)
+                .with_inner_size(wsize).with_title(title))?);
+
+        let surface = softbuffer::Surface::new(
+            &softbuffer::Context::new(window.clone())?, window.clone())?;
+        self.surface = Some(surface);   Ok(())
+    }
+
+    #[cfg(feature = "b2d")] fn resize_b2d(&mut self, wsize: Option<(f32, f32)>) {
+        let Some(surface) =
+            self.surface.as_mut() else { return };  use std::num::NonZeroU32;
+
+        let wsize = if let Some(wsize) = wsize {
+            surface.resize(NonZeroU32::new(wsize.0 as _).unwrap(),
+                           NonZeroU32::new(wsize.1 as _).unwrap()).unwrap();    wsize
+        } else {
+            let wsize = surface.window().inner_size();
+            (wsize.width as _, wsize.height as _)
+        };
+
+        let csize = match &mut self.graph {
+            AnimGraph::SVG(tree) => (tree.size().width(), tree.size().height()),
+            AnimGraph::None => (480., 480.),    // for Blend2D logo
+            _ => return,
+        };
+
+        let scale = (wsize.0 / csize.0).min(wsize.1 / csize.1) * 0.98;
+        let csize = (csize.0 * scale, csize.1 * scale);
+
+        /* let mut buffer = surface.buffer_mut().unwrap();
+        buffer.iter_mut().for_each(|pix| *pix = 0xff636363);
+        let  orig = ((wsize.0 - csize.0) / 2., (wsize.1 - csize.1) / 2.);
+
+        #[allow(clippy::missing_transmute_annotations)]
+        let frame = unsafe { std::mem::transmute(
+            &mut buffer[(orig.1 as usize * wsize.0 as usize + orig.0 as usize) ..]) };
+
+        // build BLImage over softbuffer frame, need to keep until present out to screen
+        let mut blimg = BLImage::from_buffer(csize.0 as _, csize.1 as _,
+            BLFormat::BL_FORMAT_PRGB32, frame, wsize.0 as u32 * 4); */
+        let mut blimg = BLImage::new(csize.0 as _, csize.1 as _,
+            BLFormat::BL_FORMAT_PRGB32);
+        let mut blctx = BLContext::new(&mut blimg);
+
+        // blctx.translate(orig.0, orig.1);
+        blctx.scale(scale, scale);
+        self.blctx = Some((blctx, blimg));
+    }
+
+    #[cfg(feature = "b2d")] fn redraw_b2d(&mut self) {
+        let Some((blctx, blimg)) = &mut self.blctx else { return };
+        self.prevt = Instant::now();
+
+        match &mut self.graph {
+            AnimGraph::SVG(tree) => {   //blctx.clearAll();
+                blctx.fillAllRgba32((99, 99, 99, 255).into());
+                b2d_svg::render_nodes(blctx, tree.root(), &usvg::Transform::identity());
+            }
+            AnimGraph::None => b2d_svg::blend2d_logo(blctx),
+            _ => return,
+        }
+
+        self.perf.update(self.prevt.elapsed().as_secs_f32());
+        self.perf.render_b2d(blctx, (3., 3.));
+
+        let Some(surface) =
+            self.surface.as_mut() else { return };
+        let wsize = surface.window().inner_size();
+        let mut buffer = surface.buffer_mut().unwrap();
+        //blimg.to_rgba_inplace(); // 0xAARRGGGBB -> 0xAABBGGRR
+
+        let imgd = blimg.getData();
+        buffer.iter_mut().for_each(|pix| *pix = 0xff636363);    // XXX:
+        let loff = ((wsize.width  - imgd.width())  / 2) as usize;
+        let topl = ((wsize.height - imgd.height()) / 2) as usize;
+
+        for (src, dst) in imgd.pixels().chunks_exact(imgd.stride()
+            as usize).zip(buffer.chunks_exact_mut(wsize.width as _).skip(topl)) {
+            unsafe { std::slice::from_raw_parts(src.as_ptr() as *const u32, imgd.width() as _)
+            }.iter().zip(dst.iter_mut().skip(loff)).for_each(
+                |(src, dst)| *dst = *src)
+                //.swap_bytes().rotate_right(8) // 0xAARRGGGBB -> 0xAABBGGRR
+        }   let _ = buffer.present();
     }
 
     // https://github.com/rust-windowing/glutin/blob/master/glutin_examples/src/lib.rs
@@ -201,24 +306,29 @@ impl WinitApp {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn init_state<T>(&mut self, _event_loop: &EventLoop<T>) -> Result<(), Box<dyn Error>> {
+    fn init_state(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
         use winit::platform::web::WindowAttributesExtWebSys;
         use wasm_bindgen::JsCast;
 
-        let  canvas = web_sys::window().unwrap().document().unwrap()
-            .get_element_by_id("canvas").unwrap().dyn_into::<web_sys::HtmlCanvasElement>();
+        let  window = web_sys::window().unwrap();
+        let  canvas = window.document().unwrap().get_element_by_id("canvas")
+            .unwrap().dyn_into::<web_sys::HtmlCanvasElement>();
+        self.window = event_loop.create_window(Window::default_attributes()
+            .with_title("Winit window").with_append(true).with_canvas(canvas)).ok();
+
+        let scale = window.device_pixel_ratio();
+        canvas.set_width ((canvas.client_width()  as f64 * scale) as _);
+        canvas.set_height((canvas.client_height() as f64 * scale) as _);
+        // XXX: this is matter for hidpi/retina rendering
+
         self.canvas = Canvas::new(OpenGl::new_from_html_canvas(
              canvas.as_ref().unwrap())?).ok();
-
-        self.state = event_loop.create_window(Window::default_attributes()
-            .with_title("Winit window").with_append(true).with_canvas(canvas)).ok();
-        // XXX: need to resize canvas?
     }
 
     /* fn draw_offscreen(&mut self/*, path: P*/) -> Result<(), Box<dyn Error>> {
         self.canvas = Some(Canvas::new(Self::get_renderer()?)?);
         let  canvas = self.canvas.as_mut().unwrap();
-        self.expand_central(Some(1024.0, 768.0));
+        self.resize_viewport(Some(1024.0, 768.0));
         self.redraw();
 
         /* let (width, height, mut path) = (640, 480, Path::new());
@@ -246,9 +356,7 @@ impl WinitApp {
         //let source_chromaticities = png::SourceChromaticities::new( // unscaled instant
         //    (0.3127, 0.3290), (0.6400, 0.3300), (0.3000, 0.6000), (0.1500, 0.0600));
         //encoder.set_source_chromaticities(source_chromaticities);
-        encoder.write_header()?.write_image_data(buf)?;
-
-        Ok(())
+        encoder.write_header()?.write_image_data(buf)?;     Ok(())
     }
 
     // https://github.com/Ionizing/femtovg-offscreen/blob/master/src/main.rs
@@ -322,8 +430,10 @@ impl WinitApp {
         };  Ok(())
     }
 
-    fn expand_central(&mut self, wsize: Option<(f32, f32)>) {   // maximize viewport
+    fn resize_viewport(&mut self, wsize: Option<(f32, f32)>) {  // maximize & centralize
+        #[cfg(feature = "b2d")] { self.resize_b2d(wsize); return }
         let Some(canvas) = &mut self.canvas else { return };
+
         let wsize = if let Some(wsize) = wsize {
             canvas.set_size(wsize.0 as _, wsize.1 as _, 1.);    wsize
         } else { (canvas.width() as _, canvas.height() as _) };
@@ -363,7 +473,7 @@ impl WinitApp {
 
             AnimGraph::SVG(tree) => {
                 canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
-                    Color::rgbf(0.4, 0.4, 0.4)); // XXX: to clear viewport/viewbox only?
+                    femtovg::Color::rgbf(0.4, 0.4, 0.4)); // XXX: limit to viewport/viewbox?
                 render_nodes(canvas, //canvas.transform().inversed().transform_point()
                     self.mouse_pos, tree.root(), &usvg::Transform::identity());
             }
@@ -382,12 +492,18 @@ impl WinitApp {
     }
 }
 
-pub struct PerfGraph { que: VecDeque<f32>, max: f32, sum: f32/*, time: Instant*/ }
+pub struct PerfGraph {
+    que: VecDeque<f32>, max: f32, sum: f32/*, time: Instant*/,
+    #[cfg(feature = "b2d")] font: Option<BLFont>,
+}
 
-impl PerfGraph {
-    #[allow(clippy::new_without_default)] pub fn new() -> Self {
-        Self { que: VecDeque::with_capacity(100), max: 0., sum: 0./*, time: Instant::now()*/ }
-    }
+impl PerfGraph { #[allow(clippy::new_without_default)]
+    pub fn new() -> Self { Self {
+            que: VecDeque::with_capacity(100), max: 0., sum: 0./*, time: Instant::now()*/,
+            #[cfg(feature = "b2d")] font: BLFontFace::from_file(
+                "data/Roboto-Regular.ttf").map(|face|
+                    BLFont::new(&face, 14.)).ok()
+    } }
 
     pub fn update(&mut self, ft: f32) { //debug_assert!(f32::EPSILON < ft);
         //let ft = self.time.elapsed().as_secs_f32();   self.time = Instant::now();
@@ -399,7 +515,7 @@ impl PerfGraph {
     pub fn render<T: Renderer>(&self, canvas: &mut Canvas<T>, pos: (f32, f32)) {
         let (rw, rh, mut path) = (100., 20., Path::new());
         let mut paint = Paint::color(Color::rgba(0, 0, 0, 99));
-        path.rect(0., 0., rw, rh);
+        path.rect(0., 0., rw, rh);  use femtovg::{Path, Color, Paint};
 
         let last_trfm = canvas.transform();     //canvas.save();
         canvas.reset_transform();    canvas.translate(pos.0, pos.1);
@@ -420,10 +536,38 @@ impl PerfGraph {
         let _ = canvas.fill_text(rw - 10., 0., &format!("{fps:.2} FPS"), &paint);
         canvas.reset_transform();   canvas.set_transform(&last_trfm);   //canvas.restore();
     }
+
+    #[cfg(feature = "b2d")] pub fn render_b2d(&self, blctx: &mut BLContext, pos: (f32, f32)) {
+        let (rw, rh, mut path) = (100., 20., BLPath::new());
+        path.addRect(&(0., 0., rw, rh).into());
+
+        let last_trfm = blctx.reset_transform(None);    blctx.translate(pos.0, pos.1);
+        blctx.fillGeometryRgba32(&path, (0, 0, 0, 99).into());  // to clear the exact area?
+        path.reset();   path.moveTo(&(0., rh).into());
+        for i in 0..self.que.len() {  // self.que[i].min(100.) / 100.
+            path.lineTo(&(rw * i as f32 / self.que.len() as f32,
+                rh - rh * self.que[i] / self.max).into());
+        }   path.lineTo(&(rw, rh).into());
+        blctx.fillGeometryRgba32(&path, (255, 192, 0, 128).into());
+
+        //paint.set_color(Color::rgba(240, 240, 240, 255));
+        //paint.set_text_baseline(femtovg::Baseline::Top);
+        //paint.set_text_align(femtovg::Align::Right);
+        //paint.set_font_size(14.0); // some fixed values can be moved into the structure
+
+        let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
+        if let Some(font) = &self.font {
+            blctx.fillUtf8TextDRgba32(&(10., 15.).into(), font,   // XXX:
+                &format!("{fps:.2} FPS"), (240, 240, 240, 255).into());
+        }   blctx.reset_transform(Some(&last_trfm));
+    }
+
 }
 
 fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: (f32, f32),
     parent: &usvg::Group, trfm: &usvg::Transform) {
+    use femtovg::{Path, Color, Paint};
+
     fn convert_paint(paint: &usvg::Paint, opacity: usvg::Opacity,
         _trfm: &usvg::Transform) -> Option<Paint> {
         fn convert_stops(stops: &[usvg::Stop], opacity: usvg::Opacity) -> Vec<(f32, Color)> {
@@ -537,6 +681,7 @@ fn render_nodes<T: Renderer>(canvas: &mut Canvas<T>, mouse: (f32, f32),
 fn some_test_case<T: Renderer>(canvas: &mut Canvas<T>) {
     let (w, h) = (canvas.width(), canvas.height());
     let (w, h) = (w as f32, h as f32);
+    use femtovg::{Path, Color, Paint};
 
     let imgid = canvas.create_image_empty(w as _, h as _,
         femtovg::PixelFormat::Rgba8, femtovg::ImageFlags::FLIP_Y).unwrap();
@@ -569,3 +714,148 @@ fn some_test_case<T: Renderer>(canvas: &mut Canvas<T>) {
     canvas.fill_path(&path, &paint);    canvas.flush();     canvas.delete_image(imgid);
 }
 
+#[cfg(feature = "b2d")] mod b2d_svg {   use intvg::blend2d::*;
+
+pub fn blend2d_logo(ctx: &mut BLContext) {
+    //let mut img = BLImage::new(480, 480, BLFormat::BL_FORMAT_PRGB32); // 0xAARRGGBB
+    ctx.clearAll();     //let mut ctx = BLContext::new(&mut img);
+    let mut radial = BLGradient::new(&BLRadialGradientValues::new(
+        &(180, 180).into(), &(180, 180).into(), 180.0, 0.));
+    radial.addStop(0.0, 0xFFFFFFFF.into());
+    radial.addStop(1.0, 0xFFFF6F3F.into());
+
+    ctx.fillGeometryExt(&BLCircle::new(&(180, 180).into(), 160.0), &radial);
+
+    let mut linear = BLGradient::new(&BLLinearGradientValues::new(
+        &(195, 195).into(), &(470, 470).into()));
+    linear.addStop(0.0, 0xFFFFFFFF.into());
+    linear.addStop(1.0, 0xFF3F9FFF.into());
+
+    ctx.setCompOp(BLCompOp::BL_COMP_OP_DIFFERENCE);
+    ctx.fillGeometryExt(&BLRoundRect::new(&(195, 195, 270, 270).into(), 25.0), &linear);
+    ctx.setCompOp(BLCompOp::BL_COMP_OP_SRC_OVER);   // restore to default
+
+    //let _ = img.writeToFile("target/logo_b2d.png");
+}
+
+pub fn render_nodes(blctx: &mut BLContext, parent: &usvg::Group, trfm: &usvg::Transform) {
+    fn convert_paint(paint: &usvg::Paint, opacity: usvg::Opacity,
+        _trfm: &usvg::Transform) -> Option<Box<dyn B2DStyle>> {
+        fn convert_stops(grad: &mut BLGradient, stops: &[usvg::Stop], opacity: usvg::Opacity) {
+            stops.iter().for_each(|stop| {   let color = stop.color();
+                let color = (color.red, color.green, color.blue,
+                    (stop.opacity() * opacity).to_u8()).into();
+                grad.addStop(stop.offset().get(), color);
+            });
+        }
+
+        Some(match paint { usvg::Paint::Pattern(_) => { // trfm should be applied here
+                eprintln!("Not support pattern painting"); return None }
+            // https://github.com/RazrFalcon/resvg/blob/master/crates/resvg/src/path.rs#L179
+            usvg::Paint::Color(color) => Box::new(BLSolidColor::initRgba32(
+                    (color.red, color.green, color.blue, opacity.to_u8()).into())),
+
+            usvg::Paint::LinearGradient(grad) => {
+                let mut linear = BLGradient::new(&BLLinearGradientValues::new(
+                    &(grad.x1(), grad.y1()).into(), &(grad.x2(), grad.y2()).into()));
+                convert_stops(&mut linear, grad.stops(), opacity);     Box::new(linear)
+            }
+            usvg::Paint::RadialGradient(grad) => {
+                let mut radial = BLGradient::new(&BLRadialGradientValues::new(
+                    &(grad.cx(), grad.cy()).into(), &(grad.fx(), grad.fy()).into(),
+                    grad.r().get(), 1.));   // XXX: 1./0.
+                    //(grad.cx() - grad.fx()).hypot(grad.cy() - grad.fy())
+                convert_stops(&mut radial, grad.stops(), opacity);     Box::new(radial)
+            }
+        })
+    }
+
+    for child in parent.children() { match child {
+        usvg::Node::Group(group) =>     // trfm is needed on rendering only
+            render_nodes(blctx, group, &trfm.pre_concat(group.transform())),
+
+        usvg::Node::Path(path) => if path.is_visible() {
+            let tpath = if trfm.is_identity() { None
+            } else { path.data().clone().transform(*trfm) };    // XXX:
+            let mut fpath = BLPath::new();
+
+            for seg in tpath.as_ref().unwrap_or(path.data()).segments() {
+                use usvg::tiny_skia_path::PathSegment;
+                match seg {     PathSegment::Close => fpath.close(),
+                    PathSegment::MoveTo(pt) => fpath.moveTo(&(pt.x, pt.y).into()),
+                    PathSegment::LineTo(pt) => fpath.lineTo(&(pt.x, pt.y).into()),
+
+                    PathSegment::QuadTo(ctrl, end) =>
+                        fpath.quadTo (&(ctrl.x, ctrl.y).into(), &(end.x, end.y).into()),
+                    PathSegment::CubicTo(ctrl0, ctrl1, end) =>
+                        fpath.cubicTo(&(ctrl0.x, ctrl0.y).into(), &(ctrl1.x, ctrl1.y).into(),
+                            &(end.x, end.y).into()),
+                }
+            }
+
+            let fpaint = path.fill().and_then(|fill| {
+                blctx.setFillRule(match fill.rule() {
+                    usvg::FillRule::NonZero => BLFillRule::BL_FILL_RULE_NON_ZERO,
+                    usvg::FillRule::EvenOdd => BLFillRule::BL_FILL_RULE_EVEN_ODD,
+                }); convert_paint(fill.paint(), fill.opacity(), trfm)
+            });
+
+            let lpaint = path.stroke().and_then(|stroke| {
+                blctx.setStrokeMiterLimit(stroke.miterlimit().get());
+                blctx.setStrokeWidth(stroke.width().get());
+
+                blctx.setStrokeJoin(match stroke.linejoin() {
+                    usvg::LineJoin::MiterClip => BLStrokeJoin::BL_STROKE_JOIN_MITER_CLIP,
+                    usvg::LineJoin::Miter => BLStrokeJoin::BL_STROKE_JOIN_MITER_BEVEL,
+                    usvg::LineJoin::Round => BLStrokeJoin::BL_STROKE_JOIN_ROUND,
+                    usvg::LineJoin::Bevel => BLStrokeJoin::BL_STROKE_JOIN_BEVEL,
+                });
+                blctx.setStrokeCaps(match stroke.linecap () {
+                    usvg::LineCap::Butt   => BLStrokeCap::BL_STROKE_CAP_BUTT,
+                    usvg::LineCap::Round  => BLStrokeCap::BL_STROKE_CAP_ROUND,
+                    usvg::LineCap::Square => BLStrokeCap::BL_STROKE_CAP_SQUARE,
+                }); convert_paint(stroke.paint(), stroke.opacity(), trfm)
+            });
+
+            match path.paint_order() {
+                usvg::PaintOrder::FillAndStroke => {
+                    if let Some(paint) = fpaint {
+                        blctx.fillGeometryExt(&fpath, paint.as_ref());
+                    }
+                    if let Some(paint) = lpaint {
+                        blctx.strokeGeometryExt(&fpath, paint.as_ref());
+                    }
+                }
+                usvg::PaintOrder::StrokeAndFill => {
+                    if let Some(paint) = lpaint {
+                        blctx.strokeGeometryExt(&fpath, paint.as_ref());
+                    }
+                    if let Some(paint) = fpaint {
+                        blctx.fillGeometryExt(&fpath, paint.as_ref());
+                    }
+                }
+            }
+
+            /* let mat = blctx.getUserTransform(); // XXX: must be in screen viewport
+            if  matches!(fpath.hitTest(&mat.invert().mapPonitD(&(mouse.0, mouse.1).into()),
+                BLFillRule::BL_FILL_RULE_NON_ZERO), BLHitTest::BL_HIT_TEST_IN) {
+                blctx.setStrokeWidth(1. / mat.getScaling().0);
+                blctx.strokeGeometryRgba32(&fpath, (32, 240, 32, 128).into());
+            } */
+        }
+
+        usvg::Node::Image(img) => if img.is_visible() {
+            match img.kind() {            usvg::ImageKind::JPEG(_) |
+                usvg::ImageKind::PNG(_) | usvg::ImageKind::GIF(_) => todo!(),
+                // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
+                usvg::ImageKind::SVG(svg) => render_nodes(blctx, svg.root(), trfm),
+            }
+        }
+
+        usvg::Node::Text(text) => { let group = text.flattened();
+            render_nodes(blctx, group, &trfm.pre_concat(group.transform()));
+        }
+    } }
+}
+
+}

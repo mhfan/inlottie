@@ -15,9 +15,9 @@ keywords = [ "Lottie", "Rive", "Animation", "vector-graphic" ]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = [ "lottie" ] #, "rive-rs"
 lottie  = []
-b2d = [ "intvg", "pixels" ]
+default = [ "lottie" ] #, "rive-rs", "b2d"
+b2d = [ "intvg", "softbuffer" ]
 vello = [ "dep:vello", "image", "wgpu", "anyhow", "pollster" ]
 #glutin = [ "dep:glutin", "glutin-winit", "raw-window-handle" ]
 
@@ -25,11 +25,6 @@ vello = [ "dep:vello", "image", "wgpu", "anyhow", "pollster" ]
 name = "vello"
 path = "src/winit_vello.rs"
 required-features = [ "vello" ]
-
-[[bin]]
-name = "blend2d"
-path = "src/winit_b2d.rs"
-required-features = [ "b2d" ]
 
 [dependencies]
 serde = { version = "1.0", features = [ "derive" ] }
@@ -40,7 +35,7 @@ serde_repr = "0.1"
 kurbo = "0.11"
 usvg  = "0.42"
 
-pixels = { version = "0.13", optional = true }
+softbuffer = { version = "0.4", optional = true }
 intvg = { version = "0.1", optional = true, features = [ "b2d" ], git = "https://github.com/mhfan/intvg.git" }
 
 vello = { version = "0.2", optional = true, git = "https://github.com/linebender/vello.git" }

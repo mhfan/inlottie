@@ -68,7 +68,7 @@ jobs:
 
     - name: Build
       run: |
-        cargo b -F "b2d" --bin blend2d
+        cargo b -F "b2d"
         cargo b -F "vello" --bin vello
       #  cargo b -F "rive-rs"
 

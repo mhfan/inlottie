@@ -19,11 +19,11 @@ TODO: refer to [intvg](https://github.com/mhfan/intvg), development/implement a 
 ```bash
     cargo r -- <path-to-lottie/svg>
 
-    cargo r -F rive  -- <path-to-rive/lottie/svg>
+    cargo r -F rive  -- <path-to-rive/lottie/svg>   # see Note below
 
     cargo r -F vello --bin vello -- <path-to-svg>
 
-    cargo r -F b2d --bin blend2d -- <path-to-svg>
+    cargo r -F b2d -- <path-to-svg>
 ```
 
 (with Drag & Drop support)
