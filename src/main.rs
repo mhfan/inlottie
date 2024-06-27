@@ -227,12 +227,23 @@ impl WinitApp {
 
     #[cfg(feature = "b2d")] fn redraw_b2d(&mut self) {
         let Some((blctx, blimg)) = &mut self.blctx else { return };
-        self.prevt = Instant::now();
+        let Some(surface) =
+            self.surface.as_mut() else { return };
+        let wsize = surface.window().inner_size();
 
+        let imgd = blimg.getData();
+        let loff = ((wsize.width  - imgd.width())  / 2) as usize;
+        let topl = ((wsize.height - imgd.height()) / 2) as usize;
+
+        self.prevt = Instant::now();
         match &mut self.graph {
             AnimGraph::SVG(tree) => {   //blctx.clearAll();
                 blctx.fillAllRgba32((99, 99, 99, 255).into());
-                b2d_svg::render_nodes(blctx, tree.root(), &usvg::Transform::identity());
+
+                let scale = blctx.getUserTransform().getScaling().0; // to screen viewport
+                let mouse = ((self.mouse_pos.0 - loff as f32) / scale,
+                                         (self.mouse_pos.1 - topl as f32) / scale);
+                b2d_svg::render_nodes(blctx, mouse, tree.root(), &usvg::Transform::identity());
             }
             AnimGraph::None => b2d_svg::blend2d_logo(blctx),
             _ => return,
@@ -241,17 +252,10 @@ impl WinitApp {
         self.perf.update(self.prevt.elapsed().as_secs_f32());
         self.perf.render_b2d(blctx, (3., 3.));
 
-        let Some(surface) =
-            self.surface.as_mut() else { return };
-        let wsize = surface.window().inner_size();
         let mut buffer = surface.buffer_mut().unwrap();
-        //blimg.to_rgba_inplace(); // 0xAARRGGGBB -> 0xAABBGGRR
-
-        let imgd = blimg.getData();
         buffer.iter_mut().for_each(|pix| *pix = 0xff636363);    // XXX:
-        let loff = ((wsize.width  - imgd.width())  / 2) as usize;
-        let topl = ((wsize.height - imgd.height()) / 2) as usize;
 
+        //blimg.to_rgba_inplace(); // 0xAARRGGGBB -> 0xAABBGGRR
         for (src, dst) in imgd.pixels().chunks_exact(imgd.stride()
             as usize).zip(buffer.chunks_exact_mut(wsize.width as _).skip(topl)) {
             unsafe { std::slice::from_raw_parts(src.as_ptr() as *const u32, imgd.width() as _)
@@ -747,7 +751,8 @@ pub fn blend2d_logo(ctx: &mut BLContext) {
     //let _ = img.writeToFile("target/logo_b2d.png");
 }
 
-pub fn render_nodes(blctx: &mut BLContext, parent: &usvg::Group, trfm: &usvg::Transform) {
+pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
+    parent: &usvg::Group, trfm: &usvg::Transform) {
     fn convert_paint(paint: &usvg::Paint, opacity: usvg::Opacity,
         _trfm: &usvg::Transform) -> Option<Box<dyn B2DStyle>> {
         fn convert_stops(grad: &mut BLGradient, stops: &[usvg::Stop], opacity: usvg::Opacity) {
@@ -781,7 +786,7 @@ pub fn render_nodes(blctx: &mut BLContext, parent: &usvg::Group, trfm: &usvg::Tr
 
     for child in parent.children() { match child {
         usvg::Node::Group(group) =>     // trfm is needed on rendering only
-            render_nodes(blctx, group, &trfm.pre_concat(group.transform())),
+            render_nodes(blctx, mouse, group, &trfm.pre_concat(group.transform())),
 
         usvg::Node::Path(path) => if path.is_visible() {
             let tpath = if trfm.is_identity() { None
@@ -845,24 +850,23 @@ pub fn render_nodes(blctx: &mut BLContext, parent: &usvg::Group, trfm: &usvg::Tr
                 }
             }
 
-            /* let mat = blctx.getUserTransform(); // XXX: must be in screen viewport
-            if  matches!(fpath.hitTest(&mat.invert().mapPonitD(&(mouse.0, mouse.1).into()),
+            if  matches!(fpath.hitTest(&mouse.into(),
                 BLFillRule::BL_FILL_RULE_NON_ZERO), BLHitTest::BL_HIT_TEST_IN) {
-                blctx.setStrokeWidth(1. / mat.getScaling().0);
+                blctx.setStrokeWidth(2. / blctx.getUserTransform().getScaling().0);
                 blctx.strokeGeometryRgba32(&fpath, (32, 240, 32, 128).into());
-            } */
+            }
         }
 
         usvg::Node::Image(img) => if img.is_visible() {
             match img.kind() {            usvg::ImageKind::JPEG(_) |
                 usvg::ImageKind::PNG(_) | usvg::ImageKind::GIF(_) => todo!(),
                 // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
-                usvg::ImageKind::SVG(svg) => render_nodes(blctx, svg.root(), trfm),
+                usvg::ImageKind::SVG(svg) => render_nodes(blctx, mouse, svg.root(), trfm),
             }
         }
 
         usvg::Node::Text(text) => { let group = text.flattened();
-            render_nodes(blctx, group, &trfm.pre_concat(group.transform()));
+            render_nodes(blctx, mouse, group, &trfm.pre_concat(group.transform()));
         }
     } }
 }
