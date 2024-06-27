@@ -130,7 +130,7 @@ impl renderer::Path for Path {
             rpath::Verb::Move  => path. move_to(points[0].x, points[0].y),
             rpath::Verb::Line  => path. line_to(points[0].x, points[0].y),
             rpath::Verb::Cubic => path.cubic_to(points[0].x, points[0].y,
-                    points[1].x, points[1].y,  points[2].x, points[2].y),
+                    points[1].x, points[1].y,   points[2].x, points[2].y),
         }}  path.set_fill_rule(rule);   path
     }
 
@@ -314,6 +314,7 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
     TM2D::identity().new(p.x, p.y, q.x, q.y, t.x, t.y)
 }
 
+#[allow(unused)] mod schema {
 
 /// ## Rive runtime format:
 /// Binary representation of Artboards, Shapes, Animations, State Machines, etc.
@@ -330,7 +331,7 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
 /// - u32, f32
 ///
 /// https://github.com/rive-app/rive-cpp/blob/master/src/core/binary_reader.cpp
-#[allow(unused)] pub struct VarUInt(u32); // u128?
+pub struct VarUInt(u32); // u128?
 
 /// ### Header:
 /// A ToC (table of contents/field definition) is provided which allows the runtime to
@@ -338,7 +339,7 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
 /// part of what makes the format resilient to future changes/feature additions to the editor.
 /// An older runtime can at least attempt to load an older file and display it without
 /// the objects and properties it doesn't understand.
-#[allow(unused)] pub struct Header {
+pub struct Header {
     //magic: [u8; 4], // Fingerprint: 0x52 0x49 0x56 0x45 / "RIVE"
     /// Major versions are not cross-compatible.
     majorv: VarUInt,
@@ -352,8 +353,8 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
 
     /// The Table of Contents section of the header is a list of the properties in the file
     /// along with their backing type. This allows the runtime to read past properties it
-    /// wishes to skip or doesn't understand. It does this by providing the backing type for
-    /// each property ID.
+    /// wishes to skip or doesn't understand. It does this by providing the backing type
+    /// for each property ID.
     ///
     /// The list of known properties is serialized as a sequence of variable unsigned integers
     /// with a 0 terminator. A valid property key is distinguished by a non-zero unsigned
@@ -374,11 +375,12 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
 /// The rest of the file is simply a list of objects, each containing a list of their
 /// properties and values. An object is represented as a varuint type key. It is immediately
 /// followed by the list of properties. Properties are terminated with a 0 varuint. If a non 0
-/// value is read, it is expected to the the type key for the property. If the runtime knows
-/// the type key, it will know the backing type and how to decode it. The bytes following the
-/// type key will be one of the binary types specified earlier. If it is unknown,
-/// it can determine from the ToC what the backing type is and read past it.
-///
+/// value is read, it is expected to the type key for the property. If the runtime knows the
+/// type key, it will know the backing type and how to decode it. The bytes following the type
+/// key will be one of the binary types specified earlier. If it is unknown, it can determine
+/// from the ToC what the backing type is and read past it.
+pub struct Content {}
+
 /// ## Core:
 /// All objects and properties are defined in a set of files we call core defs for
 /// [Core Definitions](https://github.com/rive-app/rive-cpp/tree/master/dev/defs). These are
@@ -394,8 +396,8 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
 /// ### Properties:
 /// Properties are similarly represented by a Core type key. These are unique across all objects,
 /// so property key 13 will always be the X value of a Node object, and it matches in the
-/// runtime. A Node's X value is known to be a floating point value so when it is encountered it
-/// will be decoded as such. Property key 0 is reserved as a null terminator (meaning we are
+/// runtime. A Node's X value is known to be a floating point value so when it is encountered
+/// it will be decoded as such. Property key 0 is reserved as a null terminator (meaning we are
 /// done reading properties for the current object).
 //
 /// ## Context:
@@ -413,4 +415,6 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
 /// within the Artboard of the ContainerComponent derived object that makes a valid parent.
 ///
 /// https://github.com/rive-app/rive-cpp/src */
+
+}
 
