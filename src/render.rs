@@ -203,7 +203,7 @@ impl PathFactory for ShapeProperty {    // for mask
 
 impl FillStrokeGrad {
     fn to_paint(&self, fnth: f32) -> VGPaint {
-        fn convert_stops(stops: &[(f32, Rgba)], opacity: f32) -> Vec<(f32, VGColor)> {
+        fn convert_stops(stops: &[(f32, RGBA)], opacity: f32) -> Vec<(f32, VGColor)> {
             stops.iter().map(|(offset, rgba)| {
                 let mut color = VGColor::rgba(rgba.r, rgba.g, rgba.b, rgba.a);
                 color.set_alphaf(opacity * color.a);  (*offset, color)
@@ -212,11 +212,11 @@ impl FillStrokeGrad {
 
         let opacity = self.opacity.get_value(fnth) / 100.;
         let mut paint = match &self.grad {
-            ColorGradEnum::Color(ColorWrapper { color }) => {
+            ColorGrad::Color(ColorWrapper { color }) => {
                 let color = color.get_value(fnth); // RGB indeed
                 VGPaint::color(VGColor::rgba(color.r, color.g, color.b, (opacity * 255.) as _))
             }
-            ColorGradEnum::Gradient(grad) => {
+            ColorGrad::Gradient(grad) => {
                 let sp = grad.sp.get_value(fnth);
                 let ep = grad.ep.get_value(fnth);
 
@@ -242,12 +242,12 @@ impl FillStrokeGrad {
 
         use femtovg::{FillRule as FRule, LineJoin as LJoin, LineCap as LCap};
         match &self.base {
-            FillStrokeEnum::FillRule(FillRuleWrapper { rule }) =>
+            FillStroke::FillRule(FillRuleWrapper { rule }) =>
                 paint.set_fill_rule(match rule {
                     FillRule::NonZero => FRule::NonZero,
                     FillRule::EvenOdd => FRule::EvenOdd,
                 }),
-            FillStrokeEnum::Stroke(stroke) => {
+            FillStroke::Stroke(stroke) => {
                 paint.set_line_width (stroke.width.get_value(fnth));
                 paint.set_miter_limit(stroke.ml2.as_ref().map_or(stroke.ml,
                     |ml| ml.get_value(fnth)));
@@ -872,6 +872,11 @@ fn trim_path<I: Iterator<Item = Verb>>(path: I, start: f64, mut trim: f64) -> VG
         } else {     suml += len;   return None };
         suml += len;    Some(seg.subsegment(range))
     })).iter().for_each(|el| convert_path_k2f(el, &mut fpath));  fpath
+}
+
+// https://github.com/nical/lyon/blob/main/crates/algorithms/src/walk.rs
+// https://www.reddit.com/r/rust/comments/12do1dq/rendering_text_along_a_curve/
+#[allow(unused)] fn walk_along_path() {
 }
 
 #[inline] fn path_to_dash(path: &VGPath, dash: &(f32, Vec<f32>)) -> VGPath {

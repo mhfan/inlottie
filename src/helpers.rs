@@ -14,21 +14,22 @@ impl From<bool> for IntBool { fn from(value: bool) -> Self { Self(if value { 1 }
 /* #[derive(Clone, Copy)] pub struct Rgb  { pub r: u8, pub g: u8, pub b: u8 }
 impl Rgb {  #[inline] pub fn new_u8 (r:  u8, g:  u8, b:  u8) -> Self { Self { r, g, b } }
             #[inline] pub fn new_f32(r: f32, g: f32, b: f32) -> Self { Self {
-        r: (r * 255.) as _, g: (g * 255.) as _, b: (b * 255.) as _
+        r: (r * 255. + 0.5) as _, g: (g * 255. + 0.5) as _, b: (b * 255. + 0.5) as _
     } }
 } */
 
-#[derive(Clone, Copy)] pub struct Rgba { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }
-impl Default for Rgba { #[inline] fn default() -> Self { Self { r: 0, g: 0, b: 0, a: 255 } } }
+#[derive(Clone, Copy)] pub struct RGBA { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }
+impl Default for RGBA { #[inline] fn default() -> Self { Self { r: 0, g: 0, b: 0, a: 255 } } }
 
-impl Rgba {
+impl RGBA {
     #[inline] pub fn new_u8 (r:  u8, g:  u8, b:  u8, a:  u8) -> Self { Self { r, g, b, a } }
     #[inline] pub fn new_f32(r: f32, g: f32, b: f32, a: f32) -> Self { Self {
-        r: (r * 255.) as _, g: (g * 255.) as _, b: (b * 255.) as _, a: (a * 255.) as _
+        r: (r * 255. + 0.5) as _, g: (g * 255. + 0.5) as _,
+        b: (b * 255. + 0.5) as _, a: (a * 255. + 0.5) as _
     } }
 }
 
-impl<'de> Deserialize<'de> for Rgba {
+impl<'de> Deserialize<'de> for RGBA {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let v = Vec::<f32>::deserialize(deserializer)?;
         debug_assert!(2 < v.len() && v.len() < 5);
@@ -36,7 +37,7 @@ impl<'de> Deserialize<'de> for Rgba {
     }
 }
 
-impl Serialize for Rgba {
+impl Serialize for RGBA {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut v = vec![self.r as f32 / 255.,
             self.g as f32 / 255.0, self.b as f32 / 255.];
@@ -44,7 +45,7 @@ impl Serialize for Rgba {
     }
 }
 
-impl std::str::FromStr for Rgba { type Err = String;
+impl std::str::FromStr for RGBA { type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> { //debug_assert!(s.len() == 7);
         let v = u32::from_str_radix(s.strip_prefix('#')
             .ok_or("not prefixed with '#'".to_owned())?, 16)
@@ -56,7 +57,7 @@ impl std::str::FromStr for Rgba { type Err = String;
     }
 }
 
-impl core::fmt::Display for Rgba {
+impl core::fmt::Display for RGBA {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, r"#{:2x}{:2x}{:2x}", self.r, self.g, self.b)?;
         if self.a < 255 { write!(f,  r"{:2x}", self.a)?; }  Ok(())
@@ -64,9 +65,9 @@ impl core::fmt::Display for Rgba {
 }
 
 #[inline] pub(crate) fn str_to_rgba<'de, D: Deserializer<'de>>(deserializer: D) ->
-    Result<Rgba, D::Error> { String::deserialize(deserializer)?.parse().map_err(D::Error::custom) }
+    Result<RGBA, D::Error> { String::deserialize(deserializer)?.parse().map_err(D::Error::custom) }
 
-#[inline] pub(crate) fn str_from_rgba<S: Serializer>(c: &Rgba, serializer: S) ->
+#[inline] pub(crate) fn str_from_rgba<S: Serializer>(c: &RGBA, serializer: S) ->
     Result<S::Ok, S::Error> { serializer.serialize_str(&c.to_string()) }
 
 #[derive(Clone, Copy)] pub struct Vec2D { pub x: f32, pub y: f32 }
@@ -88,7 +89,7 @@ impl Serialize for Vec2D {
         Result<S::Ok, S::Error> { [self.x, self.y].serialize(serializer) }
 }
 
-#[derive(Clone)] pub struct ColorList(pub Vec<(f32, Rgba)>); // (offset, color)
+#[derive(Clone)] pub struct ColorList(pub Vec<(f32, RGBA)>); // (offset, color)
 
 impl<'de> Deserialize<'de> for ColorList {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -101,15 +102,15 @@ impl<'de> Deserialize<'de> for ColorList {
 
         Ok(Self(if len == cnt * 4 { // Rgb color
             data.chunks(4).map(|chunk| (chunk[0],
-                Rgba::new_f32(chunk[1], chunk[2], chunk[3], 1.))).collect()
-        } else  if len == cnt * 4 + cnt * 2 { let cnt = (cnt * 4) as usize; // Rgba color
+                RGBA::new_f32(chunk[1], chunk[2], chunk[3], 1.))).collect()
+        } else  if len == cnt * 4 + cnt * 2 { let cnt = (cnt * 4) as usize; // RGBA color
             data[0..cnt].chunks(4).zip(data[cnt..].chunks(2))
                 .map(|(chunk, opacity)| (chunk[0], // == opacity[0]
-                Rgba::new_f32(chunk[1], chunk[2], chunk[3], opacity[1]))).collect()
+                RGBA::new_f32(chunk[1], chunk[2], chunk[3], opacity[1]))).collect()
         } else {    // issue_1732.json
             eprintln!("Inconsistent ColorList: {cnt} * 4 != {}", data.len());
             data.chunks_exact(4).map(|chunk| (chunk[0],
-                Rgba::new_f32(chunk[1], chunk[2], chunk[3], 1.))).collect()
+                RGBA::new_f32(chunk[1], chunk[2], chunk[3], 1.))).collect()
         }))
     }
 }
@@ -321,7 +322,7 @@ impl<'de> Deserialize<'de> for AnyValue {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)] enum TestLayerItem { SomeLayer(SomeLayer),
-    //Color(Rgba), //IntBool(IntBool), //Vec2D(Vec2D),
+    //Color(RGBA), //IntBool(IntBool), //Vec2D(Vec2D),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)] struct SomeLayer {
@@ -499,7 +500,7 @@ impl Lerp for Vec2D {
     }
 }
 
-impl Lerp for Rgba {
+impl Lerp for RGBA {
     fn lerp(&self, other: &Self, t: f32) -> Self {
         Self {  r: self.r + ((other.r - self.r) as f32 * t) as u8,
                 g: self.g + ((other.g - self.g) as f32 * t) as u8,
@@ -632,7 +633,7 @@ impl ShapeBase {
 impl FillStrokeGrad {
     #[inline] pub fn get_dash(&self, fnth: f32) -> (f32, Vec<f32>) {
         let (mut offset, mut gap, mut dpat) = (0., None, vec![]);
-        if let FillStrokeEnum::Stroke(stroke) = &self.base {
+        if let FillStroke::Stroke(stroke) = &self.base {
             stroke.dash.iter().for_each(|sd| {
                 let value = sd.value.get_value(fnth);
 

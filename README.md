@@ -14,6 +14,8 @@ Besides, a player/renderer adapted to [rive-app](https://github.com/rive-app/riv
 
 TODO: refer to [intvg](https://github.com/mhfan/intvg), development/implement a `renderer` based on [gpac/evg](https://github.com/gpac/gpac/tree/master/src/evg), [blend2d](https://github.com/blend2d/blend2d), [HTML5/Web Canvas API](https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API) to support most of Lottie and Rive animation features; and a `viewer` based on [bevy engine](https://github.com/bevyengine/bevy) or [Dioxus](https://github.com/DioxusLabs/dioxus)? Then, enhance capability to parse/handle [dotLottie](https://dotlottie.io/structure/#dotlottie-structure).
 
+[**pathfinder**](https://github.com/mhfan/pathfinder) performs exact coverage high quality anti-aliasing of GPU rendering, seems to be a better choice than *femtovg*.
+
 ## Usages
 
 ```bash

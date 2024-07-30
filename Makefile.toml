@@ -44,8 +44,8 @@ args = [ "llvm-cov", #"--doctests", "--include-ffi",
 [tasks.codecov]
 #command = "codecov"
 dependencies = [ "coverage" ]
-env = { "CODECOV_TOKEN" = "b24b2436-512a-461e-9947-488213b27add" }
-#args = [ "-t", "${CODECOV_TOKEN}", #"--url", "https://app.codecov.io/gh/mhfan/intvg"
+env = { "CODECOV_TOKEN" = "9494c46d-3b8a-44f0-b301-2d136350dc4b" }
+#args = [ "-t", "${CODECOV_TOKEN}", #"--url", "https://app.codecov.io/gh/mhfan/inlottie"
 #]
 
 [tasks.bench-fg]    # https://github.com/flamegraph-rs/flamegraph

@@ -1,7 +1,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_repr::{Serialize_repr, Deserialize_repr}; // for the underlying repr of a C-like enum
-use crate::helpers::{IntBool, Rgba, Vec2D, ColorList, AnyValue, AnyAsset, defaults};
+use crate::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyValue, AnyAsset, defaults};
 
 /// Top level object, describing the animation.
 /// https://lottiefiles.github.io/lottie-docs/schema/
@@ -101,7 +101,7 @@ use crate::helpers::{str_to_rgba, str_from_rgba, deserialize_strarray};
 #[derive(Deserialize, Serialize)] pub struct SolidLayer {
     #[serde(flatten)] pub vl: VisualLayer,
     /// Color of the layer, unlike most other places, the color is a `#rrggbb` hex string
-    #[serde(deserialize_with = "str_to_rgba", serialize_with = "str_from_rgba")] pub sc: Rgba,
+    #[serde(deserialize_with = "str_to_rgba", serialize_with = "str_from_rgba")] pub sc: RGBA,
     pub sw: f32, // Width
     pub sh: f32, // Height
 }
@@ -276,7 +276,7 @@ pub type MultiD = AnimatedProperty<Vec<f32>>;
 /// Color as a [r, g, b] array with values in 0~1
 /// Note sometimes you might find color values with 4 components
 /// (the 4th being alpha) but most player ignore the last component.
-type Color = Rgba; // Vec<f32>;
+type Color = RGBA; // Vec<f32>;
 
 /// An animatable property that holds an array of numbers
 #[derive(Deserialize, Serialize)] pub struct AnimatedProperty<T> {
@@ -474,16 +474,16 @@ pub struct FreePath {  #[serde(flatten)]        pub  base: ShapeBase,
 
 #[derive(Deserialize, Serialize)] pub struct FillStrokeGrad {
     #[serde(flatten)] pub elem: ShapeElement,
-    #[serde(flatten)] pub base: FillStrokeEnum,
-    #[serde(flatten)] pub grad: ColorGradEnum,
+    #[serde(flatten)] pub base: FillStroke,
+    #[serde(flatten)] pub grad: ColorGrad,
     #[serde(rename = "o")] pub opacity: Value,
 }
 
 #[derive(Deserialize, Serialize)] #[serde(untagged)]
-pub enum FillStrokeEnum { Stroke(Box<BaseStroke>), FillRule(FillRuleWrapper), }
+pub enum FillStroke { Stroke(Box<BaseStroke>), FillRule(FillRuleWrapper), }
 
 #[derive(Deserialize, Serialize)] #[serde(untagged)]
-pub enum ColorGradEnum { Color(ColorWrapper), Gradient(Box<Gradient>), }
+pub enum ColorGrad { Color(ColorWrapper), Gradient(Box<Gradient>), }
 
 #[derive(Deserialize, Serialize)] pub struct ColorWrapper {
     #[serde(rename = "c")] pub color: ColorValue
