@@ -280,7 +280,7 @@ impl WinitApp {
             .with_window_attributes(Some(Window::default_attributes()
                 .with_transparent(true).with_inner_size(wsize).with_title(title)))
             .build(event_loop, ConfigTemplateBuilder::new()
-                .with_transparency(cfg!(cgl_backend)).with_alpha_size(8),
+                .with_transparency(cfg!(target_os = "macos")).with_alpha_size(8),
                 // Find the config with maximum number of samples, so our triangle will be smooth.
                 |configs|
                     configs.reduce(|config, accum| {

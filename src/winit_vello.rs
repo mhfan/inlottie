@@ -5,7 +5,7 @@
 
 use std::{fs, collections::VecDeque, time::Instant, sync::Arc};
 use vello::util::{RenderContext, RenderSurface};
-use vello::{AaConfig, Renderer, RendererOptions, Scene,
+use vello::{AaConfig, Renderer, RendererOptions, Scene, wgpu,
     kurbo::{Affine, BezPath, Rect}, peniko::{self, Color}};
 use winit::{window::Window, event_loop::ControlFlow, event::*};
 

@@ -18,8 +18,9 @@ keywords = [ "Lottie", "Rive", "Animation", "vector-graphic" ]
 lottie  = []
 default = [ "lottie" ] #, "rive-rs", "b2d"
 b2d = [ "intvg", "softbuffer" ]
-vello = [ "dep:vello", "image", "wgpu", "anyhow", "pollster" ]
+vello = [ "dep:vello", "image", "anyhow", "pollster" ]  # "wgpu",
 #glutin = [ "dep:glutin", "glutin-winit", "raw-window-handle" ]
+expression = []
 
 [[bin]]
 name = "vello"
@@ -36,13 +37,13 @@ kurbo = "0.11"
 usvg  = "0.42"
 
 softbuffer = { version = "0.4", optional = true }
-intvg = { version = "0.1", optional = true, features = [ "b2d" ], git = "https://github.com/mhfan/intvg.git" }
+intvg = { version = "0.1", optional = true, features = [ "b2d" ], git = "https://github.com/mhfan/intvg" }
 
-vello = { version = "0.2", optional = true, git = "https://github.com/linebender/vello.git" }
+vello = { version = "0.2", optional = true }    # git = "https://github.com/linebender/vello",
 pollster = { version = "0.3", optional = true }
 anyhow = { version = "1.0", optional = true }
 image = { version = "0.25", optional = true } #features = [ "png", "jpeg", "gif" ]
-wgpu  = { version = "0.20", optional = true }
+#wgpu  = { version = "0.20", optional = true }
 
 winit = "0.30"
 femtovg = { version = "0.9", features = [ "image-loading" ]}
@@ -58,6 +59,9 @@ raw-window-handle = "0.6"
 web_sys = { version = "0.3", package = "web-sys", features = [
     "console", "WebGlContextAttributes",
 ] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
 
 [dev-dependencies]
 serde_path_to_error = "0.1"

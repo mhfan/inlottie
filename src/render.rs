@@ -6,7 +6,7 @@
  ****************************************************************/
 
 use std::f32::consts::PI;
-use crate::{schema::*, helpers::{*, math::*}};
+use crate::{schema::*, helpers::*};
 
 trait PathFactory { fn to_path(&self, fnth: f32) -> VGPath; }
 
@@ -38,8 +38,6 @@ impl PathFactory for Rectangle {
             path.move_to(erb.x, clt.y);
 
         /* let tangent = radius * 0.5519;   // approximate with cubic Bezier curve
-        let (tlx, tty) = (clx - tangent, cty - tangent); // clt - tangent;
-        let (trx, tby) = (crx + tangent, cby + tangent); // crb + tangent;
 		let (tlt, trb) = (clt - tangent, crb + tangent);
 
         if self.base.is_ccw() {
@@ -315,7 +313,7 @@ impl Transform {
                 let pos  = apos.get_value(fnth);
                 if  ao.as_bool() &&  apos.animated.as_bool() {
                     let orient = pos - apos.get_value(fnth - 1.);
-                    ts.rotate(fast_atan2(orient.y, orient.x));  trfm.multiply(&ts);
+                    ts.rotate(math::fast_atan2(orient.y, orient.x));  trfm.multiply(&ts);
                 }   trfm.multiply(&TM2D::new_translation(pos.x, pos.y));
             }
 
@@ -324,7 +322,7 @@ impl Transform {
                 if  ao.as_bool() {
                     let orient = Vec2D { x: pos.x - sv.x.get_value(fnth - 1.),
                                                       y: pos.y - sv.y.get_value(fnth - 1.) };
-                    ts.rotate(fast_atan2(orient.y, orient.x));  trfm.multiply(&ts);
+                    ts.rotate(math::fast_atan2(orient.y, orient.x));  trfm.multiply(&ts);
                 }   trfm.multiply(&TM2D::new_translation(pos.x, pos.y));
                 if sv.z.is_some() { unimplemented!(); }
             }
@@ -874,12 +872,12 @@ fn trim_path<I: Iterator<Item = Verb>>(path: I, start: f64, mut trim: f64) -> VG
     })).iter().for_each(|el| convert_path_k2f(el, &mut fpath));  fpath
 }
 
+// https://docs.rs/kurbo/latest/kurbo/offset/index.html
 // https://github.com/nical/lyon/blob/main/crates/algorithms/src/walk.rs
 // https://www.reddit.com/r/rust/comments/12do1dq/rendering_text_along_a_curve/
-#[allow(unused)] fn walk_along_path() {
-}
+#[allow(unused)] fn walk_along_path() { }
 
-#[inline] fn path_to_dash(path: &VGPath, dash: &(f32, Vec<f32>)) -> VGPath {
+fn path_to_dash(path: &VGPath, dash: &(f32, Vec<f32>)) -> VGPath {
     let mut npath = VGPath::new();  debug_assert!(dash.1.len() < 5);
     kurbo::dash(path.verbs().map(convert_path_f2k), dash.0 as _,
         &dash.1.iter().map(|v| *v as f64).collect::<Vec<_>>())
@@ -887,7 +885,7 @@ fn trim_path<I: Iterator<Item = Verb>>(path: I, start: f64, mut trim: f64) -> VG
 }
 
 use {kurbo::PathEl, femtovg::Verb};
-#[inline] fn convert_path_f2k(verb: Verb) -> PathEl { match verb {
+fn convert_path_f2k(verb: Verb) -> PathEl { match verb {
     Verb::MoveTo(x, y) => PathEl::MoveTo((x as f64, y as f64).into()),
     Verb::LineTo(x, y) => PathEl::LineTo((x as f64, y as f64).into()),
     Verb::BezierTo(ox, oy, ix, iy, x, y) =>
@@ -897,12 +895,14 @@ use {kurbo::PathEl, femtovg::Verb};
     Verb::Close => PathEl::ClosePath,
 } }
 
-#[inline] fn convert_path_k2f(elem: PathEl, path: &mut VGPath) { match elem {
+fn convert_path_k2f(elem: PathEl, path: &mut VGPath) { match elem {
     PathEl::MoveTo(pt) => path.move_to(pt.x as _, pt.y as _),
     PathEl::LineTo(pt) => path.line_to(pt.x as _, pt.y as _),
     PathEl::CurveTo(ot, it, pt) =>
         path.bezier_to(ot.x as _, ot.y as _, it.x as _, it.y as _, pt.x as _, pt.y as _),
-    PathEl::QuadTo(_, _) => unreachable!(),
+    PathEl::QuadTo(_ct, _pt) => unreachable!(),
+    //    let (ot, it) = (ct + (lp - ct) / 3, ct + (pt - ct) / 3);  // elevating curve order
+    //    path.bezier_to(ot.x as _, ot.y as _, it.x as _, it.y as _, pt.x as _, pt.y as _),
     PathEl::ClosePath => path.close(),
 } }
 

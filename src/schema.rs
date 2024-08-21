@@ -256,8 +256,8 @@ pub enum TransRotation {    Split3D(Box<SplitRotation>),
 #[derive(Deserialize, Serialize)] pub struct PositionExtra {
     //#[serde(flatten)] pub kf: KeyframeBase<Vec2D>, // PositionKeyframe
 
-    pub ti: Vec2D, //Vec<f32>,
     pub to: Vec2D, //Vec<f32>,
+    pub ti: Vec2D, //Vec<f32>,
 }
 
 /// An animatable property that is split into individually anaimated components

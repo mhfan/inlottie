@@ -476,10 +476,10 @@ impl CubicBezierEasing {    // https://pomax.github.io/bezierinfo
     #[inline] fn b(x1: f32, x2: f32) -> f32 { 3.0 * x2 - 6.0 * x1 }
     #[inline] fn c(x1: f32) -> f32 { 3.0 * x1 }
 
-    #[inline] fn at(t: f32, x1: f32, x2: f32) -> f32 {
+    fn at(t: f32, x1: f32, x2: f32) -> f32 {
         ((Self::a(x1, x2) * t + Self::b(x1, x2)) * t + Self::c(x1)) * t
     }
-    #[inline] fn slope(t: f32, x1: f32, x2: f32) -> f32 {   // derivative
+    fn slope(t: f32, x1: f32, x2: f32) -> f32 {   // derivative
         3.0 * Self::a(x1, x2) * t * t + 2.0 * Self::b(x1, x2) * t + Self::c(x1)
     }
 
@@ -551,6 +551,7 @@ pub trait Lerp { fn lerp(&self, other: &Self, t: f32) -> Self;  // Linear intERP
 
 impl Lerp for f32 {
     #[inline] fn lerp(&self, other: &Self, t: f32) -> Self { self + (other - self) * t }
+    //#[inline] fn lerp(&self, other: &Self, t: f32) -> Self { self * (1. - t) + other * t }
 }
 
 impl Lerp for Vec2D {
@@ -588,6 +589,7 @@ impl Lerp for Vec2D {
             if curve.subsegment(0.0..tmid).arclen(tolerance) < tlen {
                 tmin = tmid; } else { tmax = tmid; }
         }   let pt = curve.eval((tmin + tmax) / 2.);
+        //let pt = curve.eval(curve.inv_arclen(tlen, tolerance));
 
         Self { x: pt.x as _, y: pt.y as _ } //(pt.x as _, pt.y as _).into()
     }
@@ -636,6 +638,8 @@ impl Lerp for Vec<f32> {    // aka MultiD
     }
 }
 
+}
+
 impl<T> KeyframeBase<T> {
     #[inline] pub fn as_array(&self) -> &[T] {
         if let Some(ArrayScalar::Array(val)) = &self.value { val } else {
@@ -651,7 +655,7 @@ impl<T> KeyframeBase<T> {
     }
 }
 
-impl<T: Clone + Lerp> AnimatedProperty<T> {
+impl<T: Clone + math::Lerp> AnimatedProperty<T> {
     #[inline] pub fn from_value(val: T) -> Self {
         Self { animated: false.into(), keyframes: AnimatedValue::Static(val) }
     }
@@ -684,8 +688,8 @@ impl<T: Clone + Lerp> AnimatedProperty<T> {
                     kf.easing.as_ref().map(|eh|
                     ((get_scalar(&eh.to.time) as _, get_scalar(&eh.to.factor) as _),
                      (get_scalar(&eh.ti.time) as _, get_scalar(&eh.ti.factor) as _))) {
-                    //time = CubicBezierEasing::new(cp1, cp2).curve(time);
-                    time = CubicBezierEasing::new(cp1, cp2).get_y(time);
+                    //time = math::CubicBezierEasing::new(cp1, cp2).curve(time);
+                    time = math::CubicBezierEasing::new(cp1, cp2).get_y(time);
                 }
 
                 let (kf_prev, kf_next) = (kf.as_scalar(), coll[len + 1].as_scalar());
@@ -705,7 +709,7 @@ impl ShapeBase {
 }
 
 impl FillStrokeGrad {
-    #[inline] pub fn get_dash(&self, fnth: f32) -> (f32, Vec<f32>) {
+    pub fn get_dash(&self, fnth: f32) -> (f32, Vec<f32>) {
         let (mut offset, mut gap, mut dpat) = (0., None, vec![]);
         if let FillStroke::Stroke(stroke) = &self.base {
             stroke.dash.iter().for_each(|sd| {
@@ -719,7 +723,5 @@ impl FillStrokeGrad {
                 }});    if let Some(gap) = gap { dpat.push(gap); }
         }   (offset, dpat)
     }
-}
-
 }
 
