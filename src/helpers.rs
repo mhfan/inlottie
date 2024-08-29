@@ -451,9 +451,102 @@ impl Vec2D {
     #[inline] pub fn from_polar(angle: f32) -> Self { Self { x: angle.cos(), y: angle.sin() } }
 }
 
+/** https://github.com/hannesmann/keyframe, https://github.com/gre/bezier-easing,
+    https://github.com/hlhr202/bezier-easing-rs
+```
+    use inlottie::helpers::math::CubicBezierEasing;
+    let easing = CubicBezierEasing::new((0., 0.), (1., 0.5));
+    assert_eq!(easing.curve(0.5), 0.3125);
+    assert_eq!(easing.get_y(0.5), 0.3125);
+    assert_eq!(easing.get_y(1.0), 1.);
+    assert_eq!(easing.get_y(0.0), 0.);
+``` */
+pub struct CubicBezierEasing { p1: (f32, f32), p2: (f32, f32), }
+
+impl CubicBezierEasing {    // https://pomax.github.io/bezierinfo
+    // B(t) = p0 * (1 - t)^3 + p1 * 3 * (1 - t)^2 * t + p2 * 3 * (1 - t) * t^2 + p3 * t^3
+    // x(t) =  a * (1 - t)^3 +  b * 3 * (1 - t)^2 * t +  c * 3 * (1 - t) * t^2 +  d * t^3
+    //      = (3b - 3c + d - a) * t^3 + (3a - 6b + 3c) * t^2 + (3b - 3a) * t + a
+    //
+    // Regarding easing curve: a = x0 = 0., b = x1, c = x2, d = x3 = 1., so:
+    //  A = 3b - 3c + d - a  = 3 * x1 - 3 * x2 + 1.
+    //  B = 3a - 6b + 3c     = 3 * x2 - 6 * x1
+    //  C = 3b - 3a          = 3 * x1
+    #[inline] fn a(x1: f32, x2: f32) -> f32 { 3.0 * x1 - 3.0 * x2 + 1.0 }
+    #[inline] fn b(x1: f32, x2: f32) -> f32 { 3.0 * x2 - 6.0 * x1 }
+    #[inline] fn c(x1: f32) -> f32 { 3.0 * x1 }
+
+    #[inline] fn at(t: f32, x1: f32, x2: f32) -> f32 {
+        ((Self::a(x1, x2) * t + Self::b(x1, x2)) * t + Self::c(x1)) * t
+    }
+    #[inline] fn slope(t: f32, x1: f32, x2: f32) -> f32 {   // derivative
+        3.0 * Self::a(x1, x2) * t * t + 2.0 * Self::b(x1, x2) * t + Self::c(x1)
+    }
+
+    fn calc_t(x: f32, x1: f32, x2: f32) -> f32 {    // Newton-Raphson iteration
+        let mut guess_t = x;    for _ in 0..4 {
+            let current_slope = Self::slope(guess_t, x1, x2);
+            if  current_slope < f32::EPSILON { break }
+            guess_t -= (Self::at(guess_t, x1, x2) - x) / current_slope;
+        }   guess_t
+    }
+
+    /* fn binary_subdivide(x: f32, mut a: f32, mut b: f32, x1: f32, x2: f32) -> f32 {
+        let (mut current_x, mut current_t) = (0.0f32, 0.);
+        let (mut has_run_once, mut i) = (false, 0);
+        while !has_run_once || 0.0000001 < current_x.abs() && i + 1 < 10 {
+            current_t = a + (b - a) / 2.0;  has_run_once = true;
+            current_x = Self::at(current_t, x1, x2) - x;
+            if current_x > 0.0 { b = current_t; } else { a = current_t; }   i += 1;
+        }   current_t
+    } */
+
+    pub fn get_y(&self, x: f32) -> f32 {
+        if x == 0. || x == 1. { x } else {
+            //if self.p1.0 == self.p1.1 && self.p2.0 == self.p2.1 { return x }
+            Self::at(Self::calc_t(x, self.p1.0, self.p2.0), self.p1.1, self.p2.1)
+        }
+    }
+    #[inline] pub fn new(p1: (f32, f32), p2: (f32, f32)) -> Self { Self { p1, p2 } }
+
+    pub fn curve(&self, x: f32) -> f32 {
+        let cp1 = (self.p1.0 as _, self.p1.1 as _);
+        let cp2 = (self.p2.0 as _, self.p2.1 as _);
+        /* use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
+        let curve = Curve::from_points( (0., 0.).into(), (Coord2::from(cp1),
+            Coord2::from(cp2)), (1., 1.).into());
+        let intersect = curve_intersects_line(&curve,
+            &((x as _, 0.).into(), ((x as _, 1.).into())));
+        return if intersect.is_empty() { 0. } else { intersect[0].2.1 as _ }; */
+
+        use kurbo::{CubicBez, ParamCurve, PathSeg};
+        let sline = kurbo::Line::new((x as _, 0.), (x as _, 1.));
+        let curve = CubicBez::new((0., 0.), cp1, cp2, (1., 1.));
+        let intersect = PathSeg::Cubic(curve).intersect_line(sline);
+        if  intersect.is_empty() { 0. } else { sline.eval(intersect[0].line_t).y as _ }
+                                             //curve.eval(intersect[0].segment_t).y as _
+    }
+}
+
+impl From<(f32, f32, f32, f32)> for CubicBezierEasing {
+    #[inline] fn from(cp: (f32, f32, f32, f32)) -> Self { Self::new((cp.0, cp.1), (cp.2, cp.3)) }
+}
+
+/*  https://www.w3.org/TR/css-easing-1/#cubic-bezier-easing-functions
+    "ease":        [0.25, 0.1, 0.25, 1.0],
+    "linear":      [0.00, 0.0, 1.00, 1.0],
+    "ease-in":     [0.42, 0.0, 1.00, 1.0],
+    "ease-out":    [0.00, 0.0, 0.58, 1.0],
+    "ease-in-out": [0.42, 0.0, 0.58, 1.0],
+    http://robertpenner.com/easing/, https://lib.rs/keywords/easing,
+    https://github.com/orhanbalci/rust-easing, https://github.com/sanbox-irl/tween */
+impl From<[f32; 4]> for CubicBezierEasing {
+    #[inline] fn from(cp: [f32; 4]) -> Self { Self::new((cp[0], cp[1]), (cp[2], cp[3])) }
+}
+
 pub trait Lerp { fn lerp(&self, other: &Self, t: f32) -> Self;  // Linear intERPolation
     fn bezc(&self, _: &Self, _: f32, _: &PositionExtra) -> Self
-        where Self: std::marker::Sized { unreachable!() }
+        where Self: std::marker::Sized { unreachable!() }       // Cubic Bezier interpolation
 }
 
 impl Lerp for f32 {
@@ -587,31 +680,12 @@ impl<T: Clone + Lerp> AnimatedProperty<T> {
                 if  kf.hold.as_bool() { return kf.as_scalar().clone() }
                 let mut time = (fnth - kf.start) / (coll[len + 1].start - kf.start);
 
-                if let Some(ctrl) =
+                if let Some((cp1, cp2)) =
                     kf.easing.as_ref().map(|eh|
                     ((get_scalar(&eh.to.time) as _, get_scalar(&eh.to.factor) as _),
                      (get_scalar(&eh.ti.time) as _, get_scalar(&eh.ti.factor) as _))) {
-
-                /*  https://github.com/orhanbalci/rust-easing, https://lib.rs/keywords/easing
-                //  https://github.com/hlhr202/bezier-easing-rs, https://easings.net
-                //  https://github.com/hannesmann/keyframe, https://github.com/sanbox-irl/tween
-
-                    use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
-                    let curve = Curve::from_points( (0., 0.).into(), (Coord2::from(ctrl.0),
-                        Coord2::from(ctrl.1)), (1., 1.).into());
-                    let intersect = curve_intersects_line(&curve,
-                        &((time as _, 0.).into(), ((time as _, 1.).into())));
-                    time = if intersect.is_empty() { 0. } else { intersect[0].2.1 as _ }; */
-
-                    use kurbo::{CubicBez, ParamCurve, PathSeg};
-                    let curve = CubicBez::new((0., 0.), ctrl.0, ctrl.1, (1., 1.));
-                    let sline = kurbo::Line::new((time as _, 0.), (time as _, 1.));
-                    let intersect =
-                        PathSeg::Cubic(curve).intersect_line(sline);
-                    time = if intersect.is_empty() { 0. } else {
-                        //curve.eval(intersect[0].segment_t).y as _
-                        sline.eval(intersect[0].line_t).y as _
-                    };  //time = curve.eval(time as _).y as _;
+                    //time = CubicBezierEasing::new(cp1, cp2).curve(time);
+                    time = CubicBezierEasing::new(cp1, cp2).get_y(time);
                 }
 
                 let (kf_prev, kf_next) = (kf.as_scalar(), coll[len + 1].as_scalar());
