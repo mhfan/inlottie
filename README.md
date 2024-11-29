@@ -34,21 +34,16 @@ Note: To build for rive support, first remove comment of line "rive-rs = " in Ca
 
 ## References
 
-* <https://lottiefiles.github.io/lottie-docs/schema/>
-* <https://github.com/LottieFiles/dotlottie-rs>
-
-* <https://github.com/google/skia/tree/main/modules/skottie>
-* <https://github.com/airbnb/lottie-web/>
+* <https://lottie.github.io/>
 * <https://github.com/linebender/velato>
-* <https://github.com/Samsung/rlottie>
-* <https://github.com/thorvg/thorvg>
+* <https://lottie.github.io/implementations/>
+* <https://lottiefiles.github.io/lottie-docs/schema/>
 
 * <https://github.com/zimond/lottie-rs/blob/main/crates/model>
 * <https://github.com/angular-rust/ux-animate/tree/main/src/runtime/lottie>
 * <https://github.com/servo/pathfinder/tree/master/lottie>
 * <https://skia.org/docs/user/modules/skottie/>
 * <https://transform.tools/json-to-rust-serde>
-* <https://airbnb.design/lottie/>
 
 * <https://github.com/sammycage/plutovg>
 * <https://github.com/micro-gl/micro-gl>

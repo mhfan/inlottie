@@ -89,7 +89,7 @@ impl Serialize for Vec2D {
         Result<S::Ok, S::Error> { [self.x, self.y].serialize(serializer) }
 }
 
-#[derive(Clone)] pub struct ColorList(pub Vec<(f32, RGBA)>); // (offset, color)
+#[derive(Clone)] pub struct ColorList(pub Vec<(f32, RGBA)>); // (offset, color) for Gradient
 
 impl<'de> Deserialize<'de> for ColorList {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -100,10 +100,10 @@ impl<'de> Deserialize<'de> for ColorList {
         let cnt = if len % 6 == 0 && !(len % 4 == 0 && (0..cnt).any(|i|
             data[i * 4] != data[cnt * 4 + i * 2])) { cnt as u32 } else { len / 4 };
 
-        Ok(Self(if len == cnt * 4 { // Rgb color
+        Ok(Self(if len == cnt * 4 { // RGB color
             data.chunks(4).map(|chunk| (chunk[0],
                 RGBA::new_f32(chunk[1], chunk[2], chunk[3], 1.))).collect()
-        } else  if len == cnt * 4 + cnt * 2 { let cnt = (cnt * 4) as usize; // RGBA color
+        } else  if len == cnt * (4 + 2) { let cnt = (cnt * 4) as usize; // RGBA color
             data[0..cnt].chunks(4).zip(data[cnt..].chunks(2))
                 .map(|(chunk, opacity)| (chunk[0], // == opacity[0]
                 RGBA::new_f32(chunk[1], chunk[2], chunk[3], opacity[1]))).collect()
@@ -576,7 +576,7 @@ impl Lerp for Vec2D {
                 tmin = tmid; } else { tmax = tmid; }
         }   let pt = bezier.point_at_pos((tmin + tmax) / 2.); */
 
-        impl From<Vec2D> for Point {
+        #[allow(non_local_definitions)] impl From<Vec2D> for Point {
             #[inline] fn from(val: Vec2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
         }   use kurbo::{CubicBez, ParamCurve, ParamCurveArclen, Point};
         let curve = CubicBez::new::<Point>((*self).into(), (*self + extra.to).into(),

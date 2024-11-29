@@ -20,7 +20,7 @@ use serde_path_to_error::deserialize as deserial_err;
     fn segparse<'de, T: serde::de::Deserialize<'de>>(sfn: &str) -> Result<T, Box<dyn StdErr>> {
         let path = format!("lottie-rs/fixtures/segments/{}.json", sfn);
         Ok(deserial_err(&mut json_des::from_reader(File::open(&path)?))
-            .map_err(|err| { eprintln!("Failed parsing {path}"); err })?)
+            .inspect_err(|_| eprintln!("Failed parsing {path}"))?)
     }   use inlottie::schema::{FillStrokeGrad, TextRange, Transform};
 
     segparse::<Animation>("animated_position_legacy")?;

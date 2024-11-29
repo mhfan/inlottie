@@ -85,7 +85,7 @@ impl PathFactory for Polystar {
         let irr = self.is.as_ref().map_or(0.,
             |is| is.get_value(fnth) * PI / 2. / 100. / nvp);
 
-        let mut angle = -PI / 2. + self.rotation.get_value(fnth) * PI / 180.;
+        let mut angle = -PI / 2. + self.rotation.get_value(fnth).to_radians();
         let angle_step = if matches!(self.sy, StarType::Star) { PI } else { PI * 2. } /
             if self.base.is_ccw() { -nvp } else { nvp };
 
@@ -224,7 +224,7 @@ impl FillStrokeGrad {
                     /* let hl = grad.hl.as_ref().map_or(0.,
                         |hl| hl.get_value(fnth) * radius / 100.);
                     let ha = grad.ha.as_ref().map_or(0., |ha|
-                        ha.get_value(fnth) * PI / 180.) + fast_atan2(dy, dx);
+                        ha.get_value(fnth).to_radians()) + fast_atan2(dy, dx);
 
                     ctx.createRadialGradient(sp.x + ha.cos() * hl, sp.y + ha.sin() * hl, 0,
                         sp.x, sp.y, (ep.x - sp.x).hypot(ep.y - sp.y));
@@ -290,18 +290,18 @@ impl Transform {
 
         if  let Some(skew) = &self.skew {
             let axis = self.skew_axis.as_ref()
-                .map(|axis| axis.get_value(fnth) * PI / 180.);
+                .map(|axis| axis.get_value(fnth).to_radians());
             if let Some(axis) = axis { ts.rotate(-axis);   trfm.multiply(&ts); }
 
-            let skew = (skew.get_value(fnth) * PI / -180.).tan();
-            ts.skew_x(skew);    trfm.multiply(&ts);
+            let skew = -skew.get_value(fnth); //.clamp(-85., 85.); // SKEW_LIMIT
+            ts.skew_x(skew.to_radians().tan());     trfm.multiply(&ts);
 
             if let Some(axis) = axis { ts.rotate( axis);   trfm.multiply(&ts); }
         }
 
         match &self.extra {
             TransRotation::Normal2D { rotation: Some(rdegree) } => {
-                ts.rotate(rdegree.get_value(fnth) * PI / 180.); trfm.multiply(&ts);
+                ts.rotate(rdegree.get_value(fnth).to_radians()); trfm.multiply(&ts);
             }
 
             TransRotation::Split3D(_) => unimplemented!(), //debug_assert!(ddd);
@@ -345,18 +345,18 @@ impl Transform {
 
         if  let Some(skew) = &self.skew {
             let axis = self.skew_axis.as_ref()
-                .map(|axis| axis.get_value(fnth) * PI / 180.);
+                .map(|axis| axis.get_value(fnth).to_radians());
             if let Some(axis) = axis { ts.rotate(-axis); trfm.multiply(&ts); }
 
-            let skew = (skew.get_value(fnth) * offset * PI / -180.).tan();
-            ts.skew_x(skew);    trfm.multiply(&ts); // XXX:
+            let skew = -skew.get_value(fnth); //.clamp(-85., 85.); // SKEW_LIMIT
+            ts.skew_x(skew.to_radians().tan());     trfm.multiply(&ts); // XXX:
 
             if let Some(axis) = axis { ts.rotate( axis); trfm.multiply(&ts); }
         }
 
         match &self.extra {
             TransRotation::Normal2D { rotation: Some(rdegree) } => {
-                ts.rotate(rdegree.get_value(fnth) * offset * PI / 180.);
+                ts.rotate(rdegree.get_value(fnth).to_radians() * offset);
                 trfm.multiply(&ts);
             }
 
@@ -746,9 +746,9 @@ fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) -> (Vec<DrawItem
     } }     (draws, trfm)
 }
 
-#[derive(Clone)] enum DrawItem {
+#[derive(Clone)] enum DrawItem { // Graphic Element
     Shape(Box<VGPath>),
-    Style(Box<VGPaint>, Option<(f32, Vec<f32>)>),
+    Style(Box<VGPaint>, Option<(f32, Vec<f32>)>),   // optional stroke dash
     Repli(Vec<DrawItem>, Vec<TM2DwO>), // something like batch Groups
     Group(Vec<DrawItem>, TM2DwO),
 }

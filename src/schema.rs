@@ -4,6 +4,9 @@ use serde_repr::{Serialize_repr, Deserialize_repr}; // for the underlying repr o
 use crate::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyValue, AnyAsset, defaults};
 
 /// Top level object, describing the animation.
+///
+/// https://lottie.github.io/lottie-spec/latest/
+///
 /// https://lottiefiles.github.io/lottie-docs/schema/
 ///
 /// https://github.com/LottieFiles/lottie-docs/commits/main/docs/schema
@@ -32,8 +35,6 @@ use crate::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyValue, AnyAsset, defaul
     /// Data defining text characters as lottie shapes.
     /// If present a player might only render characters defined here and nothing else.
     #[serde(default, skip_serializing_if = "Vec::is_empty")] pub chars: Vec<CharacterData>,
-
-    //#[serde(flatten)] pub vo: VisualObject,
     //#[serde(default = "defaults::animation_vs")] /** Bodymovin/Lottie version */ pub v: String,
 
     /*/ List of Extra compositions not referenced by anything
@@ -46,8 +47,11 @@ use crate::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyValue, AnyAsset, defaul
     /// Markers defining named sections of the composition.
     #[serde(default, skip_serializing_if = "Vec::is_empty")] pub markers: Vec<Marker>,
     #[serde(skip_serializing_if = "Option::is_none")] pub mb: Option<MotionBlur>,
+
     #[serde(skip_serializing_if = "Option::is_none")] /// Available property overrides
-    #[cfg(feature = "expression")] pub slots: Option<Box<Slots>>,
+    /// Dictionary of slot ids that will replace matching properties.
+    pub slots: Option<Box<Slots>>,
+    #[serde(flatten)] pub vo: VisualObject,
 }
 
 #[derive(Serialize)] #[serde(untagged)] #[allow(clippy::large_enum_variant)]
@@ -63,6 +67,7 @@ use crate::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyValue, AnyAsset, defaul
     //  7 */VideoPlaceholder,
     //  8 */ImageSequence,
     //  9 */Video,
+    // 14 */Light,
     // 11 */Guide,
     // 12 */Adjustment,
     // 10 */ImagePlaceholder,
@@ -173,12 +178,11 @@ use crate::helpers::{str_to_rgba, str_from_rgba, deserialize_strarray};
 }
 
 #[derive(Deserialize, Serialize)] pub struct LayerInfo {
-    //* Layer type */ pub ty: u32
+    //* Layer type */ pub ty: u8,  // handled in LayerItem parsing
     /** Start Time */ pub st: f32, // XXX: what is `st` used for?
     /**  In Point  */ pub ip: f32,
     /** Out Point  */ pub op: f32,
 
-    //#[serde(flatten)] pub vo: VisualObject,
     #[serde(default)] pub ddd: IntBool, // Whether the layer is 3D threedimensional
     #[serde(default, skip_serializing_if = "defaults::is_default")]
     /** Whether the layer is hidden */ pub hd: bool,
@@ -197,13 +201,14 @@ use crate::helpers::{str_to_rgba, str_from_rgba, deserialize_strarray};
         parent layer (like a folder structure).  One of the advantages of flexible parenting
         is you can have children of the same layer be intermixed with unrelated layers. */
     #[serde(skip_serializing_if = "Option::is_none")] pub parent: Option<u32>,
+    #[serde(flatten)] pub vo: VisualObject,
 }
 
 #[derive(Deserialize, Serialize)] pub struct VisualObject {
     //#[serde(default, skip_serializing_if = "String::is_empty")]
     //* Name, as seen from editors and the like */ pub nm: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    #[cfg(feature = "expression")] /** Match name, used in expressions */ pub mn: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")] #[cfg(feature = "expression")]
+    /** Match name, used in expressions */ pub mn: String,
 }
 
 /// It has the properties from Visual Object and its own properties are all animated.
@@ -269,7 +274,7 @@ pub enum TransRotation {    Split3D(Box<SplitRotation>),
     #[serde(rename = "s")] /** default `true` const */ pub split: bool,
 }
 
-pub type Value = AnimatedProperty<f32>;
+pub type Value = AnimatedProperty<f32>; // Scalar
 pub type Position   = AnimatedProperty<Vec2D>;
 pub type Animated2D = AnimatedProperty<Vec2D>;
 pub type ColorValue = AnimatedProperty<Color>;
@@ -302,15 +307,16 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
     https://lottiefiles.github.io/lottie-docs/expressions/ */
 #[derive(Deserialize, Serialize)] pub struct Expression { // XXX:
     #[serde(default, skip_serializing_if = "String::is_empty")] /** Expression */ pub x: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    /** Slot ID, One of the ID in the file's slots */ pub sid: String,
-
     #[serde(skip_serializing_if = "Option::is_none")]
     /** Property Index */ pub ix: Option<u32>,
     /// Number of components in the value arrays. If present values will be
     /// truncated or expanded to match this length when accessed from expressions.
     #[serde(skip_serializing_if = "Option::is_none", rename = "l")]
     /** Length, for Position and MultiDimentional */ pub len: Option<u32>,
+
+    // XXX: has nothing to do with expression indeed
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    /** Slot ID, One of the ID in the file's slots */ pub sid: String,
 }
 
 /// A Keyframes specifies the value at a specific time and
@@ -508,9 +514,10 @@ pub enum ColorGrad { Color(ColorWrapper), Gradient(Box<Gradient>), }
 
 /// An item used to described the dash pattern in a stroked path
 #[derive(Deserialize, Serialize)] pub struct StrokeDash {
-    //#[serde(flatten)] pub vo: VisualObject,     // Type of a dash item in a stroked line
-    #[serde(rename = "n")] pub r#type: StrokeDashType,  /// Length of the dash
-    #[serde(rename = "v")] pub  value: Value,
+    /// Type of a dash item in a stroked line
+    #[serde(rename = "n")] pub r#type: StrokeDashType,
+    /** Length of the dash */ #[serde(rename = "v")] pub value: Value,
+    #[serde(flatten)] pub vo: VisualObject,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize, Default)] pub enum StrokeDashType {
@@ -538,12 +545,12 @@ pub enum ColorGrad { Color(ColorWrapper), Gradient(Box<Gradient>), }
 
 /// Base class for all elements of ShapeLayer and Group
 #[derive(Deserialize, Serialize)] pub struct ShapeElement {
-    //pub ty: String, // Shape type, handled via enum tag
-    //#[serde(flatten)] pub vo: VisualObject,
+    //* Shape type */ pub ty: String, // handled via ShapeItem enum tag
     #[serde(default, skip_serializing_if = "defaults::is_default")] pub bm: Option<BlendMode>,
     #[serde(default, skip_serializing_if = "defaults::is_default")]
     /** Whether the shape is hidden */ pub hd: bool,
 
+    #[serde(flatten)] pub vo: VisualObject,
     #[serde(skip_serializing_if = "Option::is_none")] /// Index used in expressions
     #[cfg(feature = "expression")] pub ix: Option<u32>,
     //#[serde(default, skip_serializing_if = "String::is_empty")]
@@ -628,11 +635,11 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 
 /// Shape Element that can contain other shapes
 #[derive(Deserialize, Serialize)] pub struct Group {
-    #[serde(flatten)] pub elem: ShapeElement,   /// Index used in expressions
-    #[serde(skip_serializing_if = "Option::is_none", rename = "cix")]
-    #[cfg(feature = "expression")] pub ix: Option<u32>,     /// Number Of Properties
+    #[serde(flatten)] pub elem: ShapeElement,   /// Number Of Properties
     #[serde(skip_serializing_if = "Option::is_none")] pub np: Option<f32>,
     #[serde(skip_serializing_if =   "Vec::is_empty", rename =  "it")] pub shapes: ShapeList,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "cix")]
+    #[cfg(feature = "expression")] pub ix: Option<u32>, // Index used in expressions
 }
 
 /// This is mostly useful for shapes with a stroke and not a fill.
@@ -759,10 +766,9 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 /// Animated property representing the text contents, it's always treated as animated.
 #[derive(Deserialize, Serialize)] pub struct AnimatedTextDocument {
     /** A keyframe containing a text document */ pub k: Vec<TextDocumentKeyframe>,
+    #[serde(default, skip_serializing_if = "String::is_empty")] /** Slot ID */ pub sid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")] /// Expression
     #[cfg(feature = "expression")] pub x: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")] /// Slot ID
-    #[cfg(feature = "expression")] pub sid: String,
 }
 
 /// This is similar to the `keyframe` object used by animated properties, but it doesn't
@@ -852,10 +858,8 @@ pub enum AssetItem { Precomp(Precomp), Image(Image), Sound(Sound),
     #[serde(default)] pub w: f32, //  Width of the image
     #[serde(default)] pub h: f32, // Height of the image
     /// Marks as part of an image sequence if present, default "seq" const
-    #[serde(skip_serializing_if = "Option::is_none", rename = "t")]
-    pub seq: Option<String>,
-    #[serde(default, skip_serializing_if = "String::is_empty")] /// Slot ID
-    #[cfg(feature = "expression")] pub sid: String,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "t")] pub seq: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")] /** Slot ID */ pub sid: String,
 }
 
 /// External data source, usually a JSON file
@@ -962,8 +966,7 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
 #[derive(Deserialize, Serialize)] pub struct Metadata {
     #[serde(default, skip_serializing_if = "String::is_empty")] pub author: String,
     #[serde(default, skip_serializing_if = "String::is_empty", rename = "d")] pub   desc: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    /** Theme Color */ pub tc: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]/** Theme Color */ pub tc: String,
     #[serde(default, skip_serializing_if = "String::is_empty", rename = "g")]
     /** Software used to generate the file */ pub gen: String,
     #[serde(default, skip_serializing_if =    "Vec::is_empty", rename = "k",
@@ -975,21 +978,26 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
     #[serde(default, skip_serializing_if = "String::is_empty")] pub filename: String,
 }
 
-#[allow(unused)] type Slots = serde_json::Value; // XXX: Available property overrides
-/* #[derive(Deserialize, Serialize)] pub struct Slots {
-    // patternProperties: any of MultiD/ColorValue/Position/ShapeProperty/Value
-} */
+use std::collections::HashMap;
+#[derive(Deserialize, Serialize)] pub struct Slots {    // Available property overrides
+    #[serde(default, rename = "patternProperties", //"additionalProperties",
+        skip_serializing_if = "HashMap::is_empty")] pub dict: HashMap<String, SlotProp>,
+}
+
+//  XXX: to replace "sid" with any of
+//  MultiD/ColorValue/Position/ShapeProperty/Value/Image/AnimatedTextDocument
+#[derive(Deserialize, Serialize)] pub struct SlotProp { pub p: serde_json::Value, }
 
 /// Layers can have post-processing effects applied to them.
 /// Many effects have unused values which are labeled with a number.
 #[derive(Deserialize, Serialize)] pub struct Effect { // Layer effect
     pub ef: Vec<EffectValueItem>,
     pub ty: EffectType,
-    #[serde(default = "defaults::effect_en")] /** Enabled */ pub en: IntBool,
 
-    //#[serde(flatten)] pub vo: VisualObject,
+    #[serde(default = "defaults::effect_en")] /** Enabled */ pub en: IntBool,
     /** Property Count, Number of values in `ef` */ #[serde(default)] pub np: u32,
-    /** Effect Index */ #[serde(default)] pub ix: u32,
+    /** Effect Index */ #[serde(default)] pub ix: u32, // used in expressions?
+    #[serde(flatten)] pub vo: VisualObject,
 }
 
 #[derive(Clone, Copy, Deserialize_repr, Serialize_repr)] #[repr(u8)] pub enum EffectType {
@@ -1039,10 +1047,10 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
 }
 
 #[derive(Deserialize, Serialize)] pub struct EffectValue<T> {
-    //* Effect (value) type */ pub ty: u32,
-    /** Effect Index */ pub ix: Option<u32>,
+    //* Effect (value) type */ pub ty: u8, // handled in EffectValueItem parsing
     #[serde(skip_serializing_if = "Option::is_none", rename = "v")] pub value: Option<T>,
-    //#[serde(flatten)] pub vo: VisualObject,
+    /** Effect Index */ pub ix: Option<u32>, // used in expressions?
+    #[serde(flatten)] pub vo: VisualObject,
 }
 
 #[derive(Serialize)] #[serde(untagged)] pub enum LayerStyleItem {
@@ -1058,10 +1066,10 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
 }
 
 #[derive(Deserialize, Serialize)] pub struct StrokeStyle { // Stroke / frame
-    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "s")] pub size: Option<Value>,
+    #[serde(flatten)] pub ls: LayerStyle,
 }
 
 #[derive(Deserialize, Serialize)] pub struct DropShadowStyle {
@@ -1071,7 +1079,6 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
 }
 
 #[derive(Deserialize, Serialize)] pub struct InnerShadowStyle {
-    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "o")] pub opacity: Option<Value>,
@@ -1085,10 +1092,10 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
     #[serde(skip_serializing_if = "Option::is_none", rename = "s")] /// Blur size
     pub bs: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "d")] pub distance: Option<Value>,
+    #[serde(flatten)] pub ls: LayerStyle,
 }
 
 #[derive(Deserialize, Serialize)] pub struct OuterGlowStyle {
-    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
      pub color: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "o")] pub opacity: Option<Value>,
@@ -1099,6 +1106,7 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
 
     #[serde(skip_serializing_if = "Option::is_none", rename = "r")] pub  range: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "j")] pub jitter: Option<Value>,
+    #[serde(flatten)] pub ls: LayerStyle,
 }
 
 #[derive(Deserialize, Serialize)] pub struct InnerGlowStyle {
@@ -1107,7 +1115,6 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
 }
 
 #[derive(Deserialize, Serialize)] pub struct BevelEmbossStyle {
-    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")] /// Local light angle
     pub angle: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "s")] pub size: Option<Value>,
@@ -1134,10 +1141,10 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
     pub sc: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none")] /// Highlight Color
     pub hc: Option<ColorValue>,
+    #[serde(flatten)] pub ls: LayerStyle,
 }
 
 #[derive(Deserialize, Serialize)] pub struct SatinStyle {
-    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "o")] pub opacity: Option<Value>,
@@ -1149,18 +1156,18 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
 
     #[serde(skip_serializing_if = "Option::is_none")] /** Blend Mode */ pub bm: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "in")] pub invert: Option<Value>,
+    #[serde(flatten)] pub ls: LayerStyle,
 }
 
 #[derive(Deserialize, Serialize)] pub struct ColorOverlayStyle {
-    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub color: Option<ColorValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "so")] pub opacity: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")] /** Blend Mode */ pub bm: Option<Value>,
+    #[serde(flatten)] pub ls: LayerStyle,
 }
 
 #[derive(Deserialize, Serialize)] pub struct GradientOverlayStyle {
-    //#[serde(flatten)] pub ls: LayerStyle,
     #[serde(skip_serializing_if = "Option::is_none", rename = "o")] pub opacity: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "a")] /// Local light angle
     pub angle: Option<Value>,
@@ -1175,25 +1182,26 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
     #[serde(skip_serializing_if = "Option::is_none")] /** Smoothness */ pub gs: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")] pub gf: Option<GradientColors>,
     #[serde(skip_serializing_if = "Option::is_none")] pub gt: Option<GradientType>,
+    #[serde(flatten)] pub ls: LayerStyle,
 }
 
 #[derive(Clone, Copy, Default, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum GradientType { #[default] Linear = 1, Radial, }
 
-//type LayerStyle = VisualObject; // Style applied to a layer
-#[derive(Deserialize, Serialize)] pub struct LayerStyle {
-    //* Style type */ pub ty: u32
-    //#[serde(flatten)] pub vo: VisualObject,
-}
+type LayerStyle = VisualObject; // Style applied to a layer
+/* #[derive(Deserialize, Serialize)] pub struct LayerStyle {
+    //* Style type */ pub ty: u8, // handled in LayerStyleItem parsing
+    #[serde(flatten)] pub vo: VisualObject,
+} */
 
 /// Bezier shape used to mask/clip a layer
 #[derive(Deserialize, Serialize)] pub struct Mask {
-    //#[serde(flatten)] pub vo: VisualObject,
     #[serde(default)] /** Inverted */ pub inv: bool,
     #[serde(default)] pub mode: MaskMode,
     #[serde(rename = "pt")] pub shape: ShapeProperty,
     #[serde(skip_serializing_if = "Option::is_none", rename =  "o")] pub opacity: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none", rename =  "x")] pub  expand: Option<Value>,
+    #[serde(flatten)] pub vo: VisualObject,
 }
 
 /// How masks interact with each other. See
