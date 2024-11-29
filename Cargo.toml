@@ -16,7 +16,7 @@ keywords = [ "Lottie", "Rive", "Animation", "vector-graphic" ]
 
 [features]
 lottie  = []
-default = [ "lottie" ] #, "rive-rs", "b2d"
+default = [ "lottie" ] #, "vello", "rive-rs", "b2d"
 b2d = [ "intvg", "softbuffer" ]
 vello = [ "dep:vello", "image", "anyhow", "pollster" ]  # "wgpu",
 #glutin = [ "dep:glutin", "glutin-winit", "raw-window-handle" ]
@@ -48,7 +48,7 @@ image = { version = "0.25", optional = true } #features = [ "png", "jpeg", "gif"
 winit = "0.30"
 femtovg = { version = "0.9", features = [ "image-loading" ]}
 
-#rive-rs = { optional = true, git = "https://github.com/rive-app/rive-rs" }
+rive-rs = { optional = true, git = "https://github.com/rive-app/rive-rs" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 glutin = "0.32"	    # offscreen@v0.29?

@@ -37,7 +37,7 @@ toolchain = "nightly"
 env = { CC  = "clang", CXX = "clang++" }
 # cargo +nightly llvm-cov --include-ffi --doctests #--lcov --output-path lcov.info #nextest
 # cargo tarpaulin --run-types 'Tests,Doctests' --out Lcov --exclude-files 'inperse/src/*'
-args = [ "llvm-cov", #"--doctests", "--include-ffi",
+args = [ "llvm-cov", "--doctests", #"--include-ffi",
             "--lcov", "--output-path", "lcov.info", #"nextest",
 ]   # https://github.com/taiki-e/cargo-llvm-cov
 
