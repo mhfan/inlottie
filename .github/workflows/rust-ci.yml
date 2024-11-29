@@ -46,11 +46,19 @@ jobs:
 
     #- name: Install toolchain
     #  uses: dtolnay/rust-toolchain@stable
-    #- uses: Swatinem/rust-cache@v2
 
     - name: Checkout repository
       uses: actions/checkout@v4
-    - run: git clone https://github.com/zimond/lottie-rs # for lottie-rs/fixtures
+
+    #- uses: actions/checkout@v4
+    #  with:
+    #    repository: rive-app/rive-rs
+    #    path: rive-rs
+    - uses: actions/checkout@v4
+      with:
+        repository: zimond/lottie-rs
+        sparse-checkout: fixtures # used as test data
+        path: lottie-rs
 
     - uses: actions/cache@v4
       with:
@@ -59,11 +67,12 @@ jobs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
+          Cargo.lock
           target/
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+    #-  uses: taiki-e/install-action@nextest
     - name: Run tests
-    #  uses: taiki-e/install-action@nextest
       run: cargo t -- --nocapture #cargo nextest r
 
     - name: Build
@@ -93,7 +102,7 @@ jobs:
   #    uses: actions/checkout@v4
 
     - run: rustup toolchain install nightly --profile minimal --component llvm-tools
-    - uses: Swatinem/rust-cache@v2 # should be after rustup
+    - uses: Swatinem/rust-cache@v2  # should be after rustup
 
     - uses: taiki-e/install-action@cargo-llvm-cov # https://github.com/taiki-e/cargo-llvm-cov
     - name: Generate code coverage  # https://github.com/actions-rs/tarpaulin
