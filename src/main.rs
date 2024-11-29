@@ -546,7 +546,7 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
         paint.set_font_size(14.0); // some fixed values can be moved into the structure
 
         let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
-        let _ = ctx2d.fill_text(rw - 10., 0., &format!("{fps:.2} FPS"), &paint);
+        let _ = ctx2d.fill_text(rw - 10., 0., format!("{fps:.2} FPS"), &paint);
         ctx2d.reset_transform();    ctx2d.set_transform(&last_trfm);    //ctx2d.restore();
     }
 
@@ -678,8 +678,9 @@ fn render_nodes<T: Renderer>(ctx2d: &mut Canvas<T>, mouse: (f32, f32),
         }
 
         usvg::Node::Image(img) => if img.is_visible() {
-            match img.kind() {            usvg::ImageKind::JPEG(_) |
-                usvg::ImageKind::PNG(_) | usvg::ImageKind::GIF(_) => todo!(),
+            match img.kind() {
+                usvg::ImageKind::GIF(_) | usvg::ImageKind::WEBP(_) |
+                usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) => todo!(),
                 // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
                 usvg::ImageKind::SVG(svg) => render_nodes(ctx2d, mouse, svg.root(), trfm),
             }
@@ -858,8 +859,9 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
         }
 
         usvg::Node::Image(img) => if img.is_visible() {
-            match img.kind() {            usvg::ImageKind::JPEG(_) |
-                usvg::ImageKind::PNG(_) | usvg::ImageKind::GIF(_) => todo!(),
+            match img.kind() {
+                usvg::ImageKind::GIF(_) | usvg::ImageKind::WEBP(_) |
+                usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) => todo!(),
                 // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
                 usvg::ImageKind::SVG(svg) => render_nodes(blctx, mouse, svg.root(), trfm),
             }

@@ -1,24 +1,17 @@
 // Copyright 2023 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! Render a [`usvg::Tree`] to a Vello [`Scene`].
+//! Render an SVG document [`usvg::Tree`] to a Vello [`Scene`](vello::Scene).
 //!
-//! This currently lacks support for a [number of SVG features](crate#unsupported-features).
-//! This is because this integration was developed for examples,
-//! which only need to support enough SVG to demonstrate Vello.
+//! This currently lacks support for a [number of important](crate#unsupported-features)
+//! SVG features.
 //!
-//! However, this is also intended to be the preferred integration between Vello and [usvg],
+//! This is also intended to be the preferred integration between Vello and [usvg],
 //! so [consider contributing](https://github.com/linebender/vello_svg)
 //! if you need a feature which is missing.
 //!
-//! [`render_tree_with`] is the primary entry point function, which supports choosing
-//! the behaviour when [unsupported features](crate#unsupported-features) are detected.
-//! In a future release where there are no unsupported features, this may be phased out
-//!
-//! [`render_tree`] is a convenience wrapper around [`render_tree_with`]
-//! which renders an indicator around not yet supported features
-//!
-//! This crate also re-exports [`usvg`], to make handling dependency versions easier
+//! This crate also re-exports [`usvg`] and [`vello`], so you can easily
+//! use the specific versions that are compatible with Vello SVG.
 //!
 //! # Unsupported features
 //!
@@ -34,46 +27,33 @@
 //! - patterns
 
 //pub mod util;
-
+pub use vello;  // Re-export vello.
+pub use usvg;   // Re-export usvg.
 use vello::{Scene, peniko};
 
-/// Re-export vello.
-pub use vello;
-
-/// Re-export usvg.
-pub use usvg;
-
-/// Append a [`usvg::Tree`] into a Vello [`Scene`], with default error handling
-/// This will draw a red box over (some) unsupported elements
+/// Append an [`usvg::Tree`] to a vello [`Scene`](vello::Scene), with default error handling.
 ///
-/// Calls [`render_tree_with`] with an error handler implementing the above.
-///
-/// See the [module level documentation](crate#unsupported-features)
-/// for a list of some unsupported svg features
+/// This will draw a red box over (some) unsupported elements.
 #[inline] pub fn render_tree(scene: &mut Scene, svg: &usvg::Tree) {
-    render_tree_with::<_, std::convert::Infallible>(scene, svg,
-        &mut util::default_error_handler).unwrap_or_else(|e| match e {});
+    render_tree_with(scene, svg, &mut util::default_error_handler);
 }
 
-/// Append a [`usvg::Tree`] into a Vello [`Scene`].
-///
-/// Calls [`render_tree_with`] with [`util::default_error_handler`].
-/// This will draw a red box over unsupported element types.
+/// Append an [`usvg::Tree`] to a vello [`Scene`](vello::Scene),
+/// with user-provided error handling logic.
 ///
 /// See the [module level documentation](crate#unsupported-features)
 /// for a list of some unsupported svg features
-#[inline] pub fn render_tree_with<F: FnMut(&mut Scene, &usvg::Node) -> Result<(), E>, E>(
-    scene: &mut Scene, svg: &usvg::Tree, error_handler: &mut F) -> Result<(), E> {
-    render_group(scene, svg.root(), &usvg::Transform::identity(), error_handler)?;  Ok(())
+#[inline] pub fn render_tree_with<F: FnMut(&mut Scene, &usvg::Node)>(
+    scene: &mut Scene, svg: &usvg::Tree, error_handler: &mut F) {
+    render_group(scene, svg.root(), &usvg::Transform::identity(), error_handler);
 }
 
 const DEFAULT_BM: peniko::BlendMode = peniko::BlendMode {
     mix: peniko::Mix::Clip,  compose: peniko::Compose::SrcOver,
 };
 
-fn render_group<F: FnMut(&mut Scene, &usvg::Node) -> Result<(), E>, E>(
-    scene: &mut Scene, group: &usvg::Group, ts: &usvg::Transform, error_handler: &mut F)
-    -> Result<(), E> {
+fn render_group<F: FnMut(&mut Scene, &usvg::Node)>(scene: &mut Scene,
+    group: &usvg::Group, ts: &usvg::Transform, error_handler: &mut F) {
     for node in group.children() {
         match node {
             usvg::Node::Group(group) => {
@@ -87,7 +67,7 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node) -> Result<(), E>, E>(
                     }
                 }   // TODO: deal with group.mask()/filters()
 
-                render_group(scene, group, &ts.pre_concat(group.transform()), error_handler)?;
+                render_group(scene, group, &ts.pre_concat(group.transform()), error_handler);
                 if pushed_clip { scene.pop_layer(); }
             }
             usvg::Node::Path(path) => if path.is_visible() {
@@ -103,8 +83,8 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node) -> Result<(), E>, E>(
                                 usvg::FillRule::NonZero => peniko::Fill::NonZero,
                                 usvg::FillRule::EvenOdd => peniko::Fill::EvenOdd,
                             },  trfm, &brush, Some(brush_trfm), &local_path);
-                        } else { return error_handler(scene, node); }
-                    }   Ok(())
+                        } else { error_handler(scene, node); }
+                    }
                 };
                 let do_stroke =
                     |scene: &mut Scene, error_handler: &mut F| {
@@ -113,36 +93,38 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node) -> Result<(), E>, E>(
                             util::to_brush(stroke.paint(), stroke.opacity()) {
                             scene.stroke(&util::to_stroke(stroke),
                                 trfm, &brush, Some(brush_trfm), &local_path);
-                        } else { return error_handler(scene, node); }
-                    }   Ok(())
+                        } else { error_handler(scene, node); }
+                    }
                 };
+
                 match path.paint_order() {
                     usvg::PaintOrder::FillAndStroke => {
-                        do_fill  (scene, error_handler)?;
-                        do_stroke(scene, error_handler)?;
+                        do_fill  (scene, error_handler);
+                        do_stroke(scene, error_handler);
                     }
                     usvg::PaintOrder::StrokeAndFill => {
-                        do_stroke(scene, error_handler)?;
-                        do_fill  (scene, error_handler)?;
+                        do_stroke(scene, error_handler);
+                        do_fill  (scene, error_handler);
                     }
                 }
             }
             usvg::Node::Image(img) => if img.is_visible() {
-                match img.kind() {            usvg::ImageKind::JPEG(_) |
-                    usvg::ImageKind::PNG(_) | usvg::ImageKind::GIF(_) => {
+                match img.kind() {
+                    usvg::ImageKind::GIF(_) | usvg::ImageKind::WEBP(_) |
+                    usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) => {
                         let Ok(image) = util::decode_raw_raster_image(img.kind())
-                        else { error_handler(scene, node)?; continue };
+                        else { error_handler(scene, node); continue };
                         scene.draw_image(&image, util::to_affine(ts));
                     }
                     usvg::ImageKind::SVG(svg) =>
-                        render_group(scene, svg.root(), ts, error_handler)?,
+                        render_group(scene, svg.root(), ts, error_handler),
                 }
             }
             usvg::Node::Text(text) => { let group = text.flattened();
-                render_group(scene, group, &ts.pre_concat(group.transform()), error_handler)?;
+                render_group(scene, group, &ts.pre_concat(group.transform()), error_handler);
             }
         }
-    }   Ok(())
+    }
 }
 
 mod util {
@@ -151,10 +133,6 @@ use vello::kurbo::{Affine, BezPath, Point, Rect, Stroke};
 
 #[inline] pub fn to_affine(ts: &usvg::Transform) -> Affine {
     Affine::new([ts.sx, ts.kx, ts.ky, ts.sy, ts.tx, ts.ty].map(f64::from))
-}
-
-#[inline] pub fn to_rect_shape(rect: &usvg::NonZeroRect) -> Rect {
-    Rect::new(rect.left()  as _, rect.top() as _, rect.right() as _, rect.bottom() as _)
 }
 
 pub fn to_stroke(stroke: &usvg::Stroke) -> Stroke {
@@ -230,16 +208,17 @@ pub fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(Brush, A
 
 /// Error handler function for [`super::render_tree_with`]
 /// which draws a transparent red box instead of unsupported SVG features
-pub fn default_error_handler(scene: &mut vello::Scene, node: &usvg::Node)
-    -> Result<(), std::convert::Infallible> {
-    scene.fill(Fill::NonZero, Affine::IDENTITY, Color::RED.with_alpha_factor(0.5),
-        None, &to_rect_shape(&node.bounding_box().to_non_zero_rect().unwrap()));
-    Ok(())
+pub fn default_error_handler(scene: &mut vello::Scene, node: &usvg::Node) {
+    let bb = node.bounding_box();
+    let rect = Rect { x0: bb.left()   as _, y0: bb.top()    as _,
+                            x1: bb.right()  as _, y1: bb.bottom() as _, };
+    scene.fill(Fill::NonZero, Affine::IDENTITY, Color::RED.multiply_alpha(0.5), None, &rect);
 }
 
-pub fn decode_raw_raster_image(img: &usvg::ImageKind)
-    -> Result<Image, image::ImageError> {
+pub fn decode_raw_raster_image(img: &usvg::ImageKind) -> Result<Image, image::ImageError> {
     let image = match img {
+        usvg::ImageKind::WEBP(data) =>
+            image::load_from_memory_with_format(data, image::ImageFormat::WebP),
         usvg::ImageKind::JPEG(data) =>
             image::load_from_memory_with_format(data, image::ImageFormat::Jpeg),
         usvg::ImageKind::PNG(data) =>

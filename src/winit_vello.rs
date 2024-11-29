@@ -280,7 +280,7 @@ impl PerfGraph {
              .draw(peniko::Fill::NonZero, format!("{fps:.2} FPS").chars().rev().map(|ch| {
                 let gid =  charmap.map(ch).unwrap_or_default();
                 pen.0 -= metrics.advance_width(gid).unwrap_or_default();
-                vello::glyph::Glyph { id: gid.to_u16() as _, x: pen.0, y: pen.1 }
+                vello::Glyph { id: gid.to_u32() as _, x: pen.0, y: pen.1 }
              }));   // XXX: not as decent as canvas.fill_text(...) of femtovg
     }
 }
