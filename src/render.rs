@@ -773,7 +773,7 @@ fn get_repeater(mdfr: &Repeater, fnth: f32) -> Vec<TM2DwO> {
     let mut coll = Vec::with_capacity(cnt as usize);
 
     for i in 0..cnt {
-        let i = if matches!(mdfr.order, Composite::Above) { i } else { cnt - 1 - i };
+        let i = if matches!(mdfr.order, Composite::Below) { i } else { cnt - 1 - i };
         coll.push(TM2DwO(mdfr.tr.trfm.to_repeat_trfm(fnth, offset + i as f32), opacity));
         opacity += delta;
     }   coll

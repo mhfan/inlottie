@@ -705,23 +705,32 @@
                                 "type": "object",
                                 "patternProperties": {
                                     ".*": {
-                                        "anyOf": [
-                                            {
-                                                "$ref": "#/$defs/multi-dimensional"
-                                            },
-                                            {
-                                                "$ref": "#/$defs/color-value"
-                                            },
-                                            {
-                                                "$ref": "#/$defs/position"
-                                            },
-                                            {
-                                                "$ref": "#/$defs/shape-property"
-                                            },
-                                            {
-                                                "$ref": "#/$defs/value"
-                                            }
-                                        ]
+                                        "p": {
+                                            "anyOf": [
+                                                {
+                                                    "$ref": "#/$defs/multi-dimensional"
+                                                },
+                                                {
+                                                    "$ref": "#/$defs/color-value"
+                                                },
+                                                {
+                                                    "$ref": "#/$defs/position"
+                                                },
+                                                {
+                                                    "$ref": "#/$defs/shape-property"
+                                                },
+                                                {
+                                                    "$ref": "#/$defs/value"
+                                                },
+                                                {
+                                                    "$ref": "#/$defs/image"
+                                                },
+                                                {
+                                                    "$ref": "#/$defs/animated-text-document"
+                                                }
+                                            ]
+                                        },
+                                        "required": ["p"]
                                     }
                                 }
                             }
@@ -1127,11 +1136,11 @@
                 "description": "How to handle multiple shapes in trim path",
                 "oneOf": [
                     {
-                        "title": "Individually",
+                        "title": "Simultaneously",
                         "const": 1
                     },
                     {
-                        "title": "Simultaneously",
+                        "title": "Individually",
                         "const": 2
                     }
                 ]
@@ -1494,11 +1503,13 @@
                 "description": "How to stack copies in a repeater",
                 "oneOf": [
                     {
-                        "title": "Above",
+                        "title": "Below",
+                        "description": "Subsequent copies are added underneath the previous ones.",
                         "const": 1
                     },
                     {
-                        "title": "Below",
+                        "title": "Above",
+                        "description": "Subsequent copies are added on top of the previous ones.",
                         "const": 2
                     }
                 ]

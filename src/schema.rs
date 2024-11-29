@@ -5,6 +5,8 @@ use crate::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyValue, AnyAsset, defaul
 
 /// Top level object, describing the animation.
 /// https://lottiefiles.github.io/lottie-docs/schema/
+///
+/// https://github.com/LottieFiles/lottie-docs/commits/main/docs/schema
 #[derive(Deserialize, Serialize)] pub struct Animation {
     #[serde(skip)] pub elapsed: f32,    // for rendering
     #[serde(skip)] pub fnth: f32,
@@ -613,7 +615,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 
 /// How to stack copies in a repeater
 #[derive(Clone, Copy, Default, Deserialize_repr, Serialize_repr)]
-#[repr(u8)] pub enum Composite { #[default] Above = 1, Below, }
+#[repr(u8)] pub enum Composite { #[default] Below = 1, Above, }
 
 /// Transform used by a repeater, the transform is applied to each subsequent repeated object.
 #[derive(Deserialize, Serialize)] pub struct RepeaterTransform {
