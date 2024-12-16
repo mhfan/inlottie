@@ -8,8 +8,8 @@ use serde_path_to_error::deserialize as deserial_err;
 // XXX: get resources from https://github.com/zimond/lottie-rs/tree/main/fixtures
 
 #[test] pub fn parse_ui_samples() -> Result<(), Box<dyn StdErr>> {  let mut cnt = 0u32;
-    for path in glob::glob("lottie-rs/fixtures/ui/**/*.json")?.filter_map(Result::ok) {
-                //.chain(glob::glob("fixtures/unit/simple/*.json")?)
+    for path in glob::glob("lottie-rs/fixtures/ui/**/*.json")?
+        .chain(glob::glob("data/slot-example.json")?).filter_map(Result::ok) {
         if path.ends_with("issue_1460.json") { continue } // ignore malformed file
         println!("Parsing {} ...", path.display());     cnt += 1;
         let _: Animation = deserial_err(&mut json_des::from_reader(File::open(&path)?))?;

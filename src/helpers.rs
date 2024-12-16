@@ -657,7 +657,7 @@ impl<T> KeyframeBase<T> {
 
 impl<T: Clone + math::Lerp> AnimatedProperty<T> {
     #[inline] pub fn from_value(val: T) -> Self {
-        Self { animated: false.into(), keyframes: AnimatedValue::Static(val) }
+        Self { animated: false.into(), keyframes: AnimatedValue::Static(val), sid: None }
     }
 
     // XXX: wrapped in Option, and use Cow<&T> to avoid unnecessary clone?

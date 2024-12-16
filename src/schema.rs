@@ -50,7 +50,7 @@ use crate::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyValue, AnyAsset, defaul
 
     #[serde(skip_serializing_if = "Option::is_none")] /// Available property overrides
     /// Dictionary of slot ids that will replace matching properties.
-    pub slots: Option<Box<Slots>>,
+    pub slots: Option<Box<SlotDict>>,
     #[serde(flatten)] pub vo: VisualObject,
 }
 
@@ -292,6 +292,10 @@ type Color = RGBA; // Vec<f32>;
     /// Whether the property is animated. Note some old animations might not have this
     #[serde(rename = "a", default)] pub animated: IntBool,
 
+    // TODO: lookup by 'sid' in slots and override the value, in loading/parsing stage
+    //#[serde(default, skip_serializing_if = "String::is_empty")]
+    /** Slot ID, One of the ID in the file's slots */ pub sid: Option<Box<String>>,
+
     #[cfg(feature = "expression")] #[serde(flatten)] expr: Option<Box<Expression>>,
 }
 
@@ -308,15 +312,11 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
 #[derive(Deserialize, Serialize)] pub struct Expression { // XXX:
     #[serde(default, skip_serializing_if = "String::is_empty")] /** Expression */ pub x: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    /** Property Index */ pub ix: Option<u32>,
+    /** Property Index */  pub ix: Option<u32>,
     /// Number of components in the value arrays. If present values will be
     /// truncated or expanded to match this length when accessed from expressions.
     #[serde(skip_serializing_if = "Option::is_none", rename = "l")]
     /** Length, for Position and MultiDimentional */ pub len: Option<u32>,
-
-    // XXX: has nothing to do with expression indeed
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    /** Slot ID, One of the ID in the file's slots */ pub sid: String,
 }
 
 /// A Keyframes specifies the value at a specific time and
@@ -693,7 +693,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 /// Contains all the text data and animation
 #[derive(Deserialize, Serialize)] pub struct TextData {
     #[serde(rename = "a")] pub ranges: Vec<TextRange>,
-    #[serde(rename = "d")] pub    doc: AnimatedTextDocument,
+    #[serde(rename = "d")] pub    doc: AnimatedTextDoc,
     #[serde(rename = "m")] pub  align: TextAlignmentOptions,
     #[serde(rename = "p")] pub follow: TextFollowPath,
 }
@@ -764,8 +764,8 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 #[repr(u8)] pub enum TextRangeUnits { Percent = 1, Index, }
 
 /// Animated property representing the text contents, it's always treated as animated.
-#[derive(Deserialize, Serialize)] pub struct AnimatedTextDocument {
-    /** A keyframe containing a text document */ pub k: Vec<TextDocumentKeyframe>,
+#[derive(Deserialize, Serialize)] pub struct AnimatedTextDoc{
+    /** A keyframe containing a text document */ pub k: Vec<TextDocKeyframe>,
     #[serde(default, skip_serializing_if = "String::is_empty")] /** Slot ID */ pub sid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")] /// Expression
     #[cfg(feature = "expression")] pub x: String,
@@ -773,7 +773,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 
 /// This is similar to the `keyframe` object used by animated properties, but it doesn't
 /// have any attribute specifying interpolation as text is always animated in discrete steps.
-#[derive(Deserialize, Serialize)] pub struct TextDocumentKeyframe {
+#[derive(Deserialize, Serialize)] pub struct TextDocKeyframe {
     #[serde(rename = "s")] pub value: TextDocument,
     #[serde(rename = "t")] pub start: f32, // Time
 }
@@ -978,15 +978,18 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
     #[serde(default, skip_serializing_if = "String::is_empty")] pub filename: String,
 }
 
-use std::collections::HashMap;
-#[derive(Deserialize, Serialize)] pub struct Slots {    // Available property overrides
-    #[serde(default, rename = "patternProperties", //"additionalProperties",
-        skip_serializing_if = "HashMap::is_empty")] pub dict: HashMap<String, SlotProp>,
-}
+type SlotDict = std::collections::HashMap<String, SlotProp>;
+#[derive(Deserialize, Serialize)] pub struct SlotProp { pub p: SlotValue }
 
-//  XXX: to replace "sid" with any of
-//  MultiD/ColorValue/Position/ShapeProperty/Value/Image/AnimatedTextDocument
-#[derive(Deserialize, Serialize)] pub struct SlotProp { pub p: serde_json::Value, }
+#[derive(Deserialize, Serialize)] #[serde(untagged)]  pub enum SlotValue {
+    Value(Value),
+    Position(Position),
+    ColorValue(ColorValue),
+    ShapeProperty(Box<ShapeProperty>),
+    Image(Box<Image>),
+    MultiD(MultiD),
+    AnimatedTextDoc(AnimatedTextDoc),
+}
 
 /// Layers can have post-processing effects applied to them.
 /// Many effects have unused values which are labeled with a number.
