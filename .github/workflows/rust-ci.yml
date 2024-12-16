@@ -67,16 +67,13 @@ jobs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          Cargo.lock
           target/
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
     #-  uses: taiki-e/install-action@nextest
-    - name: Run tests
-      run: cargo t -- --nocapture #cargo nextest r
-
-    - name: Build
+    - name: Test and Build
       run: |
+        cargo t -- --nocapture #cargo nextest r
         cargo b -F "b2d"
         cargo b -F "vello" --bin vello
       #  cargo b -F "rive-rs"
@@ -102,7 +99,7 @@ jobs:
   #    uses: actions/checkout@v4
 
     - run: rustup toolchain install nightly --profile minimal --component llvm-tools
-    - uses: Swatinem/rust-cache@v2  # should be after rustup
+    #- uses: Swatinem/rust-cache@v2  # should be after rustup
 
     - uses: taiki-e/install-action@cargo-llvm-cov # https://github.com/taiki-e/cargo-llvm-cov
     - name: Generate code coverage  # https://github.com/actions-rs/tarpaulin
