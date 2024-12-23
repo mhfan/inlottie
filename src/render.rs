@@ -13,9 +13,9 @@ trait PathFactory { fn to_path(&self, fnth: f32) -> VGPath; }
 impl PathFactory for Rectangle {
     fn to_path(&self, fnth: f32) -> VGPath {
         let center = self. pos.get_value(fnth);
-        let  halfs = self.size.get_value(fnth) / 2.;
-        let radius = self.rcr.get_value(fnth).min(halfs.x).min(halfs.y);
-        let (elt, erb) = (center - halfs, center + halfs);
+        let halves = self.size.get_value(fnth) / 2.;
+        let radius = self.rcr.get_value(fnth).min(halves.x).min(halves.y);
+        let (elt, erb) = (center - halves, center + halves);
 
         // Note that unlike other shapes, on lottie web when the `d` attribute is missing,
         // the rectangle defaults as being reversed.
@@ -146,8 +146,8 @@ impl PathFactory for FreePath {
         debug_assert!(curv.vp.len() == curv.it.len() &&
                       curv.it.len() == curv.ot.len() && !curv.vp.is_empty());
 
-        let fpt = curv.vp.last().unwrap();
-        let mut path = VGPath::new();   path.move_to(fpt.x, fpt.y);
+        let pt = curv.vp.last().unwrap();
+        let mut path = VGPath::new();   path.move_to(pt.x, pt.y);
 
         for ((cvp, cit), (lvp, lot)) in
             curv.vp.iter().zip(curv.it.iter()).rev().skip(1).zip(
@@ -162,7 +162,7 @@ impl PathFactory for FreePath {
 
         if  curv.closed {  let j = curv.it.len() - 1;
             path.bezier_to(curv.vp[0].x + curv.ot[0].x, curv.vp[0].y + curv.ot[0].y,
-                fpt.x + curv.it[j].x, fpt.y + curv.it[j].y, fpt.x, fpt.y);
+                pt.x + curv.it[j].x, pt.y + curv.it[j].y, pt.x, pt.y);
             path.close();
         }   path
     }
@@ -174,8 +174,8 @@ impl PathFactory for ShapeProperty {    // for mask
         debug_assert!(curv.vp.len() == curv.it.len() &&
                       curv.it.len() == curv.ot.len() && !curv.vp.is_empty());
 
-        let fpt = curv.vp.first().unwrap(); //&curv.vp[0];
-        let mut path = VGPath::new();   path.move_to(fpt.x, fpt.y);
+        let pt = curv.vp.first().unwrap(); //&curv.vp[0];
+        let mut path = VGPath::new();   path.move_to(pt.x, pt.y);
 
         /* let _ = curv.vp.iter().zip(curv.it.iter()).cycle().skip(1).take( //.rev()
                 curv.vp.len() - if curv.closed { 0 } else { 1 }).zip(
@@ -193,7 +193,7 @@ impl PathFactory for ShapeProperty {    // for mask
 
         if  curv.closed {  let j = curv.ot.len() - 1;
             path.bezier_to(curv.vp[j].x + curv.ot[j].x, curv.vp[j].y + curv.ot[j].y,
-                fpt.x + curv.it[0].x, fpt.y + curv.it[0].y, fpt.x, fpt.y);
+                pt.x + curv.it[0].x, pt.y + curv.it[0].y, pt.x, pt.y);
             path.close();
         }   path
     }
@@ -731,7 +731,7 @@ fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) -> (Vec<DrawItem
             draws.push(DrawItem::Repli(grp, get_repeater(mdfr, fnth)));
         }
 
-        // other modifiers usally just affect on all preceding paths ever before
+        // other modifiers usually just affect on all preceding paths ever before
         ShapeItem::Trim(mdfr) if !mdfr.elem.hd =>
             trim_shapes(mdfr, &mut draws, fnth),
 

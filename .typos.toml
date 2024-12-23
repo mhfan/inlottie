@@ -1,0 +1,15 @@
+
+[default.extend-words]
+ot = "ot"
+iy = "iy"
+fo = "fo"
+
+[files]
+extend-exclude = [
+    "typify/*",
+    "velato/*",
+    "rive-rs/*",
+    "lottie-rs/*",
+    "vello_svg/*",
+]
+

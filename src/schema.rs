@@ -256,7 +256,7 @@ pub enum TransRotation {    Split3D(Box<SplitRotation>),
     #[serde(skip_serializing_if = "Option::is_none")] ry: Option<Value>,
     /** equivalent to `r` when not split */ rz: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
-    /** Orientation, MultiDimentional    */ or: Option<MultiD>,
+    /** Orientation, MultiDimensional    */ or: Option<MultiD>,
 }
 
 /// (In/Out) tangent for values (eg: moving position around a curved path)
@@ -316,7 +316,7 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
     /// Number of components in the value arrays. If present values will be
     /// truncated or expanded to match this length when accessed from expressions.
     #[serde(skip_serializing_if = "Option::is_none", rename = "l")]
-    /** Length, for Position and MultiDimentional */ pub len: Option<u32>,
+    /** Length, for Position and MultiDimensional */ pub len: Option<u32>,
 }
 
 /// A Keyframes specifies the value at a specific time and

@@ -678,7 +678,7 @@ impl<T: Clone + math::Lerp> AnimatedProperty<T> {
                 #[inline] fn get_scalar(val: &ArrayScalar<f32>) -> f32 { match val {
                     ArrayScalar::Array (val) => val[0],
                     ArrayScalar::Scalar(val) => *val,
-                } } // XXX: handle multiple dimention?
+                } } // XXX: handle multiple dimension?
 
                 let kf = &coll[len];
                 if  kf.hold.as_bool() { return kf.as_scalar().clone() }

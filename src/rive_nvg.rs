@@ -20,8 +20,8 @@ impl<T: Renderer> RiveNVG<T> {
 
     pub fn new_scene(file: &[u8]) -> Option<Box<dyn Scene<Self>>> {
         File::new(file).ok().and_then(|riv|
-            Artboard::instantiate(&riv, Handle::Default).and_then(|abd|
-            Box::<_>::instantiate(&abd, Handle::Default)))
+            Artboard::instantiate(&riv, Handle::Default).and_then(|art|
+            Box::<_>::instantiate(&art, Handle::Default)))
             //println!("Load scene: {}, {}x{}, {}s", scene.name(), scene.width(),
             //    scene.height(), scene.duration().map_or(0., |dur| dur.as_secs_f32()));
     }
