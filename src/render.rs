@@ -875,6 +875,7 @@ fn trim_path<I: Iterator<Item = Verb>>(path: I, start: f64, mut trim: f64) -> VG
 // https://docs.rs/kurbo/latest/kurbo/offset/index.html
 // https://github.com/nical/lyon/blob/main/crates/algorithms/src/walk.rs
 // https://www.reddit.com/r/rust/comments/12do1dq/rendering_text_along_a_curve/
+// https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Element/textPath
 #[allow(unused)] fn walk_along_path() { }
 
 fn path_to_dash(path: &VGPath, dash: &(f32, Vec<f32>)) -> VGPath {
