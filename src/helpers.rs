@@ -73,7 +73,7 @@ impl core::fmt::Display for RGBA {
 #[derive(Clone, Copy)] pub struct Vec2D { pub x: f32, pub y: f32 }
 //impl From<Vec2D> for (f32, f32) { fn from(val: Vec2D) -> Self { (val.x, val.y) } }
 impl From<(f32, f32)> for Vec2D {   // for Point/Size/Position/Scale
-    #[inline] fn from(val: (f32, f32)) -> Self { Self { x: val.0, y: val.1 } }
+    #[inline] fn from((x, y): (f32, f32)) -> Self { Self { x, y } }
 }
 
 impl<'de> Deserialize<'de> for Vec2D {
@@ -375,12 +375,12 @@ pub mod math {  use super::*;
     digital computer (**CORDIC**) algorithm (requiring only shifts and add operations).
 
  - https://geekshavefeelings.com/posts/fixed-point-atan2
+ - https://github.com/quartiq/idsp/blob/main/src/atan2.rs
  - https://www-labs.iro.umontreal.ca/~mignotte/IFT2425/Documents/EfficientApproximationArctgFunction.pdf
  - https://ieeexplore.ieee.org/book/6241055
- - https://en.wikipedia.org/wiki/Atan2
- - https://en.wikipedia.org/wiki/CORDIC
  - https://en.wikipedia.org/wiki/Fast_inverse_square_root
  - https://en.wikipedia.org/wiki/Methods_of_computing_square_roots
+ - https://en.wikipedia.org/wiki/CORDIC, https://en.wikipedia.org/wiki/Atan2
  - https://math.stackexchange.com/questions/1098487/atan2-faster-approximation
 
 ```
@@ -410,8 +410,8 @@ pub fn fast_atan2(y: f32, x: f32) -> f32 {  use core::f32::consts::PI;
     let hatan = (PI / 4. + 0.273 - 0.273 * slope.abs()) * slope; // max error ~0.0038
         //(PI / 4. + 0.2447 - (0.2447 - 0.0663 + 0.0663 * slope.abs()) * slope.abs()) * slope;
         // http://nghiaho.com/?p=997, max error ~0.0015, 3x faster than standard C atan
-    //if 1. < slope { PI / 2. - hatan } else if slope < -1. { -PI / 2. - hatan } else { hatan }
 
+    //if 1. < slope { PI / 2. - hatan } else if slope < -1. { -PI / 2. - hatan } else { hatan }
     if flag { hatan + if 0. < x { 0. } else if 0. < y { PI } else { -PI }
     } else { (if 0. < y { PI / 2. } else { -PI / 2. }) - hatan }
 }
