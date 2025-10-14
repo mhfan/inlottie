@@ -220,8 +220,8 @@ impl WinitApp {
             BLFormat::BL_FORMAT_PRGB32);
         let mut blctx = BLContext::new(&mut blimg);
 
-        // blctx.translate(orig.0, orig.1);
-        blctx.scale(scale, scale);
+        // blctx.translate(orig.0 as _, orig.1 as _);
+        blctx.scale(scale as _, scale as _);
         self.blctx = Some((blctx, blimg));
     }
 
@@ -231,16 +231,16 @@ impl WinitApp {
             self.surface.as_mut() else { return };
         let wsize = surface.window().inner_size();
 
-        let imgd = blimg.getData();
+        let imgd = blimg.get_data();
         let loff = ((wsize.width  - imgd.width())  / 2) as usize;
         let topl = ((wsize.height - imgd.height()) / 2) as usize;
 
         self.prevt = Instant::now();
         match &mut self.graph {
-            AnimGraph::SVG(tree) => {   //blctx.clearAll();
-                blctx.fillAllRgba32((99, 99, 99, 255).into());
+            AnimGraph::SVG(tree) => {   //blctx.clear_all();
+                blctx.fill_all_rgba32((99, 99, 99, 255).into());
 
-                let scale = blctx.getUserTransform().getScaling().0; // to screen viewport
+                let scale = blctx.get_user_transform().get_scaling().0 as f32; // to screen viewport
                 let mouse = ((self.mouse_pos.0 - loff as f32) / scale,
                                          (self.mouse_pos.1 - topl as f32) / scale);
                 b2d_svg::render_nodes(blctx, mouse, tree.root(), &usvg::Transform::identity());
@@ -552,16 +552,17 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
 
     #[cfg(feature = "b2d")] pub fn render_b2d(&self, blctx: &mut BLContext, pos: (f32, f32)) {
         let (rw, rh, mut path) = (100., 20., BLPath::new());
-        path.addRect(&(0., 0., rw, rh).into());
+        path.add_rect(&(0., 0., rw, rh).into());
 
-        let last_trfm = blctx.reset_transform(None);    blctx.translate(pos.0, pos.1);
-        blctx.fillGeometryRgba32(&path, (0, 0, 0, 99).into());  // to clear the exact area?
-        path.reset();   path.moveTo(&(0., rh).into());
+        let last_trfm = blctx.reset_transform(None);
+        blctx.translate(pos.0 as _, pos.1 as _);
+        blctx.fill_geometry_rgba32(&path, (0, 0, 0, 99).into());  // to clear the exact area?
+        path.reset();   path.move_to(&(0., rh).into());
         for i in 0..self.que.len() {  // self.que[i].min(100.) / 100.
-            path.lineTo(&(rw * i as f32 / self.que.len() as f32,
+            path.line_to(&(rw * i as f32 / self.que.len() as f32,
                 rh - rh * self.que[i] / self.max).into());
-        }   path.lineTo(&(rw, rh).into());
-        blctx.fillGeometryRgba32(&path, (255, 192, 0, 128).into());
+        }   path.line_to(&(rw, rh).into());
+        blctx.fill_geometry_rgba32(&path, (255, 192, 0, 128).into());
 
         //paint.set_color(Color::rgba(240, 240, 240, 255));
         //paint.set_text_baseline(femtovg::Baseline::Top);
@@ -570,7 +571,7 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
 
         let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
         if let Some(font) = &self.font {
-            blctx.fillUtf8TextDRgba32(&(10., 15.).into(), font,   // XXX:
+            blctx.fill_utf8_text_d_rgba32(&(10., 15.).into(), font,   // XXX:
                 &format!("{fps:.2} FPS"), (240, 240, 240, 255).into());
         }   blctx.reset_transform(Some(&last_trfm));
     }
@@ -732,24 +733,24 @@ fn some_test_case<T: Renderer>(ctx2d: &mut Canvas<T>) {
 
 pub fn blend2d_logo(ctx: &mut BLContext) {
     //let mut img = BLImage::new(480, 480, BLFormat::BL_FORMAT_PRGB32); // 0xAARRGGBB
-    ctx.clearAll();     //let mut ctx = BLContext::new(&mut img);
+    ctx.clear_all();     //let mut ctx = BLContext::new(&mut img);
     let mut radial = BLGradient::new(&BLRadialGradientValues::new(
         &(180, 180).into(), &(180, 180).into(), 180.0, 0.));
-    radial.addStop(0.0, 0xFFFFFFFF.into());
-    radial.addStop(1.0, 0xFFFF6F3F.into());
+    radial.add_stop(0.0, 0xFFFFFFFF.into());
+    radial.add_stop(1.0, 0xFFFF6F3F.into());
 
-    ctx.fillGeometryExt(&BLCircle::new(&(180, 180).into(), 160.0), &radial);
+    ctx.fill_geometry_ext(&BLCircle::new(&(180, 180).into(), 160.0), &radial);
 
     let mut linear = BLGradient::new(&BLLinearGradientValues::new(
         &(195, 195).into(), &(470, 470).into()));
-    linear.addStop(0.0, 0xFFFFFFFF.into());
-    linear.addStop(1.0, 0xFF3F9FFF.into());
+    linear.add_stop(0.0, 0xFFFFFFFF.into());
+    linear.add_stop(1.0, 0xFF3F9FFF.into());
 
-    ctx.setCompOp(BLCompOp::BL_COMP_OP_DIFFERENCE);
-    ctx.fillGeometryExt(&BLRoundRect::new(&(195, 195, 270, 270).into(), 25.0), &linear);
-    ctx.setCompOp(BLCompOp::BL_COMP_OP_SRC_OVER);   // restore to default
+    ctx.set_comp_op(BLCompOp::BL_COMP_OP_DIFFERENCE);
+    ctx.fill_geometry_ext(&BLRoundRect::new(&(195, 195, 270, 270).into(), 25.0), &linear);
+    ctx.set_comp_op(BLCompOp::BL_COMP_OP_SRC_OVER);   // restore to default
 
-    //let _ = img.writeToFile("target/logo_b2d.png");
+    //let _ = img.write_to_file("target/logo_b2d.png");
 }
 
 pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
@@ -760,14 +761,14 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
             stops.iter().for_each(|stop| {   let color = stop.color();
                 let color = (color.red, color.green, color.blue,
                     (stop.opacity() * opacity).to_u8()).into();
-                grad.addStop(stop.offset().get(), color);
+                grad.add_stop(stop.offset().get() as _, color);
             });
         }
 
         Some(match paint { usvg::Paint::Pattern(_) => { // trfm should be applied here
                 eprintln!("Not support pattern painting"); return None }
             // https://github.com/RazrFalcon/resvg/blob/master/crates/resvg/src/path.rs#L179
-            usvg::Paint::Color(color) => Box::new(BLSolidColor::initRgba32(
+            usvg::Paint::Color(color) => Box::new(BLSolidColor::init_rgba32(
                     (color.red, color.green, color.blue, opacity.to_u8()).into())),
 
             usvg::Paint::LinearGradient(grad) => {
@@ -778,7 +779,7 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
             usvg::Paint::RadialGradient(grad) => {
                 let mut radial = BLGradient::new(&BLRadialGradientValues::new(
                     &(grad.cx(), grad.cy()).into(), &(grad.fx(), grad.fy()).into(),
-                    grad.r().get(), 1.));   // XXX: 1./0.
+                    grad.r().get() as _, 1.));   // XXX: 1./0.
                     //(grad.cx() - grad.fx()).hypot(grad.cy() - grad.fy())
                 convert_stops(&mut radial, grad.stops(), opacity);     Box::new(radial)
             }
@@ -797,35 +798,35 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
             for seg in tpath.as_ref().unwrap_or(path.data()).segments() {
                 use usvg::tiny_skia_path::PathSegment;
                 match seg {     PathSegment::Close => fpath.close(),
-                    PathSegment::MoveTo(pt) => fpath.moveTo(&(pt.x, pt.y).into()),
-                    PathSegment::LineTo(pt) => fpath.lineTo(&(pt.x, pt.y).into()),
+                    PathSegment::MoveTo(pt) => fpath.move_to(&(pt.x, pt.y).into()),
+                    PathSegment::LineTo(pt) => fpath.line_to(&(pt.x, pt.y).into()),
 
                     PathSegment::QuadTo(ctrl, end) =>
-                        fpath.quadTo (&(ctrl.x, ctrl.y).into(), &(end.x, end.y).into()),
+                        fpath.quad_to (&(ctrl.x, ctrl.y).into(), &(end.x, end.y).into()),
                     PathSegment::CubicTo(ctrl0, ctrl1, end) =>
-                        fpath.cubicTo(&(ctrl0.x, ctrl0.y).into(), &(ctrl1.x, ctrl1.y).into(),
+                        fpath.cubic_to(&(ctrl0.x, ctrl0.y).into(), &(ctrl1.x, ctrl1.y).into(),
                             &(end.x, end.y).into()),
                 }
             }
 
             let fpaint = path.fill().and_then(|fill| {
-                blctx.setFillRule(match fill.rule() {
+                blctx.set_fill_rule(match fill.rule() {
                     usvg::FillRule::NonZero => BLFillRule::BL_FILL_RULE_NON_ZERO,
                     usvg::FillRule::EvenOdd => BLFillRule::BL_FILL_RULE_EVEN_ODD,
                 }); convert_paint(fill.paint(), fill.opacity(), trfm)
             });
 
             let lpaint = path.stroke().and_then(|stroke| {
-                blctx.setStrokeMiterLimit(stroke.miterlimit().get());
-                blctx.setStrokeWidth(stroke.width().get());
+                blctx.set_stroke_miter_limit(stroke.miterlimit().get() as _);
+                blctx.set_stroke_width(stroke.width().get() as _);
 
-                blctx.setStrokeJoin(match stroke.linejoin() {
+                blctx.set_stroke_join(match stroke.linejoin() {
                     usvg::LineJoin::MiterClip => BLStrokeJoin::BL_STROKE_JOIN_MITER_CLIP,
                     usvg::LineJoin::Miter => BLStrokeJoin::BL_STROKE_JOIN_MITER_BEVEL,
                     usvg::LineJoin::Round => BLStrokeJoin::BL_STROKE_JOIN_ROUND,
                     usvg::LineJoin::Bevel => BLStrokeJoin::BL_STROKE_JOIN_BEVEL,
                 });
-                blctx.setStrokeCaps(match stroke.linecap () {
+                blctx.set_stroke_caps(match stroke.linecap () {
                     usvg::LineCap::Butt   => BLStrokeCap::BL_STROKE_CAP_BUTT,
                     usvg::LineCap::Round  => BLStrokeCap::BL_STROKE_CAP_ROUND,
                     usvg::LineCap::Square => BLStrokeCap::BL_STROKE_CAP_SQUARE,
@@ -835,26 +836,26 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
             match path.paint_order() {
                 usvg::PaintOrder::FillAndStroke => {
                     if let Some(paint) = fpaint {
-                        blctx.fillGeometryExt(&fpath, paint.as_ref());
+                        blctx.fill_geometry_ext(&fpath, paint.as_ref());
                     }
                     if let Some(paint) = lpaint {
-                        blctx.strokeGeometryExt(&fpath, paint.as_ref());
+                        blctx.stroke_geometry_ext(&fpath, paint.as_ref());
                     }
                 }
                 usvg::PaintOrder::StrokeAndFill => {
                     if let Some(paint) = lpaint {
-                        blctx.strokeGeometryExt(&fpath, paint.as_ref());
+                        blctx.stroke_geometry_ext(&fpath, paint.as_ref());
                     }
                     if let Some(paint) = fpaint {
-                        blctx.fillGeometryExt(&fpath, paint.as_ref());
+                        blctx.fill_geometry_ext(&fpath, paint.as_ref());
                     }
                 }
             }
 
-            if  matches!(fpath.hitTest(&mouse.into(),
+            if  matches!(fpath.hit_test(&mouse.into(),
                 BLFillRule::BL_FILL_RULE_NON_ZERO), BLHitTest::BL_HIT_TEST_IN) {
-                blctx.setStrokeWidth(2. / blctx.getUserTransform().getScaling().0);
-                blctx.strokeGeometryRgba32(&fpath, (32, 240, 32, 128).into());
+                blctx.set_stroke_width(2. / blctx.get_user_transform().get_scaling().0);
+                blctx.stroke_geometry_rgba32(&fpath, (32, 240, 32, 128).into());
             }
         }
 
