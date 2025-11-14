@@ -10,5 +10,6 @@ fn main() {     // https://doc.rust-lang.org/stable/cargo/reference/build-script
     let output = std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"]).output().unwrap();
     println!("cargo:rustc-env=BUILD_GIT_HASH={}", String::from_utf8(output.stdout).unwrap());
-    println!("cargo:rerun-if-changed={}", std::path::Path::new(".git").join("index").display());
+    println!("cargo:rerun-if-changed={}", std::path::PathBuf::from(".git/index").display());
 }
+

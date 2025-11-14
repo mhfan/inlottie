@@ -22,7 +22,9 @@ impl PathFactory for Rectangle {
         //let is_ccw = self.base.dir.map_or(true, |d| matches!(d, ShapeDirection::Reversed));
 
         let mut path = VGPath::new();
-        if radius < f32::EPSILON {      	path.move_to(erb.x, elt.y);
+        if radius < ACCURACY_TOLERANCE {
+            //path.rect(elt.x, elt.y, size.x, size.y); 	return path;
+            path.move_to(erb.x, elt.y);
             if self.base.is_ccw() {
                 path.line_to(elt.x, elt.y); path.line_to(elt.x, erb.y);
 				path.line_to(erb.x, erb.y);
@@ -30,10 +32,9 @@ impl PathFactory for Rectangle {
                 path.line_to(erb.x, erb.y); path.line_to(elt.x, erb.y);
 				path.line_to(elt.x, elt.y);
             }   path.close();   	 return path;
-            //path.rect(elt.x, elt.y, size.x, size.y); 	return;
         }
 
-        //path.rounded_rect(elt.x, elt.y, size.x, size.y, radius); 	return;
+        //path.rounded_rect(elt.x, elt.y, size.x, size.y, radius); 	return path;
         let (clt, crb) = (elt + radius, erb - radius);
             path.move_to(erb.x, clt.y);
 
@@ -50,7 +51,7 @@ impl PathFactory for Rectangle {
             path.line_to(clt.x, erb.y); path.bezier_to(tlt.x, erb.y, elt.x, trb.y, elt.x, crb.y);
             path.line_to(elt.x, clt.y); path.bezier_to(elt.x, tlt.y, tlt.x, elt.y, clt.x, elt.y);
             path.line_to(crb.x, elt.y); path.bezier_to(trb.x, elt.y, erb.x, tlt.y, erb.x, clt.y);
-        }   path.close(); 	return; */
+        }   path.close(); 	return path; */
 
         if self.base.is_ccw() {     let dir = femtovg::Solidity::Solid;
             //path.arc_to(erb.x, elt.y, crb.x, elt.y, radius);
@@ -63,7 +64,7 @@ impl PathFactory for Rectangle {
             path.arc(crb.x, crb.y, radius, -PI / 2.,  0., dir); //path.line_to(erb.x, clt.y);
         } else {                    let dir = femtovg::Solidity::Hole; // XXX:
             path.line_to(erb.x, crb.y); path.arc(crb.x, crb.y, radius,  0., -PI / 2., dir);
-                                        //path.arc_to(erb.x, crb.y, crb.x, erb.y, radius);
+                                        //path.arc_to(erb.x, erb.y, crb.x, erb.y, radius);
             path.line_to(clt.x, erb.y); path.arc(clt.x, crb.y, radius, -PI / 2.,  PI, dir);
                                         //path.arc_to(elt.x, erb.y, elt.x, crb.y, radius);
             path.line_to(elt.x, clt.y); path.arc(clt.x, clt.y, radius,  PI,  PI / 2., dir);
@@ -114,16 +115,17 @@ impl PathFactory for Polystar {
 
 impl PathFactory for Ellipse {
     fn to_path(&self, fnth: f32) -> VGPath {
+        let mut path = VGPath::new();
         let center = self. pos.get_value(fnth);
-        let radius = self.size.get_value(fnth) / 2.;
-        //path.ellipse(center.x, center.y, radius.x, radius.y);   return;
+        let radii  = self.size.get_value(fnth) / 2.;
+        //path.ellipse(center.x, center.y, radii.x, radii.y);   return path;
 
         //  Approximate a circle with cubic Bézier curves
         //  https://spencermortensen.com/articles/bezier-circle/
-        let tangent = radius * 0.5519;  // a magic number
-        let (elt, tlt) = (center - radius, center - tangent);
-        let (erb, trb) = (center + radius, center + tangent);
-        let mut path = VGPath::new();   path.move_to(center.x, elt.y);
+        let tangent = radii * 0.5519;   // a magic number
+        let (elt, tlt) = (center - radii, center - tangent);
+        let (erb, trb) = (center + radii, center + tangent);
+        path.move_to(center.x, elt.y);
 
         if self.base.is_ccw() {
             path.bezier_to(tlt.x, elt.y, elt.x, tlt.y, elt.x, center.y);
@@ -791,12 +793,12 @@ fn trim_shapes(mdfr: &TrimPath, draws: &mut [DrawItem], fnth: f32) {
     if mdfr.multiple.is_some_and(|ml| matches!(ml, TrimMultiple::Simultaneously)) {
         modify_shapes(draws, &mut |path| *path = trim_path(path.verbs(), start, trim));
     } else {
-        let (mut idx, mut suml, accuracy) = (0u32, 0., 1e-2);
+        let (mut idx, mut suml) = (0u32, 0.);
         let (mut lens, mut tri0) = (vec![], 0.);
 
         traverse_shapes(draws, &mut |path| {
             let len = kurbo::segments(path.verbs().map(convert_path_f2k)).fold(0.,
-                |acc, seg| acc + seg.arclen(accuracy));
+                |acc, seg| acc + seg.arclen(ACCURACY_TOLERANCE));
             lens.push(len);     suml += len;
         });
 
@@ -831,15 +833,14 @@ fn trim_path<I: Iterator<Item = Verb>>(path: I, start: f64, mut trim: f64) -> VG
     //let segments = kurbo::segments(path.map(convert_path_f2k));
     let path = path.map(convert_path_f2k).collect::<BezPath>();
 
-    let (accuracy, mut tri0) = (1e-2, 0.);
-    let mut suml = path.segments().fold(0.,
-        |acc, seg| acc + seg.arclen(accuracy));
+    let (mut tri0, mut suml) = (0., path.segments().fold(0.,
+        |acc, seg| acc + seg.arclen(ACCURACY_TOLERANCE as _)));
     if 1. < start + trim { tri0 = start + trim - 1.; trim = 1. - start; }
     let (start, mut trim) = (suml * start, suml * trim);
     let mut fpath = VGPath::new();  tri0 *= suml;  suml = 0.;
 
     BezPath::from_path_segments(path.segments().filter_map(|seg| {
-        let len = seg.arclen(accuracy);
+        let len = seg.arclen(ACCURACY_TOLERANCE as _);
 
         let range = if suml <= start && start < suml + len {
             let start = start - suml;   let end = start + trim;
@@ -870,12 +871,11 @@ fn path_to_dash(path: &VGPath, dash: &(f32, Vec<f32>)) -> VGPath {
 }
 
 use {kurbo::PathEl, femtovg::Verb};
-fn convert_path_f2k(verb: Verb) -> PathEl { match verb {
-    Verb::MoveTo(x, y) => PathEl::MoveTo((x as f64, y as f64).into()),
-    Verb::LineTo(x, y) => PathEl::LineTo((x as f64, y as f64).into()),
+fn convert_path_f2k(verb: Verb)  -> PathEl { match verb {
+    Verb::MoveTo(x, y) => PathEl::MoveTo((x, y).into()),
+    Verb::LineTo(x, y) => PathEl::LineTo((x, y).into()),
     Verb::BezierTo(ox, oy, ix, iy, x, y) =>
-        PathEl::CurveTo((ox as f64, oy as f64).into(),
-                        (ix as f64, iy as f64).into(), (x as f64, y as f64).into()),
+        PathEl::CurveTo((ox, oy).into(), (ix, iy).into(), (x, y).into()),
     Verb::Solid | Verb::Hole => unreachable!(),
     Verb::Close => PathEl::ClosePath,
 } }
@@ -885,7 +885,8 @@ fn convert_path_k2f(elem: PathEl, path: &mut VGPath) { match elem {
     PathEl::LineTo(pt) => path.line_to(pt.x as _, pt.y as _),
     PathEl::CurveTo(ot, it, pt) =>
         path.bezier_to(ot.x as _, ot.y as _, it.x as _, it.y as _, pt.x as _, pt.y as _),
-    PathEl::QuadTo(_ct, _pt) => unreachable!(),
+    PathEl::QuadTo(ct, pt) =>
+        path.quad_to(ct.x as _, ct.y as _, pt.x as _, pt.y as _),
     //    let (ot, it) = (ct + (lp - ct) / 3, ct + (pt - ct) / 3);  // elevating curve order
     //    path.bezier_to(ot.x as _, ot.y as _, it.x as _, it.y as _, pt.x as _, pt.y as _),
     PathEl::ClosePath => path.close(),

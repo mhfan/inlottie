@@ -97,7 +97,7 @@ impl<'de> Deserialize<'de> for ColorList {
         let len = data.len() as u32;
 
         let cnt = (len / 6) as usize; // XXX:
-        let cnt = if len % 6 == 0 && !(len % 4 == 0 && (0..cnt).any(|i|
+        let cnt = if len.is_multiple_of(6) && !(len.is_multiple_of(4) && (0..cnt).any(|i|
             data[i * 4] != data[cnt * 4 + i * 2])) { cnt as u32 } else { len / 4 };
 
         Ok(Self(if len == cnt * 4 { // RGB color
@@ -283,7 +283,7 @@ impl<'de> Deserialize<'de> for  AnyAsset {
 impl<'de> Deserialize<'de> for AnyValue {
     #[inline] fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
-        eprintln!("Unexpected value: {}", value);   Ok(AnyValue(value))
+        eprintln!("Unexpected value: {value}");     Ok(AnyValue(value))
     }
 }
 
@@ -369,6 +369,8 @@ fn serialize_with_type<S: Serializer>(layers: &[TestLayerItem],
 
 }
 
+pub const ACCURACY_TOLERANCE: f64 = 1e-2;
+
 pub mod math {  use super::*;
 
 /** Fast arctangent approximations by iterative algorithms, the coordinated rotation
@@ -417,34 +419,34 @@ pub fn fast_atan2(y: f32, x: f32) -> f32 {  use core::f32::consts::PI;
 }
 
 use core::ops::{Div, Mul, Add, Sub};
-impl Div<f32> for Vec2D {  type Output = Vec2D;
-    #[inline] fn div(self, scale: f32) -> Self::Output {
-        Self::Output { x: self.x / scale, y: self.y / scale }
+impl Div<f32> for Vec2D {  type Output =  Self;
+    #[inline] fn div(self, scale: f32) -> Self {
+        Self { x: self.x / scale, y: self.y / scale }
     }
 }
-impl Mul<f32> for Vec2D {  type Output = Vec2D;
-    #[inline] fn mul(self, scale: f32) -> Self::Output {
-        Self::Output { x: self.x * scale, y: self.y * scale }
+impl Mul<f32> for Vec2D {  type Output =  Self;
+    #[inline] fn mul(self, scale: f32) -> Self {
+        Self { x: self.x * scale, y: self.y * scale }
     }
 }
-impl Add<f32> for Vec2D {  type Output = Vec2D;
-    #[inline] fn add(self, offset: f32) -> Self::Output {
-        Self::Output { x: self.x + offset, y: self.y + offset }
+impl Add<f32> for Vec2D {  type Output =   Self;
+    #[inline] fn add(self, offset: f32) -> Self {
+        Self { x: self.x + offset, y: self.y + offset }
     }
 }
-impl Sub<f32> for Vec2D {  type Output = Vec2D;
-    #[inline] fn sub(self, offset: f32) -> Self::Output {
-        Self::Output { x: self.x - offset, y: self.y - offset }
+impl Sub<f32> for Vec2D {  type Output =   Self;
+    #[inline] fn sub(self, offset: f32) -> Self {
+        Self { x: self.x - offset, y: self.y - offset }
     }
 }
-impl Add for Vec2D {  type Output = Vec2D;
-    #[inline] fn add(self, rhs: Self) -> Self::Output {
-        Self::Output { x: self.x + rhs.x, y: self.y + rhs.y }
+impl Add for Vec2D {  type Output = Self;
+    #[inline] fn add(self, rhs: Self) -> Self {
+        Self { x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }
-impl Sub for Vec2D {  type Output = Vec2D;
-    #[inline] fn sub(self, rhs: Self) -> Self::Output {
-        Self::Output { x: self.x - rhs.x, y: self.y - rhs.y }
+impl Sub for Vec2D {  type Output = Self;
+    #[inline] fn sub(self, rhs: Self) -> Self {
+        Self { x: self.x - rhs.x, y: self.y - rhs.y }
     }
 }
 impl Vec2D {
@@ -569,7 +571,7 @@ impl Lerp for Vec2D {
 
         let (mut tmin, mut tmax) = (0., 1.);
         let tlen = bezier.estimate_length() * t as f64;
-        while 1e-2 < tmax - tmin {
+        while ACCURACY_TOLERANCE < tmax - tmin {
             let tmid = (tmin + tmax) / 2.;
             if bezier.subdivide(tmid).1.estimate_length() < tlen {
                 tmin = tmid; } else { tmax = tmid; }
@@ -581,14 +583,14 @@ impl Lerp for Vec2D {
         let curve = CubicBez::new::<Point>((*self).into(), (*self + extra.to).into(),
             (*other + extra.ti).into(), (*other).into());
 
-        let (mut tmin, mut tmax, tolerance) = (0., 1., 1e-2);
-        let tlen = curve.arclen(tolerance) * t as f64;
-        while tolerance < tmax - tmin {
+        let (mut tmin, mut tmax) = (0., 1.);
+        let tlen = curve.arclen(ACCURACY_TOLERANCE) * t as f64;
+        while ACCURACY_TOLERANCE < tmax - tmin {
             let tmid = (tmin + tmax) / 2.;
-            if curve.subsegment(0.0..tmid).arclen(tolerance) < tlen {
+            if curve.subsegment(0.0..tmid).arclen(ACCURACY_TOLERANCE) < tlen {
                 tmin = tmid; } else { tmax = tmid; }
         }   let pt = curve.eval((tmin + tmax) / 2.);
-        //let pt = curve.eval(curve.inv_arclen(tlen, tolerance));
+        //let pt = curve.eval(curve.inv_arclen(tlen, ACCURACY_TOLERANCE));
 
         Self { x: pt.x as _, y: pt.y as _ } //(pt.x as _, pt.y as _).into()
     }

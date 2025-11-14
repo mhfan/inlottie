@@ -557,11 +557,11 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
         let last_trfm = blctx.reset_transform(None);
         blctx.translate(pos.0 as _, pos.1 as _);
         blctx.fill_geometry_rgba32(&path, (0, 0, 0, 99).into());  // to clear the exact area?
-        path.reset();   path.move_to(&(0., rh).into());
+        path.reset();   path.move_to((0., rh).into());
         for i in 0..self.que.len() {  // self.que[i].min(100.) / 100.
-            path.line_to(&(rw * i as f32 / self.que.len() as f32,
+            path.line_to((rw * i as f32 / self.que.len() as f32,
                 rh - rh * self.que[i] / self.max).into());
-        }   path.line_to(&(rw, rh).into());
+        }   path.line_to((rw, rh).into());
         blctx.fill_geometry_rgba32(&path, (255, 192, 0, 128).into());
 
         //paint.set_color(Color::rgba(240, 240, 240, 255));
@@ -571,7 +571,7 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
 
         let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
         if let Some(font) = &self.font {
-            blctx.fill_utf8_text_d_rgba32(&(10., 15.).into(), font,   // XXX:
+            blctx.fill_utf8_text_d_rgba32((10., 15.).into(), font,  // XXX:
                 &format!("{fps:.2} FPS"), (240, 240, 240, 255).into());
         }   blctx.reset_transform(Some(&last_trfm));
     }
@@ -621,15 +621,15 @@ fn render_nodes<T: Renderer>(ctx2d: &mut Canvas<T>, mouse: (f32, f32),
             let mut fpath = Path::new();
 
             for seg in tpath.as_ref().unwrap_or(path.data()).segments() {
-                use usvg::tiny_skia_path::PathSegment;
-                match seg {     PathSegment::Close => fpath.close(),
-                    PathSegment::MoveTo(pt) => fpath.move_to(pt.x, pt.y),
-                    PathSegment::LineTo(pt) => fpath.line_to(pt.x, pt.y),
+                use usvg::tiny_skia_path::PathSegment::*;
+                match seg {     Close => fpath.close(),
+                    MoveTo(pt) => fpath.move_to(pt.x, pt.y),
+                    LineTo(pt) => fpath.line_to(pt.x, pt.y),
 
-                    PathSegment::QuadTo(ctrl, end) =>
+                    QuadTo(ctrl, end) =>
                         fpath.quad_to  (ctrl.x, ctrl.y, end.x, end.y),
-                    PathSegment::CubicTo(ctrl0, ctrl1, end) =>
-                        fpath.bezier_to (ctrl0.x, ctrl0.y, ctrl1.x, ctrl1.y, end.x, end.y),
+                    CubicTo(ctrl0, ctrl1, end) =>
+                        fpath.bezier_to(ctrl0.x, ctrl0.y, ctrl1.x, ctrl1.y, end.x, end.y),
                 }
             }
 
@@ -735,14 +735,14 @@ pub fn blend2d_logo(ctx: &mut BLContext) {
     //let mut img = BLImage::new(480, 480, BLFormat::BL_FORMAT_PRGB32); // 0xAARRGGBB
     ctx.clear_all();     //let mut ctx = BLContext::new(&mut img);
     let mut radial = BLGradient::new(&BLRadialGradientValues::new(
-        &(180, 180).into(), &(180, 180).into(), 180.0, 0.));
+        (180, 180).into(), (180, 180).into(), 180.0, 0.));
     radial.add_stop(0.0, 0xFFFFFFFF.into());
     radial.add_stop(1.0, 0xFFFF6F3F.into());
 
-    ctx.fill_geometry_ext(&BLCircle::new(&(180, 180).into(), 160.0), &radial);
+    ctx.fill_geometry_ext(&BLCircle::new((180, 180).into(), 160.0), &radial);
 
     let mut linear = BLGradient::new(&BLLinearGradientValues::new(
-        &(195, 195).into(), &(470, 470).into()));
+        (195, 195).into(), (470, 470).into()));
     linear.add_stop(0.0, 0xFFFFFFFF.into());
     linear.add_stop(1.0, 0xFF3F9FFF.into());
 
@@ -773,12 +773,12 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
 
             usvg::Paint::LinearGradient(grad) => {
                 let mut linear = BLGradient::new(&BLLinearGradientValues::new(
-                    &(grad.x1(), grad.y1()).into(), &(grad.x2(), grad.y2()).into()));
+                    (grad.x1(), grad.y1()).into(), (grad.x2(), grad.y2()).into()));
                 convert_stops(&mut linear, grad.stops(), opacity);     Box::new(linear)
             }
             usvg::Paint::RadialGradient(grad) => {
                 let mut radial = BLGradient::new(&BLRadialGradientValues::new(
-                    &(grad.cx(), grad.cy()).into(), &(grad.fx(), grad.fy()).into(),
+                    (grad.cx(), grad.cy()).into(), (grad.fx(), grad.fy()).into(),
                     grad.r().get() as _, 1.));   // XXX: 1./0.
                     //(grad.cx() - grad.fx()).hypot(grad.cy() - grad.fy())
                 convert_stops(&mut radial, grad.stops(), opacity);     Box::new(radial)
@@ -796,16 +796,16 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
             let mut fpath = BLPath::new();
 
             for seg in tpath.as_ref().unwrap_or(path.data()).segments() {
-                use usvg::tiny_skia_path::PathSegment;
-                match seg {     PathSegment::Close => fpath.close(),
-                    PathSegment::MoveTo(pt) => fpath.move_to(&(pt.x, pt.y).into()),
-                    PathSegment::LineTo(pt) => fpath.line_to(&(pt.x, pt.y).into()),
+                use usvg::tiny_skia_path::PathSegment::*;
+                match seg {     Close => fpath.close(),
+                    MoveTo(pt) => fpath.move_to((pt.x, pt.y).into()),
+                    LineTo(pt) => fpath.line_to((pt.x, pt.y).into()),
 
-                    PathSegment::QuadTo(ctrl, end) =>
-                        fpath.quad_to (&(ctrl.x, ctrl.y).into(), &(end.x, end.y).into()),
-                    PathSegment::CubicTo(ctrl0, ctrl1, end) =>
-                        fpath.cubic_to(&(ctrl0.x, ctrl0.y).into(), &(ctrl1.x, ctrl1.y).into(),
-                            &(end.x, end.y).into()),
+                    QuadTo(cp, end) =>
+                        fpath.quad_to ((cp.x, cp.y).into(), (end.x, end.y).into()),
+                    CubicTo(c1, c2, end) =>
+                        fpath.cubic_to((c1.x, c1.y).into(),
+                                       (c2.x, c2.y).into(), (end.x, end.y).into()),
                 }
             }
 
@@ -852,7 +852,7 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
                 }
             }
 
-            if  matches!(fpath.hit_test(&mouse.into(),
+            if  matches!(fpath.hit_test(mouse.into(),
                 BLFillRule::BL_FILL_RULE_NON_ZERO), BLHitTest::BL_HIT_TEST_IN) {
                 blctx.set_stroke_width(2. / blctx.get_user_transform().get_scaling().0);
                 blctx.stroke_geometry_rgba32(&fpath, (32, 240, 32, 128).into());

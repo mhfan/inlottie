@@ -157,20 +157,16 @@ pub fn to_stroke(stroke: &usvg::Stroke) -> Stroke {
 
 pub fn to_bez_path(path: &usvg::Path) -> BezPath {
     let mut local_path = BezPath::new();
-    use usvg::tiny_skia_path::PathSegment;
+    use usvg::tiny_skia_path::PathSegment::*;
 
     for elt in path.data().segments() {
         match elt {
-            PathSegment::MoveTo(p) => local_path.move_to(Point::new(p.x as _, p.y as _)),
-            PathSegment::LineTo(p) => local_path.line_to(Point::new(p.x as _, p.y as _)),
-            PathSegment::QuadTo(p1, p2) =>
-                local_path .quad_to(Point::new(p1.x as _, p1.y as _),
-                                    Point::new(p2.x as _, p2.y as _)),
-            PathSegment::CubicTo(p1, p2, p3) =>
-                local_path.curve_to(Point::new(p1.x as _, p1.y as _),
-                                    Point::new(p2.x as _, p2.y as _),
-                                    Point::new(p3.x as _, p3.y as _)),
-            PathSegment::Close => local_path.close_path(),
+            MoveTo(p) => local_path.move_to((p.x, p.y)),
+            LineTo(p) => local_path.line_to((p.x, p.y)),
+            QuadTo(p1, p2) => local_path .quad_to((p1.x, p1.y), (p2.x, p2.y)),
+            CubicTo(p1, p2, p3) =>
+                local_path.curve_to((p1.x, p1.y), (p2.x, p2.y), (p3.x, p3.y)),
+            Close => local_path.close_path(),
         }
     }   local_path
 }
