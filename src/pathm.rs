@@ -120,7 +120,7 @@ pub trait PathBuilder {     //type Point; type Path;
 pub trait PathFactory { fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB; }
 
 impl PathFactory for Rectangle {
-    fn to_path(&self, fnth: f32) -> VGPath {
+    fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
         let center = self. pos.get_value(fnth);
         let halves = self.size.get_value(fnth) / 2.;
         let radius = self.rcr.get_value(fnth).min(halves.x).min(halves.y);
@@ -130,62 +130,91 @@ impl PathFactory for Rectangle {
         // the rectangle defaults as being reversed.
         //let is_ccw = self.base.dir.map_or(true, |d| matches!(d, ShapeDirection::Reversed));
 
-        let mut path = VGPath::new();
         if radius < ACCURACY_TOLERANCE {
+            let mut path = PB::new(5);
             //path.rect(elt.x, elt.y, size.x, size.y); 	return path;
-            path.move_to(erb.x, elt.y);
+            path.move_to((erb.x, elt.y).into());
             if self.base.is_ccw() {
-                path.line_to(elt.x, elt.y); path.line_to(elt.x, erb.y);
-				path.line_to(erb.x, erb.y);
+                path.line_to(elt); path.line_to((elt.x, erb.y).into()); path.line_to(erb);
             } else {
-                path.line_to(erb.x, erb.y); path.line_to(elt.x, erb.y);
-				path.line_to(elt.x, elt.y);
+                path.line_to(erb); path.line_to((elt.x, erb.y).into()); path.line_to(elt);
             }   path.close();   	 return path;
-        }
+        }   let mut path = PB::new(10);
 
         //path.rounded_rect(elt.x, elt.y, size.x, size.y, radius); 	return path;
         let (clt, crb) = (elt + radius, erb - radius);
-            path.move_to(erb.x, clt.y);
+            path.move_to((erb.x, clt.y).into());
 
         /* let tangent = radius * 0.5519;   // approximate with cubic Bezier curve
 		let (tlt, trb) = (clt - tangent, crb + tangent);
 
         if self.base.is_ccw() {
-            path.bezier_to(erb.x, tlt.y, trb.x, elt.y, crb.x, elt.y); path.line_to(clt.x, elt.y);
-            path.bezier_to(tlt.x, elt.y, elt.x, tlt.y, elt.x, clt.y); path.line_to(elt.x, crb.y);
-            path.bezier_to(elt.x, trb.y, tlt.x, erb.y, clt.x, erb.y); path.line_to(crb.x, erb.y);
-            path.bezier_to(trb.x, erb.y, erb.x, trb.y, erb.x, crb.y); //path.line_to(erb.x, clt.y);
+            path.cubic_to((erb.x, tlt.y).into(),
+                          (trb.x, elt.y).into(), (crb.x, elt.y).into());
+            path. line_to((clt.x, elt.y).into());
+            path.cubic_to((tlt.x, elt.y).into(),
+                          (elt.x, tlt.y).into(), (elt.x, clt.y).into());
+            path. line_to((elt.x, crb.y).into());
+            path.cubic_to((elt.x, trb.y).into(),
+                          (tlt.x, erb.y).into(), (clt.x, erb.y).into());
+            path. line_to((crb.x, erb.y).into());
+            path.cubic_to((trb.x, erb.y).into(),
+                          (erb.x, trb.y).into(), (erb.x, crb.y).into());
+            //path. line_to((erb.x, clt.y).into());
         } else {
-            path.line_to(erb.x, crb.y); path.bezier_to(erb.x, trb.y, trb.x, erb.y, crb.x, erb.y);
-            path.line_to(clt.x, erb.y); path.bezier_to(tlt.x, erb.y, elt.x, trb.y, elt.x, crb.y);
-            path.line_to(elt.x, clt.y); path.bezier_to(elt.x, tlt.y, tlt.x, elt.y, clt.x, elt.y);
-            path.line_to(crb.x, elt.y); path.bezier_to(trb.x, elt.y, erb.x, tlt.y, erb.x, clt.y);
+            path. line_to((erb.x, crb.y).into());
+            path.cubic_to((erb.x, trb.y).into(),
+                          (trb.x, erb.y).into(), (crb.x, erb.y).into());
+            path. line_to((clt.x, erb.y).into());
+            path.cubic_to((tlt.x, erb.y).into(),
+                          (elt.x, trb.y).into(), (elt.x, crb.y).into());
+            path. line_to((elt.x, clt.y).into());
+            path.cubic_to((elt.x, tlt.y).into(),
+                          (tlt.x, elt.y).into(), (clt.x, elt.y).into());
+            path. line_to((crb.x, elt.y).into());
+            path.cubic_to((trb.x, elt.y).into(),
+                          (erb.x, tlt.y).into(), (erb.x, clt.y).into());
         }   path.close(); 	return path; */
 
-        if self.base.is_ccw() {     let dir = femtovg::Solidity::Solid;
-            //path.arc_to(erb.x, elt.y, crb.x, elt.y, radius);
-            path.arc(crb.x, clt.y, radius,  0.,  PI / 2., dir); path.line_to(clt.x, elt.y);
-            //path.arc_to(elt.x, elt.y, elt.x, clt.y, radius);
-            path.arc(clt.x, clt.y, radius,  PI / 2.,  PI, dir); path.line_to(elt.x, crb.y);
-            //path.arc_to(elt.x, erb.y, clt.x, erb.y, radius);
-            path.arc(clt.x, crb.y, radius,  PI, -PI / 2., dir); path.line_to(crb.x, erb.y);
-            //path.arc_to(erb.x, erb.y, erb.x, crb.y, radius);
-            path.arc(crb.x, crb.y, radius, -PI / 2.,  0., dir); //path.line_to(erb.x, clt.y);
-        } else {                    let dir = femtovg::Solidity::Hole; // XXX:
-            path.line_to(erb.x, crb.y); path.arc(crb.x, crb.y, radius,  0., -PI / 2., dir);
-                                        //path.arc_to(erb.x, erb.y, crb.x, erb.y, radius);
-            path.line_to(clt.x, erb.y); path.arc(clt.x, crb.y, radius, -PI / 2.,  PI, dir);
-                                        //path.arc_to(elt.x, erb.y, elt.x, crb.y, radius);
-            path.line_to(elt.x, clt.y); path.arc(clt.x, clt.y, radius,  PI,  PI / 2., dir);
-                                        //path.arc_to(elt.x, elt.y, clt.x, elt.y, radius);
-            path.line_to(crb.x, elt.y); path.arc(crb.x, clt.y, radius,  PI / 2.,  0., dir);
-                                        //path.arc_to(erb.x, elt.y, erb.x, clt.y, radius);
+        let radii = (radius, radius).into();
+        if self.base.is_ccw() {
+            //path.arc_to((erb.x, elt.y).into(), (crb.x, elt.y).into(), radii);
+            path.add_arc((crb.x, clt.y).into(), radii,  0.,  (PI / 2.) as _);
+            path.line_to((clt.x, elt.y).into());
+
+            //path.arc_to(elt, (elt.x, clt.y).into(), radii);
+            path.add_arc(clt, radii,  (PI / 2.) as _,  PI as _);
+            path.line_to((elt.x, crb.y).into());
+
+            //path.arc_to((elt.x, erb.y).into(), (clt.x, erb.y).into(), radii);
+            path.add_arc((clt.x, crb.y).into(), radii,  PI as _, -(PI / 2.) as _);
+            path.line_to((crb.x, erb.y).into());
+
+            //path.arc_to(erb, (erb.x, crb.y).into(), radii);
+            path.add_arc(crb, radii, -(PI / 2.) as _,  0.);
+            //path.line_to((erb.x, clt.y).into());
+        } else {
+            path.line_to((erb.x, crb.y).into());
+            path.add_arc(crb, radii,  0., -(PI / 2.) as _);
+            //path.arc_to(erb, (crb.x, erb.y).into(), radii);
+
+            path.line_to((clt.x, erb.y).into());
+            path.add_arc((clt.x, crb.y).into(), radii, -(PI / 2.) as _,  PI as _);
+            //path.arc_to((elt.x, erb.y).into(), (elt.x, crb.y).into(), radii);
+
+            path.line_to((elt.x, clt.y).into());
+            path.add_arc(clt, radii,  PI as _,  (PI / 2.) as _);
+            //path.arc_to(elt, (clt.x, elt.y).into(), radii);
+
+            path.line_to((crb.x, elt.y).into());
+            path.add_arc((crb.x, clt.y).into(), radii,  (PI / 2.) as _,  0.);
+            //path.arc_to((erb.x, elt.y).into(), (erb.x, clt.y).into(), radii);
         }   path.close();   path
     }
 }
 
 impl PathFactory for Polystar {
-    fn to_path(&self, fnth: f32) -> VGPath {
+    fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
         let center = self.pos.get_value(fnth);
         let (or, nvp) = (self.or.get_value(fnth), self.pt.get_value(fnth));
         let orr = self.os.get_value(fnth) * PI / 2. / 100. / nvp;  // XXX:
@@ -195,117 +224,123 @@ impl PathFactory for Polystar {
         let irr = self.is.as_ref().map_or(0.,
             |is| is.get_value(fnth) * PI / 2. / 100. / nvp);
 
+        let is_star = matches!(self.sy, StarType::Star);
         let mut angle = -PI / 2. + self.rotation.get_value(fnth).to_radians();
-        let angle_step = if matches!(self.sy, StarType::Star) { PI } else { PI * 2. } /
+        let angle_step = if is_star { PI } else { PI * 2. } /
             if self.base.is_ccw() { -nvp } else { nvp };
+        let nvp = nvp as u32;
 
 		let rp = Vec2D::from_polar(angle) * or;
 		let pt = center + rp; 	//let rp = rp * orr;
-        let mut path = VGPath::new();   path.move_to(pt.x, pt.y);
+        let mut path = PB::new(2 + if is_star { nvp * 2 } else { nvp });
+        path.move_to(pt);
 
-        let (mut lotx, mut loty) = (pt.x - rp.y * orr, pt.y + rp.x * orr);
-        let  mut add_bezier_to = |radius, rr| {
+        let mut lot = Point::from((pt.x - rp.y * orr, pt.y + rp.x * orr));
+        let mut add_bezier_to = |radius, rr| {
             angle += angle_step;
 
 			let rp = Vec2D::from_polar(angle) * radius;
 			let pt = center + rp; 	//let rp = rp * rr;
-            let (rdx, rdy) = (rp.y * rr, -rp.x * rr);
 
-            path.bezier_to(lotx, loty,  pt.x + rdx, pt.y + rdy, pt.x, pt.y); // pt + rd
-            (lotx, loty) = (pt.x - rdx, pt.y - rdy); // pt - rd
+            let rd = Vec2D::from((rp.y * rr, -rp.x * rr));
+            path.cubic_to(lot, pt + rd, pt);    lot = pt - rd
         };
 
-        for _ in 0..nvp as u32 {
-            if matches!(self.sy, StarType::Star) { add_bezier_to(ir, irr); }
-            add_bezier_to(or, orr);
+        for _ in 0..nvp {
+            if is_star { add_bezier_to(ir, irr); } add_bezier_to(or, orr);
         }   path.close();   path
     }
 }
 
 impl PathFactory for Ellipse {
-    fn to_path(&self, fnth: f32) -> VGPath {
-        let mut path = VGPath::new();
+    fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
+        let mut path = PB::new(6);
         let center = self. pos.get_value(fnth);
         let radii  = self.size.get_value(fnth) / 2.;
-        //path.ellipse(center.x, center.y, radii.x, radii.y);   return path;
+        //path.ellipse(center, radii);  return path;
 
         //  Approximate a circle with cubic Bézier curves
         //  https://spencermortensen.com/articles/bezier-circle/
         let tangent = radii * 0.5519;   // a magic number
         let (elt, tlt) = (center - radii, center - tangent);
         let (erb, trb) = (center + radii, center + tangent);
-        path.move_to(center.x, elt.y);
+        path.move_to((center.x, elt.y).into());
 
         if self.base.is_ccw() {
-            path.bezier_to(tlt.x, elt.y, elt.x, tlt.y, elt.x, center.y);
-            path.bezier_to(elt.x, trb.y, tlt.x, erb.y, center.x, erb.y);
-            path.bezier_to(trb.x, erb.y, erb.x, trb.y, erb.x, center.y);
-            path.bezier_to(erb.x, tlt.y, trb.x, elt.y, center.x, elt.y);
+            path.cubic_to((tlt.x, elt.y).into(),
+                          (elt.x, tlt.y).into(), (elt.x, center.y).into());
+            path.cubic_to((elt.x, trb.y).into(),
+                          (tlt.x, erb.y).into(), (center.x, erb.y).into());
+            path.cubic_to((trb.x, erb.y).into(),
+                          (erb.x, trb.y).into(), (erb.x, center.y).into());
+            path.cubic_to((erb.x, tlt.y).into(),
+                          (trb.x, elt.y).into(), (center.x, elt.y).into());
         } else {
-            path.bezier_to(trb.x, elt.y, erb.x, tlt.y, erb.x, center.y);
-            path.bezier_to(erb.x, trb.y, trb.x, erb.y, center.x, erb.y);
-            path.bezier_to(tlt.x, erb.y, elt.x, trb.y, elt.x, center.y);
-            path.bezier_to(elt.x, tlt.y, tlt.x, elt.y, center.x, elt.y);
+            path.cubic_to((trb.x, elt.y).into(),
+                          (erb.x, tlt.y).into(), (erb.x, center.y).into());
+            path.cubic_to((erb.x, trb.y).into(),
+                          (trb.x, erb.y).into(), (center.x, erb.y).into());
+            path.cubic_to((tlt.x, erb.y).into(),
+                          (elt.x, trb.y).into(), (elt.x, center.y).into());
+            path.cubic_to((elt.x, tlt.y).into(),
+                          (tlt.x, elt.y).into(), (center.x, elt.y).into());
         }   path.close();   path
     }
 }
 
 impl PathFactory for FreePath {
-    fn to_path(&self, fnth: f32) -> VGPath {
+    fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
         if !self.base.is_ccw() { return self.shape.to_path(fnth); }
         let curv = self.shape.get_value(fnth);
         debug_assert!(curv.vp.len() == curv.it.len() &&
                       curv.it.len() == curv.ot.len() && !curv.vp.is_empty());
 
-        let pt = curv.vp.last().unwrap();
-        let mut path = VGPath::new();   path.move_to(pt.x, pt.y);
+        let n = curv.vp.len();
+        let pt = *curv.vp.last().unwrap();
+        let mut path = PB::new(2 + n as u32);   path.move_to(pt);
 
-        for ((cvp, cit), (lvp, lot)) in
+        for ((&cvp, &cit), (&lvp, &lot)) in
             curv.vp.iter().zip(curv.it.iter()).rev().skip(1).zip(
             curv.vp.iter().zip(curv.ot.iter()).rev()) {
-            path.bezier_to( lvp.x + lot.x, lvp.y + lot.y,
-                            cvp.x + cit.x, cvp.y + cit.y, cvp.x, cvp.y);
+            path.cubic_to(lvp + lot, cvp + cit, cvp);
         }
-        /* let mut i = curv.vp.len() - 1;
-        while 0 < i { let (j, pt) = (i - 1, &curv.vp[i]);
-            path.bezier_to(curv.vp[j].x + curv.ot[j].x, curv.vp[j].y + curv.ot[j].y,
-                    pt.x + curv.it[i].x, pt.y + curv.it[i].y, pt.x, pt.y);  i -= 1; } */
+        /* let mut i = n - 1;
+        while 0 < i { let (j, pt) = (i - 1, curv.vp[i]);
+            path.cubic_to(curv.vp[j] + curv.ot[j], pt + curv.it[i], pt);    i -= 1; } */
 
-        if  curv.closed {  let j = curv.it.len() - 1;
-            path.bezier_to(curv.vp[0].x + curv.ot[0].x, curv.vp[0].y + curv.ot[0].y,
-                pt.x + curv.it[j].x, pt.y + curv.it[j].y, pt.x, pt.y);
+        if  curv.closed {  let j = n - 1;
+            path.cubic_to(curv.vp[0] + curv.ot[0], pt + curv.it[j], pt);
             path.close();
         }   path
     }
 }
 
 impl PathFactory for ShapeProperty {    // for mask
-    fn to_path(&self, fnth: f32) -> VGPath {
+    fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
         let curv = self.get_value(fnth);
         debug_assert!(curv.vp.len() == curv.it.len() &&
                       curv.it.len() == curv.ot.len() && !curv.vp.is_empty());
 
-        let pt = curv.vp.first().unwrap(); //&curv.vp[0];
-        let mut path = VGPath::new();   path.move_to(pt.x, pt.y);
+        let n = curv.vp.len();
+        let pt = *curv.vp.first().unwrap(); //curv.vp[0];
+        let mut path = PB::new(2 + n as u32);   path.move_to(pt);
 
         /* let _ = curv.vp.iter().zip(curv.it.iter()).cycle().skip(1).take( //.rev()
                 curv.vp.len() - if curv.closed { 0 } else { 1 }).zip(
                 curv.vp.iter().zip(curv.ot.iter())); */
 
-        for ((cvp, cit), (lvp, lot)) in
+        for ((&cvp, &cit), (&lvp, &lot)) in
             curv.vp.iter().zip(curv.it.iter()).skip(1).zip(
             curv.vp.iter().zip(curv.ot.iter())) {
-            path.bezier_to( lvp.x + lot.x, lvp.y + lot.y,
-                            cvp.x + cit.x, cvp.y + cit.y, cvp.x, cvp.y);
+            path.cubic_to(lvp + lot, cvp + cit, cvp);
         }
-        /* for i in 1..curv.vp.len() { let (j, pt) = (i - 1, &curv.vp[i]);
-            path.bezier_to(curv.vp[j].x + curv.ot[j].x, curv.vp[j].y + curv.ot[j].y,
-                    pt.x + curv.it[i].x, pt.y + curv.it[i].y, pt.x, pt.y); } */
+        /* for i in 1..n { let (j, pt) = (i - 1, &curv.vp[i]);
+            path.cubic_to(curv.vp[j] + curv.ot[j], pt + curv.it[i], pt); } */
 
-        if  curv.closed {  let j = curv.ot.len() - 1;
-            path.bezier_to(curv.vp[j].x + curv.ot[j].x, curv.vp[j].y + curv.ot[j].y,
-                pt.x + curv.it[0].x, pt.y + curv.it[0].y, pt.x, pt.y);
+        if  curv.closed {  let j = n - 1;
+            path.cubic_to(curv.vp[j] + curv.ot[j], pt + curv.it[0], pt);
             path.close();
         }   path
     }
 }
+
