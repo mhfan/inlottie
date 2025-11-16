@@ -546,7 +546,7 @@ impl From<[f32; 4]> for CubicBezierEasing {
 
 pub trait Lerp { fn lerp(&self, other: &Self, t: f32) -> Self;  // Linear intERPolation
     fn bezc(&self, _: &Self, _: f32, _: &PositionExtra) -> Self
-        where Self: std::marker::Sized { unreachable!() }       // Cubic Bezier interpolation
+        where Self: Sized { unreachable!() }    // Cubic Bezier interpolation
 }
 
 impl Lerp for f32 {
@@ -560,8 +560,7 @@ impl Lerp for Vec2D {
                 y: self.y + (other.y - self.y) * t, }
     }
 
-    fn bezc(&self, other: &Self, t: f32, extra: &PositionExtra) -> Self
-        where Self: std::marker::Sized {
+    fn bezc(&self, other: &Self, t: f32, extra: &PositionExtra) -> Self {
         /* impl From<&Vec2D> for Coord2 {
             #[inline] fn from(val: &Vec2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
         }   use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
@@ -693,8 +692,8 @@ impl<T: Clone + math::Lerp> AnimatedProperty<T> {
                 }
 
                 let (kf_prev, kf_next) = (kf.as_scalar(), coll[len + 1].as_scalar());
-                if let Some(extra) = &kf.pextra {
-                    //debug_assert!(std::any::TypeId::of::<T>() == TypeId::of::<Vec2D>());
+                if let Some(extra) = &kf.pextra {   //use core::any::TypeId;
+                    //debug_assert!(TypeId::of::<T>() == TypeId::of::<Vec2D>());
                     kf_prev.bezc(kf_next, time, extra)
                 } else { kf_prev.lerp(kf_next, time) }
             }   _ => unreachable!(),
@@ -708,20 +707,53 @@ impl ShapeBase {
     }
 }
 
+impl LayerItem {
+    #[inline] pub fn visual_layer(&self) -> Option<&VisualLayer> {
+        Some(match self {
+            Self::PrecompLayer(layer) => &layer.vl,
+            Self::SolidColor(layer) => &layer.vl,
+            Self::Shape(layer) => &layer.vl,
+
+            Self::Image(layer) => &layer.vl,
+            Self::Text(layer) => &layer.vl,
+            Self::Data(layer) => &layer.vl,
+
+            Self::Null(null) => null,
+            Self::Audio(_) | Self::Camera(_) => return None,
+        })
+    }
+}
+
+impl VisualLayer {
+    #[inline] pub fn should_hide(&self, fnth: f32) -> bool {
+        self.base.hd || fnth < self.base.ip || self.base.op <= fnth || fnth < self.base.st
+    }
+}
+
 impl FillStrokeGrad {
-    pub fn get_dash(&self, fnth: f32) -> (f32, Vec<f32>) {
-        let (mut offset, mut gap, mut dpat) = (0., None, vec![]);
+    pub fn get_dash(&self, fnth: f32) -> Vec<f32> {
+        let (mut dpat, mut sum) = (vec![], 0.);
         if let FillStroke::Stroke(stroke) = &self.base {
+            let len = stroke.dash.len();
+            if  len < 3 { return dpat }
+
+            dpat.reserve(len);   dpat.push(0.);
             stroke.dash.iter().for_each(|sd| {
                 let value = sd.value.get_value(fnth);
+                match sd.r#type {   // Offset should be at end of the array?
+                    StrokeDashType::Offset => dpat[0] = value,
+                    StrokeDashType::Length | StrokeDashType::Gap => {
+                        if value < 0. { dpat.clear(); return }
+                        dpat.push(value);   sum += value;
 
-                match sd.r#type {
-                    StrokeDashType::Offset => { offset =  value; }
-                    StrokeDashType::Length => { dpat.push(value);
-                        if let Some(gap) = gap { dpat.push(gap); } gap = None; }
-                    StrokeDashType::Gap    => { gap = Some(value); }
-                }});    if let Some(gap) = gap { dpat.push(gap); }
-        }   (offset, dpat)
+                        debug_assert!(dpat.len() % 2 ==
+                            if matches!(sd.r#type, StrokeDashType::Gap) { 1 } else { 0 });
+                    }   // Length and Gap should be alternating and positive
+                }});
+        }
+
+        if sum < f32::EPSILON { dpat.clear(); }   dpat
+        //if dpat.len() % 2 == 0 { dpat.extend_from_slice(&dpat[1..].clone()); }
     }
 }
 

@@ -215,23 +215,26 @@ impl FillStrokeGrad {
                 VGPaint::color(VGColor::rgba(color.r, color.g, color.b, (opacity * 255.) as _))
             }
             ColorGrad::Gradient(grad) => {
-                let sp = grad.sp.get_value(fnth);
-                let ep = grad.ep.get_value(fnth);
-
+                let (sp, ep) = (grad.sp.get_value(fnth), grad.ep.get_value(fnth));
                 let stops = grad.stops.cl.get_value(fnth).0;
                 debug_assert!(stops.len() as u32 == grad.stops.cnt);
+
                 if matches!(grad.r#type, GradientType::Radial) {
-                    /* let hl = grad.hl.as_ref().map_or(0.,
-                        |hl| hl.get_value(fnth) * radius / 100.);
-                    let ha = grad.ha.as_ref().map_or(0., |ha|
-                        ha.get_value(fnth).to_radians()) + fast_atan2(dy, dx);
+                    let (dx, dy) = (ep.x - sp.x, ep.y - sp.y);
+                    let radius = dx.hypot(dy);
 
-                    ctx.createRadialGradient(sp.x + ha.cos() * hl, sp.y + ha.sin() * hl, 0,
-                        sp.x, sp.y, (ep.x - sp.x).hypot(ep.y - sp.y));
-                        // XXX: femtovg::Paint doesn't support focal? */
+                    let _hl = grad.hl.as_ref().map_or(0., |hl|
+                        hl.get_value(fnth).clamp(f32::EPSILON - 100.,
+                            100. - f32::EPSILON) * radius / 100.);
+                    let _ha = grad.ha.as_ref().map_or(0., |ha|
+                        ha.get_value(fnth).to_radians()) + math::fast_atan2(dy, dx);
 
-                         VGPaint::radial_gradient_stops(sp.x, sp.y, 1., // 0.
-                            (ep.x - sp.x).hypot(ep.y - sp.y), convert_stops(&stops, opacity))
+                    //ctx.createRadialGradient(sp.x, sp.y, 0.,  // XXX:
+                    //  sp.x + ha.cos() * hl, sp.y + ha.sin() * hl, radius);
+
+                    // Lottie doesn't have any focal radius concept
+                         VGPaint::radial_gradient_stops(sp.x, sp.y, 0., radius,
+                            convert_stops(&stops, opacity))
                 } else { VGPaint::linear_gradient_stops(sp.x, sp.y, ep.x, ep.y,
                             convert_stops(&stops, opacity))
                 }
@@ -418,7 +421,7 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
             let mut trfm  = vl.ks.to_matrix(fnth, vl.ao);
             if let Some(pid) = vl.base.parent {
                 let ptm = layers.iter().find_map(|layer|
-                    get_visual_layer(layer).and_then(|vl|
+                    layer.visual_layer().and_then(|vl|
                         vl.base.ind.and_then(|ind| if ind == pid {
                             Some(vl.ks.to_matrix(fnth, vl.ao)) } else { None })));
 
@@ -428,28 +431,9 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
             };  trfm
         };
 
-        #[inline] fn get_visual_layer(layer: &LayerItem) -> Option<&VisualLayer> {
-            Some(match layer {
-                LayerItem::PrecompLayer(layer) => &layer.vl,
-                LayerItem::SolidColor(layer) => &layer.vl,
-                LayerItem::Shape(layer) => &layer.vl,
-
-                LayerItem::Image(layer) => &layer.vl,
-                LayerItem::Text(layer) => &layer.vl,
-                LayerItem::Data(layer) => &layer.vl,
-
-                LayerItem::Null(null) => null,
-                LayerItem::Audio(_) | LayerItem::Camera(_) => return None,
-            })
-        }
-
-        fn need_to_hide(vl: &VisualLayer, fnth: f32) -> bool {
-            vl.base.hd || fnth < vl.base.ip || vl.base.op <= fnth || fnth < vl.base.st
-        }
-
         let last_trfm = canvas.transform();
         for layer in layers.iter().rev() { match layer {
-            LayerItem::Shape(shpl) => if !need_to_hide(&shpl.vl, fnth) {
+            LayerItem::Shape(shpl) => if !shpl.vl.should_hide(fnth) {
                 let mut trfm = get_matrix(&shpl.vl, fnth);
                 canvas.set_transform(&trfm.0);
                 //canvas.set_global_alpha(trfm.1);
@@ -469,7 +453,7 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
 
                 canvas.reset_transform();    canvas.set_transform(&last_trfm);
             }
-            LayerItem::PrecompLayer(pcl) => if !need_to_hide(&pcl.vl, fnth) {
+            LayerItem::PrecompLayer(pcl) => if !pcl.vl.should_hide(fnth) {
                 if let Some(pcomp) = self.assets.iter().find_map(|asset|
                     match asset { AssetItem::Precomp(pcomp)
                         if pcomp.base.id == pcl.rid => Some(pcomp), _ => None }) {
@@ -490,7 +474,7 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
                     canvas.reset_transform();    canvas.set_transform(&last_trfm);
                 }   // clipping(pcl.w, pcl.h)?
             }
-            LayerItem::SolidColor(scl) => if !need_to_hide(&scl.vl, fnth) {
+            LayerItem::SolidColor(scl) => if !scl.vl.should_hide(fnth) {
                 let trfm = get_matrix(&scl.vl, fnth);
                 canvas.set_transform(&trfm.0);
 
@@ -543,8 +527,8 @@ fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[Dr
         DrawItem::Style(style, dash) =>
             traverse_shapes(canvas, &draws[0..idx], &|canvas, path| {
                 if let Some(dash) = dash {
-                    if dash.1.is_empty() { canvas.stroke_path(path, style);
-                    } else { canvas.stroke_path(&path_to_dash(path, dash), style); }
+                    if dash.len() < 3 { canvas.stroke_path(path, style);
+                    } else { canvas.stroke_path(&path.make_dash(dash[0], &dash[1..]), style); }
                 } else { canvas.fill_path(path, style); }
             }),
         DrawItem::Group(grp, ts) => {
@@ -748,7 +732,7 @@ fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) -> (Vec<DrawItem
 
 #[derive(Clone)] enum DrawItem { // Graphic Element
     Shape(Box<VGPath>),
-    Style(Box<VGPaint>, Option<(f32, Vec<f32>)>),   // optional stroke dash
+    Style(Box<VGPaint>, Option<Vec<f32>>),  // optional stroke dash (offset and pattern)
     Repli(Vec<DrawItem>, Vec<TM2DwO>), // something like batch Groups
     Group(Vec<DrawItem>, TM2DwO),
 }
