@@ -210,7 +210,7 @@ impl FillStrokeGrad {
 
         let opacity = self.opacity.get_value(fnth) / 100.;
         let mut paint = match &self.grad {
-            ColorGrad::Color(ColorWrapper { color }) => {
+            ColorGrad::Color { color } => {
                 let color = color.get_value(fnth); // RGB indeed
                 VGPaint::color(VGColor::rgba(color.r, color.g, color.b, (opacity * 255.) as _))
             }
@@ -243,7 +243,7 @@ impl FillStrokeGrad {
 
         use femtovg::{FillRule as FRule, LineJoin as LJoin, LineCap as LCap};
         match &self.base {
-            FillStroke::FillRule(FillRuleWrapper { rule }) =>
+            FillStroke::FillRule { rule } =>
                 paint.set_fill_rule(match rule {
                     FillRule::NonZero => FRule::NonZero,
                     FillRule::EvenOdd => FRule::EvenOdd,

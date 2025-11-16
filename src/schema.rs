@@ -488,18 +488,14 @@ pub struct FreePath {  #[serde(flatten)]        pub  base: ShapeBase,
 }
 
 #[derive(Deserialize, Serialize)] #[serde(untagged)]
-pub enum FillStroke { Stroke(Box<BaseStroke>), FillRule(FillRuleWrapper), }
+pub enum FillStroke { Stroke(Box<BaseStroke>), FillRule {
+    #[serde(rename = "r", default)] rule: FillRule,
+}, }
 
 #[derive(Deserialize, Serialize)] #[serde(untagged)]
-pub enum ColorGrad { Color(ColorWrapper), Gradient(Box<Gradient>), }
-
-#[derive(Deserialize, Serialize)] pub struct ColorWrapper {
-    #[serde(rename = "c")] pub color: ColorValue
-}
-
-#[derive(Clone, Copy, Deserialize, Serialize)] pub struct FillRuleWrapper {
-    #[serde(rename = "r", default)] pub rule: FillRule,
-}
+pub enum ColorGrad { Gradient(Box<Gradient>), Color {
+    #[serde(rename = "c")] color: ColorValue,
+}, }
 
 #[derive(Deserialize, Serialize)] pub struct BaseStroke {
     #[serde(rename = "w")] pub width: Value,    // `opacity` was moved out to unify struct
