@@ -7,8 +7,40 @@
 
 use crate::{schema::*, helpers::*, pathm::*};
 
+impl PathBuilder for femtovg::Path {    // TODO: reserve capacity, current_pos
+    #[inline] fn current_pos(&self) -> Option<Vec2D> { todo!() }
+    #[inline] fn new(_capacity: u32) -> Self { Self::new() }
+    #[inline] fn close(&mut self) { self.close() }
+
+    #[inline] fn move_to(&mut self, end: Vec2D) { self.move_to(end.x, end.y) }
+    #[inline] fn line_to(&mut self, end: Vec2D) { self.line_to(end.x, end.y) }
+    #[inline] fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
+        self.bezier_to(ocp.x, ocp.y, icp.x, icp.y, end.x, end.y)
+    }
+    #[inline] fn quad_to(&mut self, cp: Vec2D, end: Vec2D) {
+        self.quad_to(cp.x, cp.y, end.x, end.y)
+    }
+    #[inline] fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
+        self.arc(center.x, center.y, (radii.x + radii.y) / 2.,
+            start as _, sweep as _, femtovg::Solidity::Solid)   // XXX:
+        //self.arc_to(x1, y1, x2, y2, (radii.x + radii.y) / 2.);
+    }
+
+    fn to_kurbo(&self) -> BezPath {   use femtovg::Verb::*;
+        let mut pb = BezPath::with_capacity(self.verbs().count());
+        self.verbs().for_each(|verb|  match verb {
+            MoveTo(x, y) => pb.move_to((x, y)),
+            LineTo(x, y) => pb.line_to((x, y)),
+            BezierTo(ox, oy, ix, iy, x, y) =>
+                pb.curve_to((ox, oy), (ix, iy), (x, y)),
+            Solid | Hole => unreachable!(),
+            Close => pb.close(),
+        }); pb
+    }
+}
+
 impl FillStrokeGrad {
-    fn to_paint(&self, fnth: f32) -> VGPaint {
+    fn to_paint(&self, fnth: f32) -> VGPaint {  // (VGPaint, FSOptions)
         fn convert_stops(stops: &[(f32, RGBA)], opacity: f32) -> Vec<(f32, VGColor)> {
             stops.iter().map(|(offset, rgba)| {
                 let mut color = VGColor::rgba(rgba.r, rgba.g, rgba.b, rgba.a);
@@ -189,6 +221,15 @@ impl Transform {
 
 use femtovg::{Canvas, Renderer, Transform2D as TM2D, CompositeOperation as CompOp,
     Path as VGPath, Paint as VGPaint, Color as VGColor};
+
+pub trait RenderContext {
+    type VGPath: PathBuilder;
+    type VGPaint;   // (VGStyle/VGBrush, FillRule/StrokeOptions(dash))
+    type VGColor;
+
+    fn   fill_path(&mut self, path: &Self::VGPath, paint: &Self::VGPaint);
+    fn stroke_path(&mut self, path: &Self::VGPath, paint: &Self::VGPaint);
+}
 
 impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
     //fn get_duration(&self) -> f32 { (self.op - self.ip) / self.fr }
@@ -486,7 +527,9 @@ struct TrackMatte { mode: MatteMode, mlid: Option<u32>,
 /// calculate transform matrix, convert shapes to paths, modify/change the paths,
 /// and convert style(fill/stroke/gradient) to draw items, recursively
 fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) -> (Vec<DrawItem>, TM2DwO) {
-    let (mut draws, mut trfm) = (vec![], Default::default());
+    let mut draws = Vec::with_capacity(shapes.len());
+    let mut trfm = Default::default();
+
     for shape in shapes.iter() { match shape {
         ShapeItem::Rectangle(rect)    if !rect.base.elem.hd =>
             draws.push(DrawItem::Shape(Box::new(rect.to_path(fnth)))),
@@ -572,23 +615,14 @@ fn get_repeater(mdfr: &Repeater, fnth: f32) -> Vec<TM2DwO> {
 }
 
 fn trim_shapes(mdfr: &TrimPath, draws: &mut [DrawItem], fnth: f32) {
-    fn modify_shapes(draws: &mut [DrawItem], closure: &mut impl FnMut(&mut VGPath)) {
+    fn traverse_shapes(draws: &mut [DrawItem], closure: &mut impl FnMut(&mut VGPath)) {
         draws.iter_mut().for_each(|draw| match draw {
-            DrawItem::Group(grp, _) => modify_shapes(grp, closure),
-            DrawItem::Repli(grp, _) => modify_shapes(grp, closure),
+            DrawItem::Group(grp, _) => traverse_shapes(grp, closure),
+            DrawItem::Repli(grp, _) => traverse_shapes(grp, closure),
             DrawItem::Shape(path) => closure(path),
             _ => (), // skip/ignore Style
         });
     }       // XXX: how to treat repeated shapes?
-
-    fn traverse_shapes(draws: &mut [DrawItem], closure: &mut impl FnMut(&mut VGPath)) {
-        draws.iter_mut().for_each(|draw| match draw {
-            DrawItem::Shape(path) => closure(path),
-            DrawItem::Group(grp, _) => traverse_shapes(grp, closure),
-            DrawItem::Repli(grp, _) => traverse_shapes(grp, closure),
-            _ => (), // skip/ignore Style
-        });
-    }
 
     let offset   = mdfr.offset.get_value(fnth) as f64 / 360.;
     let start    = mdfr. start.get_value(fnth) as f64 / 100.;
@@ -597,13 +631,13 @@ fn trim_shapes(mdfr: &TrimPath, draws: &mut [DrawItem], fnth: f32) {
     let start = (start + offset) % 1.;
 
     if mdfr.multiple.is_some_and(|ml| matches!(ml, TrimMultiple::Simultaneously)) {
-        modify_shapes(draws, &mut |path| *path = trim_path(path.verbs(), start, trim));
-    } else {
+        traverse_shapes(draws, &mut |path| *path = path.trim_path(start, trim));
+    } else {    use kurbo::ParamCurveArclen;
         let (mut idx, mut suml) = (0u32, 0.);
         let (mut lens, mut tri0) = (vec![], 0.);
 
         traverse_shapes(draws, &mut |path| {
-            let len = kurbo::segments(path.verbs().map(convert_path_f2k)).fold(0.,
+            let len = kurbo::segments(path.to_kurbo()).fold(0.,
                 |acc, seg| acc + seg.arclen(ACCURACY_TOLERANCE));
             lens.push(len);     suml += len;
         });
@@ -612,89 +646,29 @@ fn trim_shapes(mdfr: &TrimPath, draws: &mut [DrawItem], fnth: f32) {
         let (start, mut trim) = (suml * start, suml * trim);
         tri0 *= suml;   suml = 0.;
 
-        traverse_shapes(draws, &mut |path: &mut VGPath| { // same logic as in trim_path
+        traverse_shapes(draws, &mut |path| {    // same logic as in trim_path
             let len = lens[idx as usize];   idx += 1;
 
             if suml <= start &&  start < suml + len {   let start = start - suml;
                 if  start + trim < len {
-                    *path = trim_path(path.verbs(), start / len, trim  / len);  trim = 0.;
+                    *path = path.trim_path(start / len, trim  / len);  trim = 0.;
                 } else { trim -= len - start;   let start = start / len;
-                    *path = trim_path(path.verbs(), start, 1. - start);
+                    *path = path.trim_path(start, 1. - start);
                 }
             } else if start < suml && 0. < trim { if trim < len {
-                    *path = trim_path(path.verbs(), 0., (trim / len) as _);     trim = 0.;
+                    *path = path.trim_path(0., (trim / len) as _);     trim = 0.;
                 } else { trim -= len; }
             } else if 0. < tri0 { if tri0 < len {
-                    *path = trim_path(path.verbs(), 0., (tri0 / len) as _);     tri0 = 0.;
+                    *path = path.trim_path(0., (tri0 / len) as _);     tri0 = 0.;
                 } else { tri0 -= len; }
             } else { *path = VGPath::new(); }   suml += len;
         });
     }
 }
 
-use kurbo::{BezPath, ParamCurve, ParamCurveArclen};
-fn trim_path<I: Iterator<Item = Verb>>(path: I, start: f64, mut trim: f64) -> VGPath {
-    // https://lottiefiles.github.io/lottie-docs/scripts/lottie_bezier.js
-    // or use curve_length(curve, merr) and subdivide(t, seg) of flo_curves
-    //let segments = kurbo::segments(path.map(convert_path_f2k));
-    let path = path.map(convert_path_f2k).collect::<BezPath>();
-
-    let (mut tri0, mut suml) = (0., path.segments().fold(0.,
-        |acc, seg| acc + seg.arclen(ACCURACY_TOLERANCE as _)));
-    if 1. < start + trim { tri0 = start + trim - 1.; trim = 1. - start; }
-    let (start, mut trim) = (suml * start, suml * trim);
-    let mut fpath = VGPath::new();  tri0 *= suml;  suml = 0.;
-
-    BezPath::from_path_segments(path.segments().filter_map(|seg| {
-        let len = seg.arclen(ACCURACY_TOLERANCE as _);
-
-        let range = if suml <= start && start < suml + len {
-            let start = start - suml;   let end = start + trim;
-            if  end < len { trim = 0.;      start / len .. end / len
-            } else { trim -= len - start;   start / len .. 1. }
-        } else if start < suml && 0. < trim {
-            if trim < len { let end = trim / len;   trim = 0.;  0.0 .. end
-            } else { trim -= len;   0.0 .. 1. }
-        } else if 0. < tri0 {   // rewound part
-            if tri0 < len { let end = tri0 / len;   tri0 = 0.;  0.0 .. end
-            } else { tri0 -= len;   0.0 .. 1. }
-        } else {     suml += len;   return None };
-        suml += len;    Some(seg.subsegment(range))
-    })).iter().for_each(|el| convert_path_k2f(el, &mut fpath));  fpath
-}
-
 // https://docs.rs/kurbo/latest/kurbo/offset/index.html
 // https://github.com/nical/lyon/blob/main/crates/algorithms/src/walk.rs
 // https://www.reddit.com/r/rust/comments/12do1dq/rendering_text_along_a_curve/
 // https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Element/textPath
-#[allow(unused)] fn walk_along_path() { }
-
-fn path_to_dash(path: &VGPath, dash: &(f32, Vec<f32>)) -> VGPath {
-    let mut npath = VGPath::new();  debug_assert!(dash.1.len() < 5);
-    kurbo::dash(path.verbs().map(convert_path_f2k), dash.0 as _,
-        &dash.1.iter().map(|v| *v as f64).collect::<Vec<_>>())
-        .for_each(|el| convert_path_k2f(el, &mut npath));   npath
-}
-
-use {kurbo::PathEl, femtovg::Verb};
-fn convert_path_f2k(verb: Verb)  -> PathEl { match verb {
-    Verb::MoveTo(x, y) => PathEl::MoveTo((x, y).into()),
-    Verb::LineTo(x, y) => PathEl::LineTo((x, y).into()),
-    Verb::BezierTo(ox, oy, ix, iy, x, y) =>
-        PathEl::CurveTo((ox, oy).into(), (ix, iy).into(), (x, y).into()),
-    Verb::Solid | Verb::Hole => unreachable!(),
-    Verb::Close => PathEl::ClosePath,
-} }
-
-fn convert_path_k2f(elem: PathEl, path: &mut VGPath) { match elem {
-    PathEl::MoveTo(pt) => path.move_to(pt.x as _, pt.y as _),
-    PathEl::LineTo(pt) => path.line_to(pt.x as _, pt.y as _),
-    PathEl::CurveTo(ot, it, pt) =>
-        path.bezier_to(ot.x as _, ot.y as _, it.x as _, it.y as _, pt.x as _, pt.y as _),
-    PathEl::QuadTo(ct, pt) =>
-        path.quad_to(ct.x as _, ct.y as _, pt.x as _, pt.y as _),
-    //    let (ot, it) = (ct + (lp - ct) / 3, ct + (pt - ct) / 3);  // elevating curve order
-    //    path.bezier_to(ot.x as _, ot.y as _, it.x as _, it.y as _, pt.x as _, pt.y as _),
-    PathEl::ClosePath => path.close(),
-} }
+#[allow(unused)] fn walk_along_path() { }   // TODO:
 

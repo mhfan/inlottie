@@ -5,116 +5,165 @@
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use std::f32::consts::PI;
+use core::f32::consts::PI;
 use crate::{schema::*, helpers::*};
 
 #[cfg(feature = "b2d")] use intvg::blend2d::{BLPoint, BLPath};
-#[cfg(feature = "b2d")] impl From<Point> for BLPoint {
-    #[inline] fn from(p: Point) -> Self { (p.x, p.y).into() }
+#[cfg(feature = "b2d")] impl From<Vec2D> for BLPoint {
+    #[inline] fn from(pt: Vec2D) -> Self { (pt.x, pt.y).into() }
 }
 #[cfg(feature = "b2d")] impl PathBuilder for BLPath {
-    #[inline] fn new(capacity: u32) -> Self {   // XXX: different commands vary in size?
+    #[inline] fn new(capacity: u32) -> Self {
         let mut path = Self::new();
-        if capacity != 0 { path.reserve(capacity as _); }   path
-    }
+        if capacity != 0 { path.reserve((2 * capacity) as _); }     path
+    }   // different commands vary in size for BLPath
     #[inline] fn close(&mut self) { self.close() }
-    #[inline] fn current_position(&self) -> Option<Point> {
-        self.get_last_vertex().map(|p| Point { x: p.x() as _, y: p.y() as _ })
+    #[inline] fn current_pos(&self) -> Option<Vec2D> {
+        self.get_last_vertex().map(|pt| Vec2D { x: pt.x() as _, y: pt.y() as _ })
     }
 
-    #[inline] fn move_to(&mut self, end: Point) { self.move_to(end.into()) }
-    #[inline] fn line_to(&mut self, end: Point) { self.line_to(end.into()) }
-    #[inline] fn cubic_to(&mut self, ocp: Point, icp: Point, end: Point) {
+    #[inline] fn move_to(&mut self, end: Vec2D) { self.move_to(end.into()) }
+    #[inline] fn line_to(&mut self, end: Vec2D) { self.line_to(end.into()) }
+    #[inline] fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
         self.cubic_to(ocp.into(), icp.into(), end.into())
     }
-    #[inline] fn quad_to(&mut self, cp: Point, end: Point) {
+    #[inline] fn quad_to(&mut self, cp: Vec2D, end: Vec2D) {
         self.quad_to(cp.into(), end.into())
     }
-    #[inline] fn add_arc(&mut self, center: Point, radii: Vec2D, start: f64, sweep: f64) {
-        self.arc_to(center.into(), radii.into(), start, sweep)
+    #[inline] fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
+        self.arc_to(center.into(), radii.into(), start as _, sweep as _)
     }
     #[inline] fn elliptic_arc_to(&mut self, radii: Vec2D,
-        x_rot: f64, large: bool, sweep: bool, end: Point) {
-        self.elliptic_arc_to(radii.into(), x_rot, large, sweep, end.into())
+        x_rot: f32, large: bool, sweep: bool, end: Vec2D) {
+        self.elliptic_arc_to(radii.into(), x_rot as _, large, sweep, end.into())
+    }
+
+    fn to_kurbo(&self) -> BezPath {   use intvg::blend2d::BLPathItem::*;
+        let mut pb = BezPath::with_capacity(self.get_size() as _);
+        self.iter().for_each(|item| match item {
+            MoveTo(end) => pb.move_to((end.x(), end.y())),
+            LineTo(end) => pb.line_to((end.x(), end.y())),
+            QuadTo(cp, end) =>
+                pb.quad_to((cp.x(), cp.y()), (end.x(), end.y())),
+            CubicTo(ocp, icp, end) =>
+                pb.curve_to((ocp.x(), ocp.y()), (icp.x(), icp.y()), (end.x(), end.y())),
+            Close => pb.close(),
+        }); pb
     }
 }
 
-impl PathBuilder for femtovg::Path {    // TODO: reserve capacity, get_last_point
-    #[inline] fn current_position(&self) -> Option<Point> { todo!() }
-    #[inline] fn new(_capacity: u32) -> Self { Self::new() }
-    #[inline] fn close(&mut self) { self.close() }
-
-    #[inline] fn move_to(&mut self, end: Point) { self.move_to(end.x, end.y) }
-    #[inline] fn line_to(&mut self, end: Point) { self.line_to(end.x, end.y) }
-    #[inline] fn cubic_to(&mut self, ocp: Point, icp: Point, end: Point) {
-        self.bezier_to(ocp.x, ocp.y, icp.x, icp.y, end.x, end.y)
-    }
-    #[inline] fn quad_to(&mut self, cp: Point, end: Point) {
-        self.quad_to(cp.x, cp.y, end.x, end.y)
-    }
-    #[inline] fn add_arc(&mut self, center: Point, radii: Vec2D, start: f64, sweep: f64) {
-        self.arc(center.x, center.y, (radii.x + radii.y) / 2.,
-            start as _, sweep as _, femtovg::Solidity::Solid)   // XXX:
-        //self.arc_to(x1, y1, x2, y2, (radii.x + radii.y) / 2.);
-    }
-    #[inline] fn elliptic_arc_to(&mut self, _radii: Vec2D,
-        _x_rot: f64, _large: bool, _sweep: bool, _end: Point) { todo!() }
+pub use kurbo::BezPath;
+impl From<Vec2D> for kurbo::Vec2 {
+    fn from(val: Vec2D) -> Self { Self::new(val.x as _, val.y as _) }
 }
-
-impl From<Point> for kurbo::Vec2 {
-    fn from(val: Point) -> Self { Self::new(val.x as _, val.y as _) }
-}
-impl PathBuilder for kurbo::BezPath {
+impl PathBuilder for BezPath {
     #[inline] fn new(capacity: u32) -> Self {
         if capacity == 0 { Self::new() } else { Self::with_capacity(capacity as _) }
     }
     #[inline] fn close(&mut self) { self.close_path() }
-    #[inline] fn current_position(&self) -> Option<Point> {
-        self.current_position().map(|p| Point { x: p.x as _, y: p.y as _ })
+    #[inline] fn current_pos(&self) -> Option<Vec2D> {
+        self.current_position().map(|p| Vec2D::from((p.x as _, p.y as _)))
     }
 
-    #[inline] fn move_to(&mut self, end: Point) { self.move_to(end) }
-    #[inline] fn line_to(&mut self, end: Point) { self.line_to(end) }
-    #[inline] fn cubic_to(&mut self, ocp: Point, icp: Point, end: Point) {
+    #[inline] fn move_to(&mut self, end: Vec2D) { self.move_to(end) }
+    #[inline] fn line_to(&mut self, end: Vec2D) { self.line_to(end) }
+    #[inline] fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
         self.curve_to(ocp, icp, end)
     }
-    #[inline] fn quad_to(&mut self, cp: Point, end: Point) { self.quad_to(cp, end) }
-    #[inline] fn add_arc(&mut self, center: Point, radii: Vec2D, start: f64, sweep: f64) {
-        let arc = kurbo::Arc::new(center, radii, start, sweep, 0.);
-            arc.to_cubic_beziers(ACCURACY_TOLERANCE as _,
-            |ocp, icp, end| self.curve_to(ocp, icp, end))
-    }
-    #[inline] fn elliptic_arc_to(&mut self, radii: Vec2D,
-        x_rot: f64, large: bool, sweep: bool, end: Point) {
-        let svg_arc = kurbo::SvgArc {
-            to: end.into(), radii: radii.into(),
-            x_rotation: x_rot, large_arc: large, sweep,
-            from: self.current_position().unwrap_or_default(),
-        };
-        if let Some(arc) = kurbo::Arc::from_svg_arc(&svg_arc) {
-            arc.to_cubic_beziers(ACCURACY_TOLERANCE as _,
-                |ocp, icp, end| self.curve_to(ocp, icp, end))
-        } else { self.line_to(end) }
-    }
+    #[inline] fn quad_to(&mut self, cp: Vec2D, end: Vec2D) { self.quad_to(cp, end) }
+
+    #[inline] fn from_kurbo(path: BezPath) -> Self { path }
+    #[inline] fn to_kurbo(&self) -> BezPath { self.clone() }    // XXX: how to avoid clone?
 }
 
-type Point = Vec2D;
 pub trait PathBuilder {     //type Point; type Path;
     fn new(capacity: u32) -> Self;
     fn close(&mut self);
 
-    fn move_to(&mut self, end: Point);
-    fn line_to(&mut self, end: Point);
-    fn quad_to(&mut self,  cp: Point, end: Point);
-    fn cubic_to(&mut self, ocp: Point, icp: Point, end: Point);
-    fn curve_to(&mut self, ocp: Point, icp: Point, end: Point) {
+    fn move_to(&mut self, end: Vec2D);
+    fn line_to(&mut self, end: Vec2D);
+    fn quad_to(&mut self,  cp: Vec2D, end: Vec2D);  // elevating curve order
+        //self.cubic_to(cp + (current_pos - cp) / 3, cp + (end - cp) / 3, end)
+    fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D);
+    #[inline] fn curve_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
         self.cubic_to(ocp, icp, end)
     }
 
-    fn current_position(&self) -> Option<Point>;
-    fn elliptic_arc_to(&mut self, radii: Vec2D,
-        x_rot: f64, large: bool, sweep: bool, end: Point);  // x_rot in radians
-    fn add_arc(&mut self, center: Point, radii: Vec2D, start: f64, sweep: f64);
+    fn current_pos(&self) -> Option<Vec2D>;
+    fn to_kurbo(&self) -> BezPath;
+
+    #[inline] fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
+        kurbo::Arc::new(center, radii, start as _, sweep as _, 0.)  // in radians
+            .to_cubic_beziers(ACCURACY_TOLERANCE, |ocp, icp, end|
+                self.curve_to(ocp.into(), icp.into(), end.into()))
+    }
+
+    #[inline] fn elliptic_arc_to(&mut self, radii: Vec2D,   // x_rot must be in radians
+        x_rot: f32, large: bool, sweep: bool, end: Vec2D) {
+        let svg_arc = kurbo::SvgArc {
+            to: end.into(), radii: radii.into(),
+            x_rotation: x_rot as _, large_arc: large, sweep,
+            from: self.current_pos().unwrap().into(),   // XXX:
+        };
+        if let Some(arc) = kurbo::Arc::from_svg_arc(&svg_arc) {
+            arc.to_cubic_beziers(ACCURACY_TOLERANCE, |ocp, icp, end|
+                 self.curve_to(ocp.into(), icp.into(), end.into()))
+        } else { self.line_to(end) }
+    }
+
+    fn from_kurbo(path: BezPath) -> Self where Self: Sized {
+        let mut pb = Self::new(path.elements().len() as _);
+
+        #[allow(non_local_definitions)] impl From<kurbo::Point> for Vec2D {
+            fn from(pt: kurbo::Point) -> Self { Self { x: pt.x as _, y: pt.y as _ } }
+        }   use kurbo::PathEl::*;
+        path.iter().for_each(|el| match el {
+            MoveTo(pt) => pb.move_to(pt.into()),
+            LineTo(pt) => pb.line_to(pt.into()),
+            CurveTo(ot, it, pt) =>
+                pb.cubic_to(ot.into(), it.into(), pt.into()),
+            QuadTo(ct, pt) => pb.quad_to(ct.into(), pt.into()),
+            ClosePath => pb.close(),
+        }); pb
+    }
+
+    fn make_dash(&self, offset: f32, pattern: &[f32]) -> Self where Self: Sized {
+        //debug_assert!(pattern.len() < 5);  // refer to kurbo::Dashes?
+        Self::from_kurbo(kurbo::dash(self.to_kurbo().iter(), offset as _,
+            &pattern.iter().map(|v| *v as f64).collect::<Vec<_>>()).collect())
+    }
+
+    // https://lottiefiles.github.io/lottie-docs/scripts/lottie_bezier.js
+    // or use curve_length(curve, merr) and subdivide(t, seg) of flo_curves
+    fn trim_path(&self, start: f64, mut trim: f64) -> Self where Self: Sized {
+        let path = self.to_kurbo();
+
+        use kurbo::{ParamCurve, ParamCurveArclen};
+        //let segments = kurbo::segments(path.iter());
+        let (mut tri0, mut suml) = (0., path.segments().fold(0.,
+            |acc, seg| acc + seg.arclen(ACCURACY_TOLERANCE)));
+        if 1. < start + trim { tri0 = start + trim - 1.; trim = 1. - start; }
+        let (start, mut trim) = (suml * start, suml * trim);
+        tri0 *= suml;  suml = 0.;
+
+        Self::from_kurbo(BezPath::from_path_segments(path.segments().filter_map(|seg| {
+            let len = seg.arclen(ACCURACY_TOLERANCE);
+
+            let range = if suml <= start && start < suml + len {
+                let start = start - suml;   let end = start + trim;
+                if  end < len { trim = 0.;      start / len .. end / len
+                } else { trim -= len - start;   start / len .. 1. }
+            } else if start < suml && 0. < trim {
+                if trim < len { let end = trim / len;   trim = 0.;  0.0 .. end
+                } else { trim -= len;   0.0 .. 1. }
+            } else if 0. < tri0 {   // rewound part
+                if tri0 < len { let end = tri0 / len;   tri0 = 0.;  0.0 .. end
+                } else { tri0 -= len;   0.0 .. 1. }
+            } else {     suml += len;   return None };
+            suml += len;    Some(seg.subsegment(range))
+        })))
+    }
+
 }
 
 pub trait PathFactory { fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB; }
@@ -130,10 +179,10 @@ impl PathFactory for Rectangle {
         // the rectangle defaults as being reversed.
         //let is_ccw = self.base.dir.map_or(true, |d| matches!(d, ShapeDirection::Reversed));
 
-        if radius < ACCURACY_TOLERANCE {
+        if radius < ACCURACY_TOLERANCE as _ {
             let mut path = PB::new(5);
             //path.rect(elt.x, elt.y, size.x, size.y); 	return path;
-            path.move_to((erb.x, elt.y).into());
+            path.move_to((erb.x, elt.y).into());    // from top-right going clockwise
             if self.base.is_ccw() {
                 path.line_to(elt); path.line_to((elt.x, erb.y).into()); path.line_to(erb);
             } else {
@@ -235,7 +284,7 @@ impl PathFactory for Polystar {
         let mut path = PB::new(2 + if is_star { nvp * 2 } else { nvp });
         path.move_to(pt);
 
-        let mut lot = Point::from((pt.x - rp.y * orr, pt.y + rp.x * orr));
+        let mut lot = Vec2D::from((pt.x - rp.y * orr, pt.y + rp.x * orr));
         let mut add_bezier_to = |radius, rr| {
             angle += angle_step;
 
