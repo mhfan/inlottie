@@ -5,7 +5,7 @@
  * Copyright (c) 2024 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::{schema::*, helpers::*, pathm::*};
+use crate::{schema::*, helpers::*, pathm::*, style::*};
 
 impl PathBuilder for femtovg::Path {    // TODO: reserve capacity, current_pos
     #[inline] fn current_pos(&self) -> Option<Vec2D> { todo!() }
@@ -39,12 +39,75 @@ impl PathBuilder for femtovg::Path {    // TODO: reserve capacity, current_pos
     }
 }
 
+impl MatrixConv for femtovg::Transform2D {
+    #[inline] fn identity() -> Self { Self::identity() }
+    #[inline] fn rotate(&mut self, angle: f32) {
+        let mut tm = Self::identity();
+        tm.rotate(angle);   self.multiply(&tm)
+    }
+    #[inline] fn translate(&mut self, pos: Vec2D) {
+        let mut tm = Self::identity();
+        tm.translate(pos.x, pos.y);   self.multiply(&tm);
+    }
+    #[inline] fn skew_x(&mut self, sk: f32) {
+        let mut tm = Self::identity();
+        tm.skew_x(sk);  self.multiply(&tm);
+    }
+
+    #[inline] fn scale(&mut self, sl: Vec2D) {
+        let mut tm = Self::identity();
+        tm.scale(sl.x, sl.y);   self.multiply(&tm);
+    }
+    #[inline] fn multiply(&mut self, tm: &Self) { self.multiply(tm) }
+}
+
+impl From<RGBA> for femtovg::Color {
+    #[inline] fn from(color: RGBA) -> Self { Self::rgba(color.r, color.g, color.b, color.a) }
+}
+impl StyleConv for femtovg::Paint {
+    #[inline] fn solid_color(&mut self, color: RGBA) -> Self { Self::color(color.into()) }
+    #[inline] fn linear_gradient(&mut self, sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
+        Self::linear_gradient_stops(sp.x, sp.y, ep.x, ep.y,
+            stops.iter().map(|&(offset, color)| (offset, color.into())))
+    }
+
+    #[inline] fn radial_gradient(&mut self, cp: Vec2D, _fp: Vec2D, radii: (f32, f32),
+            stops: &[(f32, RGBA)]) -> Self {
+        Self::radial_gradient_stops(cp.x, cp.y, radii.0, radii.1,
+            stops.iter().map(|&(offset, color)| (offset, color.into())))
+    }
+
+    /* fn set_fill_stroke(&mut self, fso: FSOpts) {
+        use femtovg::{FillRule as FRule, LineJoin as LJoin, LineCap as LCap};
+        match fso {
+            FSOpts::Fill(rule) => self.set_fill_rule(match rule {
+                FillRule::NonZero => FRule::NonZero,
+                FillRule::EvenOdd => FRule::EvenOdd,
+            }),
+            FSOpts::Stroke { width, limit, join, cap } => {
+                self.set_line_width (width);
+                self.set_miter_limit(limit);
+                self.set_line_join(match join {
+                    LineJoin::Miter => LJoin::Miter,
+                    LineJoin::Round => LJoin::Round,
+                    LineJoin::Bevel => LJoin::Bevel,
+                });
+                self.set_line_cap (match cap {
+                    LineCap::Butt   => LCap::Butt,
+                    LineCap::Round  => LCap::Round,
+                    LineCap::Square => LCap::Square,
+                });
+            }
+        }
+    } */
+}
+
 impl FillStrokeGrad {
     fn to_paint(&self, fnth: f32) -> VGPaint {  // (VGPaint, FSOptions)
         fn convert_stops(stops: &[(f32, RGBA)], opacity: f32) -> Vec<(f32, VGColor)> {
-            stops.iter().map(|(offset, rgba)| {
+            stops.iter().map(|&(offset, rgba)| {
                 let mut color = VGColor::rgba(rgba.r, rgba.g, rgba.b, rgba.a);
-                color.set_alphaf(opacity * color.a);  (*offset, color)
+                color.set_alphaf(opacity * color.a);  (offset, color)
             }).collect::<Vec<_>>()
         }
 
@@ -164,7 +227,7 @@ impl Transform {
                 let pos = Vec2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) };
                 if  ao.as_bool() {
                     let orient = Vec2D { x: pos.x - sv.x.get_value(fnth - 1.),
-                                                      y: pos.y - sv.y.get_value(fnth - 1.) };
+                                                y: pos.y - sv.y.get_value(fnth - 1.) };
                     ts.rotate(math::fast_atan2(orient.y, orient.x));  trfm.multiply(&ts);
                 }   trfm.multiply(&TM2D::new_translation(pos.x, pos.y));
                 if sv.z.is_some() { unimplemented!(); }
@@ -221,15 +284,6 @@ impl Transform {
 
 use femtovg::{Canvas, Renderer, Transform2D as TM2D, CompositeOperation as CompOp,
     Path as VGPath, Paint as VGPaint, Color as VGColor};
-
-pub trait RenderContext {
-    type VGPath: PathBuilder;
-    type VGPaint;   // (VGStyle/VGBrush, FillRule/StrokeOptions(dash))
-    type VGColor;
-
-    fn   fill_path(&mut self, path: &Self::VGPath, paint: &Self::VGPaint);
-    fn stroke_path(&mut self, path: &Self::VGPath, paint: &Self::VGPaint);
-}
 
 impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
     //fn get_duration(&self) -> f32 { (self.op - self.ip) / self.fr }

@@ -8,50 +8,6 @@
 use core::f32::consts::PI;
 use crate::{schema::*, helpers::*};
 
-#[cfg(feature = "b2d")] use intvg::blend2d::{BLPoint, BLPath};
-#[cfg(feature = "b2d")] impl From<Vec2D> for BLPoint {
-    #[inline] fn from(pt: Vec2D) -> Self { (pt.x, pt.y).into() }
-}
-#[cfg(feature = "b2d")] impl PathBuilder for BLPath {
-    #[inline] fn new(capacity: u32) -> Self {
-        let mut path = Self::new();
-        if capacity != 0 { path.reserve((2 * capacity) as _); }     path
-    }   // different commands vary in size for BLPath
-    #[inline] fn close(&mut self) { self.close() }
-    #[inline] fn current_pos(&self) -> Option<Vec2D> {
-        self.get_last_vertex().map(|pt| Vec2D { x: pt.x() as _, y: pt.y() as _ })
-    }
-
-    #[inline] fn move_to(&mut self, end: Vec2D) { self.move_to(end.into()) }
-    #[inline] fn line_to(&mut self, end: Vec2D) { self.line_to(end.into()) }
-    #[inline] fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
-        self.cubic_to(ocp.into(), icp.into(), end.into())
-    }
-    #[inline] fn quad_to(&mut self, cp: Vec2D, end: Vec2D) {
-        self.quad_to(cp.into(), end.into())
-    }
-    #[inline] fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
-        self.arc_to(center.into(), radii.into(), start as _, sweep as _)
-    }
-    #[inline] fn elliptic_arc_to(&mut self, radii: Vec2D,
-        x_rot: f32, large: bool, sweep: bool, end: Vec2D) {
-        self.elliptic_arc_to(radii.into(), x_rot as _, large, sweep, end.into())
-    }
-
-    fn to_kurbo(&self) -> BezPath {   use intvg::blend2d::BLPathItem::*;
-        let mut pb = BezPath::with_capacity(self.get_size() as _);
-        self.iter().for_each(|item| match item {
-            MoveTo(end) => pb.move_to((end.x(), end.y())),
-            LineTo(end) => pb.line_to((end.x(), end.y())),
-            QuadTo(cp, end) =>
-                pb.quad_to((cp.x(), cp.y()), (end.x(), end.y())),
-            CubicTo(ocp, icp, end) =>
-                pb.curve_to((ocp.x(), ocp.y()), (icp.x(), icp.y()), (end.x(), end.y())),
-            Close => pb.close(),
-        }); pb
-    }
-}
-
 pub use kurbo::BezPath;
 impl From<Vec2D> for kurbo::Vec2 {
     fn from(val: Vec2D) -> Self { Self::new(val.x as _, val.y as _) }
@@ -117,6 +73,7 @@ pub trait PathBuilder {     //type Point; type Path;
         #[allow(non_local_definitions)] impl From<kurbo::Point> for Vec2D {
             fn from(pt: kurbo::Point) -> Self { Self { x: pt.x as _, y: pt.y as _ } }
         }   use kurbo::PathEl::*;
+
         path.iter().for_each(|el| match el {
             MoveTo(pt) => pb.move_to(pt.into()),
             LineTo(pt) => pb.line_to(pt.into()),
@@ -127,10 +84,9 @@ pub trait PathBuilder {     //type Point; type Path;
         }); pb
     }
 
-    fn make_dash(&self, offset: f32, pattern: &[f32]) -> Self where Self: Sized {
-        //debug_assert!(pattern.len() < 5);  // refer to kurbo::Dashes?
+    #[inline] fn make_dash(&self, offset: f32, pattern: &[f32]) -> Self where Self: Sized {
         Self::from_kurbo(kurbo::dash(self.to_kurbo().iter(), offset as _,
-            &pattern.iter().map(|v| *v as f64).collect::<Vec<_>>()).collect())
+            &pattern.iter().map(|&v| v as f64).collect::<Vec<_>>()).collect())
     }
 
     // https://lottiefiles.github.io/lottie-docs/scripts/lottie_bezier.js
