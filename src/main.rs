@@ -220,8 +220,8 @@ impl WinitApp {
             BLFormat::BL_FORMAT_PRGB32);
         let mut blctx = BLContext::new(&mut blimg);
 
-        // blctx.translate(orig.0 as _, orig.1 as _);
-        blctx.scale(scale as _, scale as _);
+        // blctx.translate(orig.into());
+        blctx.scale((scale as _, scale as _));
         self.blctx = Some((blctx, blimg));
     }
 
@@ -240,7 +240,7 @@ impl WinitApp {
             AnimGraph::SVG(tree) => {   //blctx.clear_all();
                 blctx.fill_all_rgba32((99, 99, 99, 255).into());
 
-                let scale = blctx.get_user_transform().get_scaling().0 as f32; // to screen viewport
+                let scale = blctx.get_transform(1).get_scaling().0 as f32; // to screen viewport
                 let mouse = ((self.mouse_pos.0 - loff as f32) / scale,
                                          (self.mouse_pos.1 - topl as f32) / scale);
                 b2d_svg::render_nodes(blctx, mouse, tree.root(), &usvg::Transform::identity());
@@ -554,8 +554,8 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
         let (rw, rh, mut path) = (100., 20., BLPath::new());
         path.add_rect(&(0., 0., rw, rh).into());
 
-        let last_trfm = blctx.reset_transform(None);
-        blctx.translate(pos.0 as _, pos.1 as _);
+        let last_trfm = blctx.get_transform(1);
+        blctx.translate(pos.into());
         blctx.fill_geometry_rgba32(&path, (0, 0, 0, 99).into());  // to clear the exact area?
         path.reset();   path.move_to((0., rh).into());
         for i in 0..self.que.len() {  // self.que[i].min(100.) / 100.
@@ -735,7 +735,7 @@ pub fn blend2d_logo(ctx: &mut BLContext) {
     //let mut img = BLImage::new(480, 480, BLFormat::BL_FORMAT_PRGB32); // 0xAARRGGBB
     ctx.clear_all();     //let mut ctx = BLContext::new(&mut img);
     let mut radial = BLGradient::new(&BLRadialGradientValues::new(
-        (180, 180).into(), (180, 180).into(), 180.0, 0.));
+        (180, 180).into(), (180, 180).into(), (180.0, 0.)));
     radial.add_stop(0.0, 0xFFFFFFFF.into());
     radial.add_stop(1.0, 0xFFFF6F3F.into());
 
@@ -779,7 +779,7 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
             usvg::Paint::RadialGradient(grad) => {
                 let mut radial = BLGradient::new(&BLRadialGradientValues::new(
                     (grad.cx(), grad.cy()).into(), (grad.fx(), grad.fy()).into(),
-                    grad.r().get() as _, 1.));   // XXX: 1./0.
+                    (grad.r().get() as _, 0.)));
                     //(grad.cx() - grad.fx()).hypot(grad.cy() - grad.fy())
                 convert_stops(&mut radial, grad.stops(), opacity);     Box::new(radial)
             }
@@ -854,7 +854,7 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
 
             if  matches!(fpath.hit_test(mouse.into(),
                 BLFillRule::BL_FILL_RULE_NON_ZERO), BLHitTest::BL_HIT_TEST_IN) {
-                blctx.set_stroke_width(2. / blctx.get_user_transform().get_scaling().0);
+                blctx.set_stroke_width(2. / blctx.get_transform(1).get_scaling().0);
                 blctx.stroke_geometry_rgba32(&fpath, (32, 240, 32, 128).into());
             }
         }

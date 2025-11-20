@@ -31,7 +31,7 @@ impl RGBA {
 
 impl<'de> Deserialize<'de> for RGBA {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let v = Vec::<f32>::deserialize(deserializer)?;
+        let v = Vec::<f32>::deserialize(deserializer)?;     // use SmallVec?
         debug_assert!(2 < v.len() && v.len() < 5);
         Ok(Self::new_f32(v[0], v[1], v[2], v.get(3).cloned().unwrap_or(1.)))
     }
@@ -40,7 +40,7 @@ impl<'de> Deserialize<'de> for RGBA {
 impl Serialize for RGBA {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut v = vec![self.r as f32 / 255.,
-            self.g as f32 / 255.0, self.b as f32 / 255.];
+            self.g as f32 / 255.0, self.b as f32 / 255.];   // use SmallVec?
         if  self.a < 255 {  v.push(self.a as f32 / 255.); }    v.serialize(serializer)
     }
 }
@@ -78,7 +78,7 @@ impl From<(f32, f32)> for Vec2D {   // for Point/Size/Position/Scale
 
 impl<'de> Deserialize<'de> for Vec2D {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let v = Vec::<f32>::deserialize(deserializer)?;
+        let v = Vec::<f32>::deserialize(deserializer)?;     // use SmallVec?
         debug_assert!(!v.is_empty() && v.len() < 4); // XXX: ignore extra 3rd value?
         Ok(Self { x: v[0], y: v.get(1).cloned().unwrap_or(0.) })
     }
@@ -91,19 +91,22 @@ impl Serialize for Vec2D {
 
 #[derive(Clone)] pub struct ColorList(pub Vec<(f32, RGBA)>); // (offset, color) for Gradient
 
+impl  core::ops::Deref for ColorList {  type Target = [(f32, RGBA)];
+    #[inline] fn deref(&self) -> &Self::Target { &self.0 }
+}
+
 impl<'de> Deserialize<'de> for ColorList {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let data = Vec::<f32>::deserialize(deserializer)?;
-        let len = data.len() as u32;
+        let len = data.len();   let cnt = len / 6;  // XXX:
 
-        let cnt = (len / 6) as usize; // XXX:
-        let cnt = if len.is_multiple_of(6) && !(len.is_multiple_of(4) && (0..cnt).any(|i|
-            data[i * 4] != data[cnt * 4 + i * 2])) { cnt as u32 } else { len / 4 };
+        let cnt = if len.is_multiple_of(6) && !(len.is_multiple_of(4) && (0..cnt)
+            .any(|i| data[i * 4] != data[cnt * 4 + i * 2])) { cnt } else { len / 4 };
 
         Ok(Self(if len == cnt * 4 { // RGB color
             data.chunks(4).map(|chunk| (chunk[0],
                 RGBA::new_f32(chunk[1], chunk[2], chunk[3], 1.))).collect()
-        } else  if len == cnt * (4 + 2) { let cnt = (cnt * 4) as usize; // RGBA color
+        } else  if len == cnt * (4 + 2) {   let cnt = cnt * 4;  // RGBA color
             data[0..cnt].chunks(4).zip(data[cnt..].chunks(2))
                 .map(|(chunk, opacity)| (chunk[0], // == opacity[0]
                 RGBA::new_f32(chunk[1], chunk[2], chunk[3], opacity[1]))).collect()
@@ -117,13 +120,13 @@ impl<'de> Deserialize<'de> for ColorList {
 
 impl Serialize for ColorList {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut data = self.0.iter().flat_map(|(offset, color)|
-            vec![*offset, color.r as f32 / 255., color.g as f32 / 255.,
-                          color.b as f32 / 255.]).collect::<Vec<_>>();
+        let mut data = self.0.iter().flat_map(|&(offset, color)|
+            [offset, color.r as f32 / 255., color.g as f32 / 255.,
+                     color.b as f32 / 255.]).collect::<Vec<_>>();
 
-        if  self.0.iter().any(|(_, color)| color.a < 255) {
-            data.extend(self.0.iter().flat_map(|(offset, color)|
-                vec![*offset, color.a as f32 / 255.]));
+        if  self.0.iter().any(|&(_, color)| color.a < 255) {
+            data.extend(self.0.iter().flat_map(|&(offset, color)|
+                [offset, color.a as f32 / 255.]));
         }   data.serialize(serializer)
     }
 }

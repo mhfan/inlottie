@@ -150,9 +150,9 @@ pub fn to_stroke(stroke: &usvg::Stroke) -> Stroke {
         }).with_miter_limit(stroke.miterlimit().get() as _);
 
     if let Some(dash_array) = stroke.dasharray() {
-        conv_stroke = conv_stroke.with_dashes(stroke.dashoffset() as _,
-            dash_array.iter().map(|x| *x as f64));
-    }   conv_stroke
+        conv_stroke.with_dashes(stroke.dashoffset() as _,
+            dash_array.iter().map(|&x| x as f64))
+    } else { conv_stroke }
 }
 
 pub fn to_bez_path(path: &usvg::Path) -> BezPath {
