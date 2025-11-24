@@ -65,110 +65,16 @@ impl From<RGBA> for femtovg::Color {
     #[inline] fn from(color: RGBA) -> Self { Self::rgba(color.r, color.g, color.b, color.a) }
 }
 impl StyleConv for femtovg::Paint {
-    #[inline] fn solid_color(&mut self, color: RGBA) -> Self { Self::color(color.into()) }
-    #[inline] fn linear_gradient(&mut self, sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
+    #[inline] fn solid_color(color: RGBA) -> Self { Self::color(color.into()) }
+    #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
         Self::linear_gradient_stops(sp.x, sp.y, ep.x, ep.y,
             stops.iter().map(|&(offset, color)| (offset, color.into())))
     }
 
-    #[inline] fn radial_gradient(&mut self, cp: Vec2D, _fp: Vec2D, radii: (f32, f32),
+    #[inline] fn radial_gradient(cp: Vec2D, _fp: Vec2D, radii: (f32, f32),
             stops: &[(f32, RGBA)]) -> Self {
         Self::radial_gradient_stops(cp.x, cp.y, radii.0, radii.1,
             stops.iter().map(|&(offset, color)| (offset, color.into())))
-    }
-
-    /* fn set_fill_stroke(&mut self, fso: FSOpts) {
-        use femtovg::{FillRule as FRule, LineJoin as LJoin, LineCap as LCap};
-        match fso {
-            FSOpts::Fill(rule) => self.set_fill_rule(match rule {
-                FillRule::NonZero => FRule::NonZero,
-                FillRule::EvenOdd => FRule::EvenOdd,
-            }),
-            FSOpts::Stroke { width, limit, join, cap } => {
-                self.set_line_width (width);
-                self.set_miter_limit(limit);
-                self.set_line_join(match join {
-                    LineJoin::Miter => LJoin::Miter,
-                    LineJoin::Round => LJoin::Round,
-                    LineJoin::Bevel => LJoin::Bevel,
-                });
-                self.set_line_cap (match cap {
-                    LineCap::Butt   => LCap::Butt,
-                    LineCap::Round  => LCap::Round,
-                    LineCap::Square => LCap::Square,
-                });
-            }
-        }
-    } */
-}
-
-impl FillStrokeGrad {
-    fn to_paint(&self, fnth: f32) -> VGPaint {  // (VGPaint, FSOptions)
-        fn convert_stops(stops: &[(f32, RGBA)], opacity: f32) -> Vec<(f32, VGColor)> {
-            stops.iter().map(|&(offset, rgba)| {
-                let mut color = VGColor::rgba(rgba.r, rgba.g, rgba.b, rgba.a);
-                color.set_alphaf(opacity * color.a);  (offset, color)
-            }).collect::<Vec<_>>()
-        }
-
-        let opacity = self.opacity.get_value(fnth) / 100.;
-        let mut paint = match &self.grad {
-            ColorGrad::Color { color } => {
-                let color = color.get_value(fnth); // RGB indeed
-                VGPaint::color(VGColor::rgba(color.r, color.g, color.b, (opacity * 255.) as _))
-            }
-            ColorGrad::Gradient(grad) => {
-                let (sp, ep) = (grad.sp.get_value(fnth), grad.ep.get_value(fnth));
-                let stops = grad.stops.cl.get_value(fnth).0;
-                debug_assert!(stops.len() as u32 == grad.stops.cnt);
-
-                if matches!(grad.r#type, GradientType::Radial) {
-                    let (dx, dy) = (ep.x - sp.x, ep.y - sp.y);
-                    let radius = dx.hypot(dy);
-
-                    let _hl = grad.hl.as_ref().map_or(0., |hl|
-                        hl.get_value(fnth).clamp(f32::EPSILON - 100.,
-                            100. - f32::EPSILON) * radius / 100.);
-                    let _ha = grad.ha.as_ref().map_or(0., |ha|
-                        ha.get_value(fnth).to_radians()) + math::fast_atan2(dy, dx);
-
-                    //ctx.createRadialGradient(sp.x, sp.y, 0.,  // XXX:
-                    //  sp.x + ha.cos() * hl, sp.y + ha.sin() * hl, radius);
-
-                    // Lottie doesn't have any focal radius concept
-                         VGPaint::radial_gradient_stops(sp.x, sp.y, 0., radius,
-                            convert_stops(&stops, opacity))
-                } else { VGPaint::linear_gradient_stops(sp.x, sp.y, ep.x, ep.y,
-                            convert_stops(&stops, opacity))
-                }
-            }
-        };
-
-        use femtovg::{FillRule as FRule, LineJoin as LJoin, LineCap as LCap};
-        match &self.base {
-            FillStroke::FillRule { rule } =>
-                paint.set_fill_rule(match rule {
-                    FillRule::NonZero => FRule::NonZero,
-                    FillRule::EvenOdd => FRule::EvenOdd,
-                }),
-            FillStroke::Stroke(stroke) => {
-                paint.set_line_width (stroke.width.get_value(fnth));
-                paint.set_miter_limit(stroke.ml2.as_ref().map_or(stroke.ml,
-                    |ml| ml.get_value(fnth)));
-
-                // stroke.dash is handled separately
-                paint.set_line_join(match stroke.lj {
-                    LineJoin::Miter => LJoin::Miter,
-                    LineJoin::Round => LJoin::Round,
-                    LineJoin::Bevel => LJoin::Bevel,
-                });
-                paint.set_line_cap (match stroke.lc {
-                    LineCap::Butt   => LCap::Butt,
-                    LineCap::Round  => LCap::Round,
-                    LineCap::Square => LCap::Square,
-                });
-            }
-        }       paint
     }
 }
 
@@ -279,6 +185,34 @@ impl Transform {
 
         trfm.multiply(&TM2D::new_translation(pos.x * offset + anchor.x,
                                              pos.y * offset + anchor.y));   trfm
+    }
+}
+
+#[derive(Clone)] pub struct TM2DwO(TM2D, f32);
+impl Default for TM2DwO { fn default() -> Self { Self(TM2D::identity(), 1.) } }
+impl TM2DwO {
+    #[inline] fn multiply(&mut self, other: &TM2DwO) {
+        self.0  .multiply(&other.0);  self.1 *= other.1;
+    }
+}
+
+impl Repeater {
+    pub fn get_matrix(&self, fnth: f32) -> Vec<TM2DwO> {
+        let mut opacity = self.tr.so.as_ref().map_or(1.,
+            |so| so.get_value(fnth) / 100.);
+        let offset = self.offset.as_ref().map_or(0.,
+            |offset| offset.get_value(fnth));   // range: [-1, 2]?
+
+        let cnt = self.cnt.get_value(fnth) as u32;
+        let delta = if 1 < cnt { (self.tr.eo.as_ref().map_or(1., |eo|
+            eo.get_value(fnth) / 100.) - opacity) / (cnt - 1) as f32 } else { 0. };
+        let mut coll = Vec::with_capacity(cnt as usize);
+
+        for i in 0..cnt {
+            let i = if matches!(self.order, Composite::Below) { i } else { cnt - 1 - i };
+            coll.push(TM2DwO(self.tr.trfm.to_repeat_trfm(fnth, offset + i as f32), opacity));
+            opacity += delta;
+        }   coll
     }
 }
 
@@ -405,20 +339,20 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
 }
 
 fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[DrawItem]) {
-    fn traverse_shapes<T: Renderer>(canvas:  &mut Canvas<T>,
-        draws: &[DrawItem], render: &impl Fn(&mut Canvas<T>, &VGPath)) {
+    fn traverse_shapes<T: Renderer>(canvas: &mut Canvas<T>,
+        draws: &[DrawItem], style: &RefCell<(VGPaint, FSOpts)>) {
 
         let last_trfm = canvas.transform();
         draws.iter().rev().for_each(|draw| match draw {
-            DrawItem::Shape(path) => render(canvas, path),
+            DrawItem::Shape(path) => fill_stroke(canvas, path, style),
 
             DrawItem::Group(grp, ts) => {
-                    canvas.set_transform(&ts.0);    traverse_shapes(canvas, grp, render);
+                    canvas.set_transform(&ts.0);    traverse_shapes(canvas, grp, style);
                     canvas.reset_transform();       canvas.set_transform(&last_trfm);
             }   // apply transform in group-wise rather path-wise
             DrawItem::Repli(grp, rep) =>
                 rep.iter().rev().for_each(|ts| {
-                    canvas.set_transform(&ts.0);    traverse_shapes(canvas, grp, render);
+                    canvas.set_transform(&ts.0);    traverse_shapes(canvas, grp, style);
                     canvas.reset_transform();       canvas.set_transform(&last_trfm);
                 }),
             _ => (), // skip/ignore Style
@@ -427,13 +361,8 @@ fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[Dr
 
     let last_trfm = canvas.transform();
     draws.iter().enumerate().rev().for_each(|(idx, draw)| match draw {
-        DrawItem::Style(style, dash) =>
-            traverse_shapes(canvas, &draws[0..idx], &|canvas, path| {
-                if let Some(dash) = dash {
-                    if dash.len() < 3 { canvas.stroke_path(path, style);
-                    } else { canvas.stroke_path(&path.make_dash(dash[0], &dash[1..]), style); }
-                } else { canvas.fill_path(path, style); }
-            }),
+        DrawItem::Style(style) =>
+            traverse_shapes(canvas, &draws[0..idx], style),
         DrawItem::Group(grp, ts) => {
                 canvas.set_transform(&ts.0);
                 let mut ts = ts.clone();    ts.multiply(trfm);
@@ -457,6 +386,41 @@ fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[Dr
         }
         _ => (), // skip/ignore Shape
     });
+}
+
+fn fill_stroke<T: Renderer>(canvas: &mut Canvas<T>,
+    path: &VGPath, style: &RefCell<(VGPaint, FSOpts)>) {
+    use femtovg::{FillRule as FFR, LineCap as FLC, LineJoin as FLJ};
+
+    match &style.borrow().1 {
+        FSOpts::Fill(rule) => {
+            let paint = &mut style.borrow_mut().0;
+            paint.set_fill_rule(match rule {
+                FillRule::EvenOdd => FFR::EvenOdd,
+                FillRule::NonZero => FFR::NonZero,
+            }); canvas.fill_path(path, paint);
+        }
+
+        FSOpts::Stroke { width, limit,
+            join, cap, dash } => {
+            let paint = &mut style.borrow_mut().0;
+            paint.set_line_width (*width);
+            paint.set_miter_limit(*limit);
+
+            paint.set_line_join(match join {
+                LineJoin::Miter => FLJ::Miter, LineJoin::Round => FLJ::Round,
+                LineJoin::Bevel => FLJ::Bevel,
+            });
+            paint.set_line_cap(match cap {
+                LineCap::Butt   => FLC::Butt,   LineCap::Round => FLC::Round,
+                LineCap::Square => FLC::Square,
+            });
+
+            if dash.len() < 3 { canvas.stroke_path(path, paint); } else {
+                canvas.stroke_path(&path.make_dash(dash[0], &dash[1..]), paint);
+            }
+        }
+    }
 }
 
 use femtovg::{PixelFormat, ImageFlags, RenderTarget};
@@ -596,15 +560,13 @@ fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) -> (Vec<DrawItem
 
         // styles affect on all preceding paths ever before
         ShapeItem::Fill(fill)   if !fill.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(fill.to_paint(fnth)), None)),
+            draws.push(DrawItem::Style(Box::new(fill.to_style(fnth).into()))),
         ShapeItem::Stroke(line) if !line.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(line.to_paint(fnth)),
-                Some(line.get_dash(fnth)))),
+            draws.push(DrawItem::Style(Box::new(line.to_style(fnth).into()))),
         ShapeItem::GradientFill(grad)   if !grad.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(grad.to_paint(fnth)), None)),
+            draws.push(DrawItem::Style(Box::new(grad.to_style(fnth).into()))),
         ShapeItem::GradientStroke(grad) if !grad.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(grad.to_paint(fnth)),
-                Some(grad.get_dash(fnth)))),
+            draws.push(DrawItem::Style(Box::new(grad.to_style(fnth).into()))),
         ShapeItem::NoStyle(_) => eprintln!("Nothing to do here?"),
 
         ShapeItem::Group(group) if !group.elem.hd => {
@@ -615,9 +577,9 @@ fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) -> (Vec<DrawItem
         ShapeItem::Repeater(mdfr) if !mdfr.elem.hd => {
             let grp = draws;    draws = vec![];
             // repeat preceding (Shape/Style) items into new Groups?
-            //get_repeater(mdfr, fnth).into_iter().for_each(|ts|
+            //mdfr.get_matrix(fnth).into_iter().for_each(|ts|
             //    draws.push(DrawItem::Group(grp.clone(), ts)));
-            draws.push(DrawItem::Repli(grp, get_repeater(mdfr, fnth)));
+            draws.push(DrawItem::Repli(grp, mdfr.get_matrix(fnth)));
         }
 
         // other modifiers usually just affect on all preceding paths ever before
@@ -635,37 +597,12 @@ fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) -> (Vec<DrawItem
     } }     (draws, trfm)
 }
 
-#[derive(Clone)] enum DrawItem { // Graphic Element
+use core::cell::RefCell;
+enum DrawItem {     // Graphic Element
     Shape(Box<VGPath>),
-    Style(Box<VGPaint>, Option<Vec<f32>>),  // optional stroke dash (offset and pattern)
+    Style(Box<RefCell<(VGPaint, FSOpts)>>),
     Repli(Vec<DrawItem>, Vec<TM2DwO>), // something like batch Groups
     Group(Vec<DrawItem>, TM2DwO),
-}
-
-#[derive(Clone)] struct TM2DwO(TM2D, f32);
-impl Default for TM2DwO { fn default() -> Self { Self(TM2D::identity(), 1.) } }
-impl TM2DwO {
-    #[inline] fn multiply(&mut self, other: &TM2DwO) {
-        self.0  .multiply(&other.0);  self.1 *= other.1;
-    }
-}
-
-fn get_repeater(mdfr: &Repeater, fnth: f32) -> Vec<TM2DwO> {
-    let mut opacity = mdfr.tr.so.as_ref().map_or(1.,
-        |so| so.get_value(fnth) / 100.);
-    let offset = mdfr.offset.as_ref().map_or(0.,
-        |offset| offset.get_value(fnth));   // range: [-1, 2]?
-
-    let cnt = mdfr.cnt.get_value(fnth) as u32;
-    let delta = if 1 < cnt { (mdfr.tr.eo.as_ref().map_or(1., |eo|
-        eo.get_value(fnth) / 100.) - opacity) / (cnt - 1) as f32 } else { 0. };
-    let mut coll = Vec::with_capacity(cnt as usize);
-
-    for i in 0..cnt {
-        let i = if matches!(mdfr.order, Composite::Below) { i } else { cnt - 1 - i };
-        coll.push(TM2DwO(mdfr.tr.trfm.to_repeat_trfm(fnth, offset + i as f32), opacity));
-        opacity += delta;
-    }   coll
 }
 
 fn trim_shapes(mdfr: &TrimPath, draws: &mut [DrawItem], fnth: f32) {

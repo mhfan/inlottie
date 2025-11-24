@@ -24,8 +24,8 @@ impl From<RGBA> for peniko::Color {
     }
 }
 impl StyleConv for peniko::Brush {
-    #[inline] fn solid_color(&mut self, color: RGBA) -> Self { Self::Solid(color.into()) }
-    #[inline] fn linear_gradient(&mut self, sp: Vec2D, ep: Vec2D,
+    #[inline] fn solid_color(color: RGBA) -> Self { Self::Solid(color.into()) }
+    #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D,
             stops: &[(f32, RGBA)]) -> Self {
         use peniko::{Gradient, ColorStop, color::DynamicColor};
         let stops = stops.iter().map(|&(offset, color)|
@@ -33,7 +33,7 @@ impl StyleConv for peniko::Brush {
             .collect::<Vec<ColorStop>>();
         Self::Gradient(Gradient::new_linear(sp, ep).with_stops(stops.as_slice()))
     }
-    #[inline] fn radial_gradient(&mut self, cp: Vec2D, fp: Vec2D, radii: (f32, f32),
+    #[inline] fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
             stops: &[(f32, RGBA)]) -> Self {
         use peniko::{Gradient, ColorStop, color::DynamicColor};
         let stops = stops.iter().map(|&(offset, color)|
@@ -42,26 +42,6 @@ impl StyleConv for peniko::Brush {
         Self::Gradient(Gradient::new_two_point_radial(cp, radii.0, fp, radii.1)
             .with_stops(stops.as_slice()))
     }
-
-    /* fn set_fill_stroke(&mut self, fso: FSOpts) {
-        use {peniko::Fill, kurbo::{Stroke, Cap, Join}};
-        match fso {
-            FSOpts::Fill { rule } => scene.fill(match rule {
-                FillRule::NonZero => Fill::NonZero, FillRule::EvenOdd => Fill::EvenOdd,
-            }),
-            FSOpts::Stroke { width, limit, join, cap } =>
-                scene.stroke(Stroke::new(width as _).with_miter_limit(limit as _)
-                    .with_caps(match cap {
-                        LineCap::Butt   => Cap::Butt,
-                        LineCap::Round  => Cap::Round,
-                        LineCap::Square => Cap::Square,
-                    }).with_join(match join {
-                        LineJoin::Miter => Join::Miter,
-                        LineJoin::Round => Join::Round,
-                        LineJoin::Bevel => Join::Bevel,
-                    }).with_dashes(dash[0] as _, dash[1].iter().map(|&x| x as _))),
-        }
-    } */
 }
 
 pub trait RenderContext {
@@ -93,13 +73,87 @@ pub trait MatrixConv {
 }
 
 pub trait StyleConv {
-    fn solid_color(&mut self, color: RGBA) -> Self;
-    fn linear_gradient(&mut self, sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self;
-    fn radial_gradient(&mut self, cp: Vec2D, fp: Vec2D, radii: (f32, f32),
+    fn solid_color(color: RGBA) -> Self;
+    fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self;
+    fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
         stops: &[(f32, RGBA)]) -> Self;
 }
 
 pub enum FSOpts {   Fill(FillRule),     /// dash\[0\] is offset indeed; use SmallVec for dash?
     Stroke { width: f32, limit: f32, join: LineJoin, cap: LineCap, dash: Vec<f32>, }
+}
+
+impl FillStrokeGrad {
+    pub fn to_style<SC: StyleConv>(&self, fnth: f32) -> (SC, FSOpts) {
+        let opacity = self.opacity.get_value(fnth) / 100.;
+        let style = match &self.grad {
+            ColorGrad::Color { color } => {
+                let mut rgba = color.get_value(fnth);  // RGB indeed
+                rgba.a = (opacity * 255.) as _;     SC::solid_color(rgba)
+            }
+            ColorGrad::Gradient(grad) => {
+                let (sp, ep) = (grad.sp.get_value(fnth), grad.ep.get_value(fnth));
+                let mut stops = grad.stops.cl.get_value(fnth).0;
+                debug_assert!(stops.len() as u32 == grad.stops.cnt);
+                stops.iter_mut().for_each(|(_, rgba)|
+                    rgba.a = (opacity * rgba.a as f32 + 0.5) as _);
+
+                if matches!(grad.r#type, GradientType::Radial) {
+                    let (dx, dy) = (ep.x - sp.x, ep.y - sp.y);
+                    let radius = dx.hypot(dy);
+
+                    let hl = grad.hl.as_ref().map_or(0., |hl|
+                        hl.get_value(fnth).clamp(f32::EPSILON - 100.,
+                            100. - f32::EPSILON) * radius / 100.);
+                    let ha = grad.ha.as_ref().map_or(0., |ha|
+                        ha.get_value(fnth).to_radians()) + math::fast_atan2(dy, dx);
+                    let fp = Vec2D { x: ha.cos(), y: ha.sin() } * hl + sp;
+
+                    //ctx.createRadialGradient(sp.x, sp.y, 0., fp.x, fp.y, radius); // XXX:
+                    // Lottie doesn't have any focal radius concept
+                         SC::radial_gradient(sp, fp, (0., radius), &stops)
+                } else { SC::linear_gradient(sp, ep, &stops) }
+            }
+        };
+
+        let fso = match &self.base {
+            FillStroke::FillRule { rule } => FSOpts::Fill(*rule),
+            FillStroke::Stroke(stroke) => {
+                let width = stroke.width.get_value(fnth);
+                let limit = stroke.ml2.as_ref().map_or(stroke.ml,
+                    |ml| ml.get_value(fnth));
+                FSOpts::Stroke { width, limit, join: stroke.lj, cap: stroke.lc,
+                    dash: self.get_dash(fnth) }
+            }
+        };
+
+        (style, fso)
+    }
+
+    fn get_dash(&self, fnth: f32) -> Vec<f32> {
+        let (mut dpat, mut sum) = (vec![], 0.);
+        if let FillStroke::Stroke(stroke) = &self.base {
+            let len = stroke.dash.len();
+            if  len < 3 { return dpat }
+
+            dpat.reserve(len);   dpat.push(0.);
+            stroke.dash.iter().for_each(|sd| {
+                let value = sd.value.get_value(fnth);
+                match sd.r#type {   // Offset should be at end of the array?
+                    StrokeDashType::Offset => dpat[0] = value,
+                    StrokeDashType::Length | StrokeDashType::Gap => {
+                        if value < 0. { dpat.clear(); return }
+                        dpat.push(value);   sum += value;
+
+                        debug_assert!(dpat.len() % 2 ==
+                            if matches!(sd.r#type, StrokeDashType::Gap) { 1 } else { 0 });
+                    }   // Length and Gap should be alternating and positive
+                }
+            });
+        }
+
+        if sum < f32::EPSILON { dpat.clear(); }   dpat
+        //if dpat.len() % 2 == 0 { dpat.extend_from_slice(&dpat[1..].clone()); } // XXX:
+    }
 }
 

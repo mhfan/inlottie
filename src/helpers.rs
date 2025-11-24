@@ -735,30 +735,3 @@ impl VisualLayer {
     }
 }
 
-impl FillStrokeGrad {
-    pub fn get_dash(&self, fnth: f32) -> Vec<f32> {
-        let (mut dpat, mut sum) = (vec![], 0.);
-        if let FillStroke::Stroke(stroke) = &self.base {
-            let len = stroke.dash.len();
-            if  len < 3 { return dpat }
-
-            dpat.reserve(len);   dpat.push(0.);
-            stroke.dash.iter().for_each(|sd| {
-                let value = sd.value.get_value(fnth);
-                match sd.r#type {   // Offset should be at end of the array?
-                    StrokeDashType::Offset => dpat[0] = value,
-                    StrokeDashType::Length | StrokeDashType::Gap => {
-                        if value < 0. { dpat.clear(); return }
-                        dpat.push(value);   sum += value;
-
-                        debug_assert!(dpat.len() % 2 ==
-                            if matches!(sd.r#type, StrokeDashType::Gap) { 1 } else { 0 });
-                    }   // Length and Gap should be alternating and positive
-                }});
-        }
-
-        if sum < f32::EPSILON { dpat.clear(); }   dpat
-        //if dpat.len() % 2 == 0 { dpat.extend_from_slice(&dpat[1..].clone()); }
-    }
-}
-

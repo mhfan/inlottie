@@ -67,19 +67,18 @@ impl From<RGBA> for BLRgba32 {
 }
 pub enum BLStyle { Solid(BLSolidColor), Gradient(BLGradient), }
 impl StyleConv for BLStyle {
-    #[inline] fn solid_color(&mut self, color: RGBA) -> Self {
+    #[inline] fn solid_color(color: RGBA) -> Self {
         Self::Solid(BLSolidColor::init_rgba32(color.into()))
     }
 
-    #[inline] fn linear_gradient(&mut self, sp: Vec2D, ep: Vec2D,
-            stops: &[(f32, RGBA)]) -> Self {
+    #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
         let stops = stops.iter().map(|&(offset, color)|
                 (offset, color.into()).into()).collect::<Vec<_>>();
         Self::Gradient(BLGradient::new(&BLLinearGradientValues::
             new(sp.into(), ep.into())).with_stops(&stops))
     }
 
-    #[inline] fn radial_gradient(&mut self, cp: Vec2D, fp: Vec2D, radii: (f32, f32),
+    #[inline] fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
             stops: &[(f32, RGBA)]) -> Self {
         let stops = stops.iter().map(|&(offset, color)|
                 (offset, color.into()).into()).collect::<Vec<_>>();
