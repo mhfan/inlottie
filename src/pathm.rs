@@ -240,14 +240,16 @@ impl PathFactory for Polystar {
         let mut path = PB::new(2 + if is_star { nvp * 2 } else { nvp });
         path.move_to(pt);
 
-        let mut lot = Vec2D::from((pt.x - rp.y * orr, pt.y + rp.x * orr));
+        let rd = Vec2D::from((rp.y, -rp.x));
+        let mut lot = pt - rd * orr;
+
         let mut add_bezier_to = |radius, rr| {
             angle += angle_step;
 
 			let rp = Vec2D::from_polar(angle) * radius;
 			let pt = center + rp; 	//let rp = rp * rr;
 
-            let rd = Vec2D::from((rp.y * rr, -rp.x * rr));
+            let rd = rd * rr;
             path.cubic_to(lot, pt + rd, pt);    lot = pt - rd
         };
 

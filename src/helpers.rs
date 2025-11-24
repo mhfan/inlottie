@@ -421,7 +421,7 @@ pub fn fast_atan2(y: f32, x: f32) -> f32 {  use core::f32::consts::PI;
     } else { (if 0. < y { PI / 2. } else { -PI / 2. }) - hatan }
 }
 
-use core::ops::{Div, Mul, Add, Sub};
+use core::ops::{Div, Mul, Add, Sub, Neg};
 impl Div<f32> for Vec2D {  type Output =  Self;
     #[inline] fn div(self, scale: f32) -> Self {
         Self { x: self.x / scale, y: self.y / scale }
@@ -451,6 +451,9 @@ impl Sub for Vec2D {  type Output = Self;
     #[inline] fn sub(self, rhs: Self) -> Self {
         Self { x: self.x - rhs.x, y: self.y - rhs.y }
     }
+}
+impl Neg for Vec2D {  type Output = Self;
+    #[inline] fn neg(self) -> Self { Self { x: -self.x, y: -self.y } }
 }
 impl Vec2D {
     #[inline] pub fn from_polar(angle: f32) -> Self { Self { x: angle.cos(), y: angle.sin() } }

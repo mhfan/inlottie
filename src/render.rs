@@ -78,144 +78,7 @@ impl StyleConv for femtovg::Paint {
     }
 }
 
-impl Transform {
-    fn to_matrix(&self, fnth: f32, ao: IntBool) -> TM2DwO {
-        let opacity = self.opacity.as_ref().map_or(1.,
-            |o| o.get_value(fnth) / 100.); // FIXME: for canvas global?
-
-        // Multiplications are RIGHT multiplications (Next = Previous * StepOperation).
-        // If your transform is transposed (`tx`, `ty` are on the last column),
-        // perform LEFT multiplication instead. Perform the following operations on a
-        // matrix starting from the identity matrix (or the parent object's transform matrix):
-        let (mut trfm, mut ts) = (TM2D::identity(), TM2D::identity());
-        if  let Some(anchor) = &self.anchor {
-            let anchor = anchor.get_value(fnth);
-            trfm.multiply(&TM2D::new_translation(-anchor.x, -anchor.y));
-        }
-
-        if  let Some(scale) = &self.scale {
-            let scale = scale.get_value(fnth) / 100.;
-            //if scale.x == 0. { scale.x = f32::EPSILON; } // workaround for some lottie file?
-            //if scale.y == 0. { scale.y = f32::EPSILON; }
-            ts.scale(scale.x, scale.y);     trfm.multiply(&ts);
-        }
-
-        if  let Some(skew) = &self.skew {
-            let axis = self.skew_axis.as_ref()
-                .map(|axis| axis.get_value(fnth).to_radians());
-            if let Some(axis) = axis { ts.rotate(-axis);   trfm.multiply(&ts); }
-
-            let skew = -skew.get_value(fnth); //.clamp(-85., 85.); // SKEW_LIMIT
-            ts.skew_x(skew.to_radians().tan());     trfm.multiply(&ts);
-
-            if let Some(axis) = axis { ts.rotate( axis);   trfm.multiply(&ts); }
-        }
-
-        match &self.extra {
-            TransRotation::Normal2D { rotation: Some(rdegree) } => {
-                ts.rotate(rdegree.get_value(fnth).to_radians()); trfm.multiply(&ts);
-            }
-
-            TransRotation::Split3D(_) => unimplemented!(), //debug_assert!(ddd);
-            _ => (),
-        }
-
-        match &self.position {
-            Some(Translation::Normal(apos)) => {
-                let pos  = apos.get_value(fnth);
-                if  ao.as_bool() &&  apos.animated.as_bool() {
-                    let orient = pos - apos.get_value(fnth - 1.);
-                    ts.rotate(math::fast_atan2(orient.y, orient.x));  trfm.multiply(&ts);
-                }   trfm.multiply(&TM2D::new_translation(pos.x, pos.y));
-            }
-
-            Some(Translation::Split(sv)) => {   debug_assert!(sv.split);
-                let pos = Vec2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) };
-                if  ao.as_bool() {
-                    let orient = Vec2D { x: pos.x - sv.x.get_value(fnth - 1.),
-                                                y: pos.y - sv.y.get_value(fnth - 1.) };
-                    ts.rotate(math::fast_atan2(orient.y, orient.x));  trfm.multiply(&ts);
-                }   trfm.multiply(&TM2D::new_translation(pos.x, pos.y));
-                if sv.z.is_some() { unimplemented!(); }
-            }
-            _ => (),
-        }   TM2DwO(trfm, opacity)
-    }
-
-    fn to_repeat_trfm(&self, fnth: f32, offset: f32) -> TM2D {
-        let (mut trfm, mut ts) = (TM2D::identity(), TM2D::identity());
-        let anchor = if let Some(anchor) = &self.anchor {
-            let anchor = anchor.get_value(fnth);
-            trfm.multiply(&TM2D::new_translation(-anchor.x, -anchor.y));    anchor
-        } else { Vec2D { x: 0., y: 0. } };
-
-        if  let Some(scale) = &self.scale {
-            let scale = scale.get_value(fnth) / 100.;
-            ts.scale(scale.x.powf(offset), scale.y.powf(offset));
-            trfm.multiply(&ts);
-        }
-
-        if  let Some(skew) = &self.skew {
-            let axis = self.skew_axis.as_ref()
-                .map(|axis| axis.get_value(fnth).to_radians());
-            if let Some(axis) = axis { ts.rotate(-axis); trfm.multiply(&ts); }
-
-            let skew = -skew.get_value(fnth); //.clamp(-85., 85.); // SKEW_LIMIT
-            ts.skew_x(skew.to_radians().tan());     trfm.multiply(&ts); // XXX:
-
-            if let Some(axis) = axis { ts.rotate( axis); trfm.multiply(&ts); }
-        }
-
-        match &self.extra {
-            TransRotation::Normal2D { rotation: Some(rdegree) } => {
-                ts.rotate(rdegree.get_value(fnth).to_radians() * offset);
-                trfm.multiply(&ts);
-            }
-
-            TransRotation::Split3D(_) => unimplemented!(), //debug_assert!(ddd);
-            _ => (),
-        }
-
-        let pos = match &self.position {
-            Some(Translation::Normal(apos)) => apos.get_value(fnth),
-            Some(Translation::Split(sv)) => {   debug_assert!(sv.split);
-                Vec2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) }
-            }   _ => Vec2D { x: 0., y: 0. },
-        };  // XXX: shouldn't need to deal with auto orient?
-
-        trfm.multiply(&TM2D::new_translation(pos.x * offset + anchor.x,
-                                             pos.y * offset + anchor.y));   trfm
-    }
-}
-
-#[derive(Clone)] pub struct TM2DwO(TM2D, f32);
-impl Default for TM2DwO { fn default() -> Self { Self(TM2D::identity(), 1.) } }
-impl TM2DwO {
-    #[inline] fn multiply(&mut self, other: &TM2DwO) {
-        self.0  .multiply(&other.0);  self.1 *= other.1;
-    }
-}
-
-impl Repeater {
-    pub fn get_matrix(&self, fnth: f32) -> Vec<TM2DwO> {
-        let mut opacity = self.tr.so.as_ref().map_or(1.,
-            |so| so.get_value(fnth) / 100.);
-        let offset = self.offset.as_ref().map_or(0.,
-            |offset| offset.get_value(fnth));   // range: [-1, 2]?
-
-        let cnt = self.cnt.get_value(fnth) as u32;
-        let delta = if 1 < cnt { (self.tr.eo.as_ref().map_or(1., |eo|
-            eo.get_value(fnth) / 100.) - opacity) / (cnt - 1) as f32 } else { 0. };
-        let mut coll = Vec::with_capacity(cnt as usize);
-
-        for i in 0..cnt {
-            let i = if matches!(self.order, Composite::Below) { i } else { cnt - 1 - i };
-            coll.push(TM2DwO(self.tr.trfm.to_repeat_trfm(fnth, offset + i as f32), opacity));
-            opacity += delta;
-        }   coll
-    }
-}
-
+type TM2DwO = crate::style::TM2DwO<TM2D>;
 use femtovg::{Canvas, Renderer, Transform2D as TM2D, CompositeOperation as CompOp,
     Path as VGPath, Paint as VGPaint, Color as VGColor};
 
@@ -600,7 +463,7 @@ fn convert_shapes(shapes: &[ShapeItem], fnth: f32, ao: IntBool) -> (Vec<DrawItem
 use core::cell::RefCell;
 enum DrawItem {     // Graphic Element
     Shape(Box<VGPath>),
-    Style(Box<RefCell<(VGPaint, FSOpts)>>),
+    Style(Box<RefCell<(VGPaint, FSOpts)>>), // RefCell interior mutation for femtovg
     Repli(Vec<DrawItem>, Vec<TM2DwO>), // something like batch Groups
     Group(Vec<DrawItem>, TM2DwO),
 }

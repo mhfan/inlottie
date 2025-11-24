@@ -59,17 +59,132 @@ pub trait RenderContext {
 
 pub trait MatrixConv {
     fn identity() -> Self;
+    fn multiply(&mut self, tm: &Self);
     //fn reset(&mut self, tm: Option<&Self>);
 
     fn rotate(&mut self, angle: f32);
     fn translate(&mut self, pos: Vec2D);
     fn skew_x(&mut self, sk: f32);
     fn scale(&mut self, sl: Vec2D);
+}
 
-    /// Multiplications are right multiplications (Next = Previous * StepOperation).
-    /// If your transform is transposed (tx, ty are on the last column),
-    /// perform left multiplication instead.
-    fn multiply(&mut self, tm: &Self);
+#[derive(Clone)] pub struct TM2DwO<MC: MatrixConv>(pub MC, pub f32);
+impl<MC: MatrixConv> Default for TM2DwO<MC> {
+    fn default() -> Self { Self(MC::identity(), 1.) } }
+impl<MC: MatrixConv> TM2DwO<MC> {
+    #[inline] pub fn multiply(&mut self, other: &Self) {
+            self.0  .multiply(&other.0);  self.1 *= other.1;
+    }
+}
+
+impl Transform {
+    /// Multiplications are RIGHT multiplications (Next = Previous * StepOperation).
+    /// If your transform is transposed (`tx`, `ty` are on the last column),
+    /// perform LEFT multiplication instead. Perform the following operations on a
+    /// matrix starting from the identity matrix (or the parent object's transform matrix):
+    pub fn to_matrix<MC: MatrixConv>(&self, fnth: f32, ao: IntBool) -> TM2DwO<MC> {
+        let opacity = self.opacity.as_ref().map_or(1.,
+            |o| o.get_value(fnth) / 100.); // FIXME: for canvas global?
+
+        let mut trfm = MC::identity();
+        if  let Some(anchor) = &self.anchor {
+            trfm.translate(-anchor.get_value(fnth));
+        }
+
+        if  let Some(scale) = &self.scale {
+            let scale = scale.get_value(fnth) / 100.;
+            //if scale.x == 0. { scale.x = f32::EPSILON; } // workaround for some lottie file?
+            //if scale.y == 0. { scale.y = f32::EPSILON; }
+            trfm.scale(scale);
+        }
+
+        if  let Some(skew) = &self.skew {
+            let axis = self.skew_axis.as_ref()
+                .map(|axis| axis.get_value(fnth).to_radians());
+            if let Some(axis) = axis { trfm.rotate(-axis); }
+
+            let skew = -skew.get_value(fnth); //.clamp(-85., 85.); // SKEW_LIMIT
+            trfm.skew_x(skew.to_radians().tan());
+
+            if let Some(axis) = axis { trfm.rotate( axis); }
+        }
+
+        match &self.extra {
+            TransRotation::Normal2D { rotation: Some(rdeg) } =>
+                trfm.rotate(rdeg.get_value(fnth).to_radians()),
+            TransRotation::Split3D(_) => unimplemented!(), //debug_assert!(ddd),
+            _ => (),
+        }
+
+        match &self.position {
+            Some(Translation::Normal(apos)) => {
+                let pos  = apos.get_value(fnth);
+                if  ao.as_bool() &&  apos.animated.as_bool() {
+                    let orient = pos - apos.get_value(fnth - 1.);
+                    trfm.rotate(math::fast_atan2(orient.y, orient.x));
+                }   trfm.translate(pos);
+            }
+
+            Some(Translation::Split(sv)) => {   debug_assert!(sv.split);
+                let pos = Vec2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) };
+                if  ao.as_bool() {
+                    let orient = pos -
+                        Vec2D { x: sv.x.get_value(fnth - 1.), y: sv.y.get_value(fnth - 1.) };
+                    trfm.rotate(math::fast_atan2(orient.y, orient.x));
+                }   trfm.translate(pos);
+                if sv.z.is_some() { unimplemented!(); }
+            }   _ => (),
+        }   TM2DwO(trfm, opacity)
+    }
+}
+
+impl Repeater {
+    pub fn get_matrix<MC: MatrixConv>(&self, fnth: f32) -> Vec<TM2DwO<MC>> {
+        let mut opacity = self.tr.so.as_ref().map_or(1.,
+            |so| so.get_value(fnth) / 100.);
+        let  offset = self.offset.as_ref().map_or(0.,
+            |offset| offset.get_value(fnth));   // range: [-1, 2]?
+
+        let cnt = self.cnt.get_value(fnth) as u32;
+        let delta = if 1 < cnt { (self.tr.eo.as_ref().map_or(1., |eo|
+            eo.get_value(fnth) / 100.) - opacity) / (cnt - 1) as f32 } else { 0. };
+        let mut coll = Vec::with_capacity(cnt as usize);
+
+        let trfm = &self.tr.trfm;
+        let  anchor = trfm.anchor.as_ref().map_or(Vec2D { x: 0., y: 0. },
+            |anchor| anchor.get_value(fnth));
+        let scale = trfm.scale.as_ref()
+            .map(|scale| scale.get_value(fnth) / 100.);
+
+        let rot = match &trfm.extra {
+            TransRotation::Normal2D { rotation } =>
+                rotation.as_ref().map(|rdeg|
+                    rdeg.get_value(fnth).to_radians()),
+            TransRotation::Split3D(_) => unimplemented!(), //debug_assert!(ddd),
+        };
+
+        let pos = match &trfm.position {
+            Some(Translation::Normal(apos)) => apos.get_value(fnth),
+            Some(Translation::Split(sv)) => {   debug_assert!(sv.split);
+                Vec2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) }
+            }   _ => Vec2D { x: 0., y: 0. },
+        };  // XXX: shouldn't need to deal with auto orient and skew_x?
+
+        for i in 0..cnt {
+            let offset = offset + if matches!(self.order,
+                Composite::Below) { i } else { cnt - 1 - i } as f32;
+            let mut trfm = MC::identity();
+
+            trfm.translate(-anchor);
+            if let Some(scale) = scale {
+                trfm.scale((scale.x.powf(offset), scale.y.powf(offset)).into());
+            };  if let Some(rot) = rot { trfm.rotate(rot * offset); }
+            trfm.translate(pos * offset + anchor);
+
+            coll.push(TM2DwO(trfm, opacity));
+            opacity += delta;
+        }   coll
+    }
 }
 
 pub trait StyleConv {
@@ -107,7 +222,7 @@ impl FillStrokeGrad {
                             100. - f32::EPSILON) * radius / 100.);
                     let ha = grad.ha.as_ref().map_or(0., |ha|
                         ha.get_value(fnth).to_radians()) + math::fast_atan2(dy, dx);
-                    let fp = Vec2D { x: ha.cos(), y: ha.sin() } * hl + sp;
+                    let fp = Vec2D::from_polar(ha) * hl + sp;
 
                     //ctx.createRadialGradient(sp.x, sp.y, 0., fp.x, fp.y, radius); // XXX:
                     // Lottie doesn't have any focal radius concept
