@@ -6,6 +6,145 @@
  ****************************************************************/
 
 use crate::{schema::*, helpers::*};
+use crate::pathm::{PathBuilder, PathFactory};
+
+pub trait RenderContext {
+    type VGPath: PathBuilder;
+    type VGStyle: StyleConv;    // (VGBrush/VGPaint, FSOpts)
+    type TM2D: MatrixConv;
+
+    //fn clear_rect(&mut self, rect: &Rect);
+    //fn set_comp_op(&mut self, op: CompOp);
+
+    fn get_transform(&self) -> Self::TM2D;
+    fn set_global_alpha(&mut self, alpha: f32);
+    fn reset_transform(&mut self, trfm: Option<&Self::TM2D>);
+    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>); // alpha
+
+    fn stroke_path(&mut self, path: &Self::VGPath, style: &Self::VGStyle, fso: &FSOpts);
+    fn   fill_path(&mut self, path: &Self::VGPath, style: &Self::VGStyle, fso: &FSOpts);
+}
+
+/// calculate transform matrix, convert shapes to paths, modify/change the paths,
+/// and convert style(fill/stroke/gradient) to draw items, recursively
+pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
+    shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
+    (Vec<DrawItem<VGPath, VGPaint, TM2D>>, TM2DwO<TM2D>) {
+    let mut draws = Vec::with_capacity(shapes.len());
+    let mut trfm = Default::default();
+
+    for shape in shapes.iter() { match shape {
+        ShapeItem::Rectangle(rect)    if !rect.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(rect.to_path(fnth)))),
+        ShapeItem::Polystar(star) if !star.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(star.to_path(fnth)))),
+        ShapeItem::Ellipse(elps)        if !elps.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(elps.to_path(fnth)))),
+        ShapeItem::Path(curv)          if !curv.base.elem.hd =>
+            draws.push(DrawItem::Shape(Box::new(curv.to_path(fnth)))),
+
+        // styles affect on all preceding paths ever before
+        ShapeItem::Fill(fill)   if !fill.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(fill.to_style(fnth).into()))),
+        ShapeItem::Stroke(line) if !line.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(line.to_style(fnth).into()))),
+        ShapeItem::GradientFill(grad)   if !grad.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(grad.to_style(fnth).into()))),
+        ShapeItem::GradientStroke(grad) if !grad.elem.hd =>
+            draws.push(DrawItem::Style(Box::new(grad.to_style(fnth).into()))),
+        ShapeItem::NoStyle(_) => eprintln!("Nothing to do here?"),
+
+        ShapeItem::Group(group) if !group.elem.hd => {
+            let (grp, trfm) = convert_shapes(&group.shapes, fnth, ao);
+            draws.push(DrawItem::Group(grp, trfm));
+        }
+
+        ShapeItem::Repeater(mdfr) if !mdfr.elem.hd => {
+            let grp = draws;    draws = vec![];
+            // repeat preceding (Shape/Style) items into new Groups?
+            //mdfr.get_matrix(fnth).into_iter().for_each(|ts|
+            //    draws.push(DrawItem::Group(grp.clone(), ts)));
+            draws.push(DrawItem::Repli(grp, mdfr.get_matrix(fnth)));
+        }
+
+        // other modifiers usually just affect on all preceding paths ever before
+        ShapeItem::Trim(mdfr) if !mdfr.elem.hd =>
+            trim_shapes(mdfr, &mut draws, fnth),
+
+        ShapeItem::Merge (_) | ShapeItem::OffsetPath (_) |
+        ShapeItem::Twist (_) | ShapeItem::PuckerBloat(_) |
+        ShapeItem::ZigZag(_) | ShapeItem::RoundedCorners(_) => dbg!(),  // TODO:
+
+        ShapeItem::Transform(ts) if !ts.elem.hd =>
+            trfm = ts.trfm.to_matrix(fnth, ao),
+
+        _ => (),
+    } }     (draws, trfm)
+}
+
+use core::cell::RefCell;
+pub enum DrawItem<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv> {
+    Shape(Box<VGPath>),     // DrawItem is the core Graphic Element
+    Style(Box<RefCell<(VGPaint, FSOpts)>>), // RefCell interior mutation for femtovg
+    Group(Vec<DrawItem<VGPath, VGPaint, TM2D>>,     TM2DwO<TM2D>),
+    Repli(Vec<DrawItem<VGPath, VGPaint, TM2D>>, Vec<TM2DwO<TM2D>>), // as batch Groups
+}
+
+fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
+    mdfr: &TrimPath, draws: &mut [DrawItem<VGPath, VGPaint, TM2D>], fnth: f32) {
+    fn traverse_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(draws:
+        &mut [DrawItem<VGPath, VGPaint, TM2D>], closure: &mut impl FnMut(&mut VGPath)) {
+        draws.iter_mut().for_each(|draw| match draw {
+            DrawItem::Group(grp, _) =>
+                traverse_shapes(grp, closure),
+            DrawItem::Repli(grp, _) =>
+                traverse_shapes(grp, closure),
+            DrawItem::Shape(path) => closure(path),
+            _ => (), // skip/ignore Style
+        });
+    }       // XXX: how to treat repeated shapes?
+
+    let offset   = mdfr.offset.get_value(fnth) as f64 / 360.;
+    let start    = mdfr. start.get_value(fnth) as f64 / 100.;
+    let mut trim = mdfr.   end.get_value(fnth) as f64 / 100. - start;
+    if 1. < trim { trim = 1.; } //debug_assert!((0.0..=1.).contains(&trim));
+    let start = (start + offset) % 1.;
+
+    if mdfr.multiple.is_some_and(|ml| matches!(ml, TrimMultiple::Simultaneously)) {
+        traverse_shapes(draws, &mut |path| *path = path.trim_path(start, trim));
+    } else {    use kurbo::ParamCurveArclen;
+        let (mut idx, mut suml) = (0u32, 0.);
+        let (mut lens, mut tri0) = (vec![], 0.);
+
+        traverse_shapes(draws, &mut |path| {
+            let len = kurbo::segments(path.to_kurbo()).fold(0.,
+                |acc, seg| acc + seg.arclen(ACCURACY_TOLERANCE));
+            lens.push(len);     suml += len;
+        });
+
+        if 1. < start + trim { tri0 = start + trim - 1.; trim = 1. - start; }
+        let (start, mut trim) = (suml * start, suml * trim);
+        tri0 *= suml;   suml = 0.;
+
+        traverse_shapes(draws, &mut |path| {    // same logic as in trim_path
+            let len = lens[idx as usize];   idx += 1;
+
+            if suml <= start &&  start < suml + len {   let start = start - suml;
+                if  start + trim < len {
+                    *path = path.trim_path(start / len, trim  / len);  trim = 0.;
+                } else { trim -= len - start;   let start = start / len;
+                    *path = path.trim_path(start, 1. - start);
+                }
+            } else if start < suml && 0. < trim { if trim < len {
+                    *path = path.trim_path(0., (trim / len) as _);     trim = 0.;
+                } else { trim -= len; }
+            } else if 0. < tri0 { if tri0 < len {
+                    *path = path.trim_path(0., (tri0 / len) as _);     tri0 = 0.;
+                } else { tri0 -= len; }
+            } else { *path = VGPath::new(0); }  suml += len;
+        });
+    }
+}
 
 impl MatrixConv for kurbo::Affine {
     #[inline] fn identity() -> Self { Self::IDENTITY }
@@ -42,19 +181,6 @@ impl StyleConv for peniko::Brush {
         Self::Gradient(Gradient::new_two_point_radial(cp, radii.0, fp, radii.1)
             .with_stops(stops.as_slice()))
     }
-}
-
-pub trait RenderContext {
-    type VGPath: crate::pathm::PathBuilder;
-    type VGStyle: StyleConv;    // (VGBrush/VGPaint, FSOpts)
-    type TM2D: MatrixConv;
-
-    fn get_transform(&self) -> Self::TM2D;
-    fn reset_transform(&mut self, trfm: Option<&Self::TM2D>);
-    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>); // alpha
-
-    fn   fill_path(&mut self, path: &Self::VGPath, style: &Self::VGStyle, fso: &FSOpts);
-    fn stroke_path(&mut self, path: &Self::VGPath, style: &Self::VGStyle, fso: &FSOpts);
 }
 
 pub trait MatrixConv {

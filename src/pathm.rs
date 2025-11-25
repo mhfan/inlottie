@@ -8,6 +8,12 @@
 use core::f32::consts::PI;
 use crate::{schema::*, helpers::*};
 
+// https://docs.rs/kurbo/latest/kurbo/offset/index.html
+// https://github.com/nical/lyon/blob/main/crates/algorithms/src/walk.rs
+// https://www.reddit.com/r/rust/comments/12do1dq/rendering_text_along_a_curve/
+// https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Element/textPath
+#[allow(unused)] fn walk_along_path() { }   // TODO:
+
 pub use kurbo::BezPath;
 impl From<Vec2D> for kurbo::Vec2 {
     fn from(val: Vec2D) -> Self { Self::new(val.x as _, val.y as _) }
