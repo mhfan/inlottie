@@ -7,8 +7,10 @@
 
 use core::cell::RefCell;
 use crate::{schema::*, helpers::*, pathm::*, style::*};
+type DrawItem = crate::style::DrawItem<VGPath, VGPaint, TM2D>;
+type TM2DwO   = crate::style::TM2DwO<TM2D>;
 
-impl PathBuilder for femtovg::Path {    // TODO: reserve capacity, current_pos
+impl PathBuilder for VGPath {    // TODO: reserve capacity, current_pos
     #[inline] fn current_pos(&self) -> Option<Vec2D> { todo!() }
     #[inline] fn new(_capacity: u32) -> Self { Self::new() }
     #[inline] fn close(&mut self) { self.close() }
@@ -40,7 +42,7 @@ impl PathBuilder for femtovg::Path {    // TODO: reserve capacity, current_pos
     }
 }
 
-impl MatrixConv for femtovg::Transform2D {
+impl MatrixConv for TM2D {
     #[inline] fn identity() -> Self { Self::identity() }
     #[inline] fn rotate(&mut self, angle: f32) {
         let mut tm = Self::identity();
@@ -59,13 +61,13 @@ impl MatrixConv for femtovg::Transform2D {
         let mut tm = Self::identity();
         tm.scale(sl.x, sl.y);   self.multiply(&tm);
     }
-    #[inline] fn multiply(&mut self, tm: &Self) { self.multiply(tm) }
+    #[inline] fn multiply(&mut self, tm: &Self) { self.premultiply(tm) } // self.multiply(tm)
 }
 
-impl From<RGBA> for femtovg::Color {
+impl From<RGBA> for VGColor {
     #[inline] fn from(color: RGBA) -> Self { Self::rgba(color.r, color.g, color.b, color.a) }
 }
-impl StyleConv for femtovg::Paint {
+impl StyleConv for VGPaint {
     #[inline] fn solid_color(color: RGBA) -> Self { Self::color(color.into()) }
     #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
         Self::linear_gradient_stops(sp.x, sp.y, ep.x, ep.y,
@@ -79,8 +81,61 @@ impl StyleConv for femtovg::Paint {
     }
 }
 
-use femtovg::{Canvas, Renderer, Transform2D as TM2D, CompositeOperation as CompOp,
-    Path as VGPath, Paint as VGPaint, Color as VGColor};
+impl<T: Renderer> RenderContext for Canvas<T> {
+    type VGStyle = VGPaint;
+    type VGPath  = VGPath;
+    type TM2D = TM2D;
+
+    fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA) {
+        self.clear_rect(x, y, w, h, color.into());
+    }
+    fn reset_transform(&mut self, trfm: Option<&Self::TM2D>) {
+        self.reset_transform();     //self.set_global_alpha(1.);
+        if let Some(trfm) = trfm { self.set_transform(trfm) }
+    }
+    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) -> Self::TM2D {
+        let last_trfm = self.transform();
+        if let Some(opacity) = opacity { self.set_global_alpha(opacity) }
+        self.set_transform(trfm);   last_trfm
+    }
+
+    fn fill_stroke(&mut self, path: &Self::VGPath, style: &RefCell<(Self::VGStyle, FSOpts)>) {
+        use femtovg::{FillRule as FFR, LineCap as FLC, LineJoin as FLJ};
+
+        match &style.borrow().1 {
+            FSOpts::Fill(rule) => {
+                let paint = &mut style.borrow_mut().0;
+                paint.set_fill_rule(match rule {
+                    FillRule::NonZero => FFR::NonZero,
+                    FillRule::EvenOdd => FFR::EvenOdd,
+                }); self.fill_path(path, paint);
+            }
+
+            FSOpts::Stroke { width, limit,
+                join, cap, dash } => {
+                let paint = &mut style.borrow_mut().0;
+                paint.set_line_width (*width);
+                paint.set_miter_limit(*limit);
+
+                paint.set_line_join(match join {
+                    LineJoin::Miter => FLJ::Miter, LineJoin::Round => FLJ::Round,
+                    LineJoin::Bevel => FLJ::Bevel,
+                });
+                paint.set_line_cap(match cap {
+                    LineCap::Butt   => FLC::Butt,   LineCap::Round => FLC::Round,
+                    LineCap::Square => FLC::Square,
+                });
+
+                if dash.len() < 3 { self.stroke_path(path, paint); } else {
+                    self.stroke_path(&path.make_dash(dash[0], &dash[1..]), paint);
+                }
+            }
+        }
+    }
+}
+
+use femtovg::{Canvas, Renderer, CompositeOperation as CompOp,
+    Transform2D as TM2D, Path as VGPath, Paint as VGPaint, Color as VGColor};
 
 impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
     //fn get_duration(&self) -> f32 { (self.op - self.ip) / self.fr }
@@ -105,7 +160,7 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
         canvas.clear_rect(0, 0, canvas.width(), canvas.height(),
             //ltrb.0, ltrb.1, ltrb.2 - ltrb.0, ltrb.3 - ltrb.1,
             VGColor::rgbf(0.4, 0.4, 0.4));
-        self.render_layers(canvas, None, &self.layers, self.fnth);
+        self.render_layers(canvas, &TM2DwO::default(), &self.layers, self.fnth);
 
         self.elapsed -= 1.;       self.fnth += 1.;
         if self.op <= self.fnth { self.fnth  = 0.; }    true
@@ -114,44 +169,18 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
     /// The render order goes from the last element to the first,
     /// items in list coming first will be rendered on top.
     fn render_layers<T: Renderer>(&self, canvas: &mut Canvas<T>,
-        ptm: Option<&TM2DwO>, layers: &[LayerItem], fnth: f32) {
+        ptm: &TM2DwO, layers: &[LayerItem], fnth: f32) {
         let mut matte: Option<TrackMatte> = None;
 
-        let get_matrix = |vl: &VisualLayer, fnth: f32| {
-            let mut trfm  = vl.ks.to_matrix(fnth, vl.ao);
-            if let Some(pid) = vl.base.parent {
-                let ptm = layers.iter().find_map(|layer|
-                    layer.visual_layer().and_then(|vl|
-                        vl.base.ind.and_then(|ind| if ind == pid {
-                            Some(vl.ks.to_matrix(fnth, vl.ao)) } else { None })));
-
-                if let Some(ptm) = &ptm { trfm.multiply(ptm) } else {
-                    unreachable!()  //Default::default()
-                }
-            };  trfm
-        };
-
-        let last_trfm = canvas.transform();
         for layer in layers.iter().rev() { match layer {
             LayerItem::Shape(shpl) => if !shpl.vl.should_hide(fnth) {
-                let mut trfm = get_matrix(&shpl.vl, fnth);
-                canvas.set_transform(&trfm.0);
-                //canvas.set_global_alpha(trfm.1);
-
-                // XXX: transform are set correctly already, this is merely for
-                // computing alpha/opacity correctly along rendering stack
-                if let Some(ptm) = ptm { trfm.multiply(ptm) }
-
-                prepare_matte(canvas, &last_trfm, &shpl.vl, &mut matte);
-                let (draws, mut ts) =
+                let ltm = shpl.vl.get_matrix(layers, fnth).compose(ptm);
+                let (draws, ctm) =
                     convert_shapes(&shpl.shapes, fnth, shpl.vl.ao);
-                canvas.set_transform(&ts.0);    ts.multiply(&trfm);
-                canvas.set_global_alpha(ts.1);
 
-                render_shapes(canvas, &trfm, &draws);
-                render_matte (canvas, &last_trfm, &shpl.vl, &mut matte, fnth);
-
-                canvas.reset_transform();    canvas.set_transform(&last_trfm);
+                prepare_matte(canvas, &shpl.vl, &mut matte);
+                canvas.render_shapes(&ctm.compose(&ltm), &draws);
+                compose_matte(canvas, &shpl.vl, &mut matte, &ltm, fnth);
             }
             LayerItem::PrecompLayer(pcl) => if !pcl.vl.should_hide(fnth) {
                 if let Some(pcomp) = self.assets.iter().find_map(|asset|
@@ -159,38 +188,27 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
                         if pcomp.base.id == pcl.rid => Some(pcomp), _ => None }) {
                     let fnth = (fnth - pcl.vl.base.st) / pcl.vl.base.sr;
 
-                    let mut trfm = get_matrix(&pcl.vl, fnth);
                     let fnth = pcl.tm.as_ref().map_or(fnth, // handle time remapping
                         |tm| tm.get_value(fnth) * pcomp.fr);
+                    let ltm = pcl.vl.get_matrix(layers, fnth).compose(ptm);
 
-                    canvas.set_transform(&trfm.0);
-                    if let Some(ptm) = ptm { trfm.multiply(ptm) }
-                    canvas.set_global_alpha(trfm.1);
-
-                    prepare_matte(canvas, &last_trfm, &pcl.vl, &mut matte);
-                    self.render_layers(canvas, Some(&trfm), &pcomp.layers, fnth);
-                     render_matte(canvas, &last_trfm, &pcl.vl, &mut matte, fnth);
-
-                    canvas.reset_transform();    canvas.set_transform(&last_trfm);
-                }   // clipping(pcl.w, pcl.h)?
+                    prepare_matte(canvas, &pcl.vl, &mut matte);
+                    self.render_layers(canvas, &ltm, &pcomp.layers, fnth);
+                    compose_matte(canvas, &pcl.vl, &mut matte, &ltm, fnth);
+                }   // XXX: clipping(pcl.w, pcl.h)?
             }
             LayerItem::SolidColor(scl) => if !scl.vl.should_hide(fnth) {
-                let trfm = get_matrix(&scl.vl, fnth);
-                canvas.set_transform(&trfm.0);
-
-                //if let Some(ptm) = ptm { trfm.multiply(ptm) }
-                //canvas.set_global_alpha(trfm.1); // should be fixed as 1.0?
+                let ltm = scl.vl.get_matrix(layers, fnth).compose(ptm);
 
                 let mut path = VGPath::new();
                 path.rect((self.w as f32 - scl.sw) / 2., // 0., 0.,
                           (self.h as f32 - scl.sh) / 2., scl.sw, scl.sh);
-                let paint = VGPaint::color(VGColor::rgb(scl.sc.r, scl.sc.g, scl.sc.b));
 
-                prepare_matte(canvas, &last_trfm, &scl.vl, &mut matte);
-                canvas.fill_path(&path, &paint);
-                 render_matte(canvas, &last_trfm, &scl.vl, &mut matte, fnth);
-
-                canvas.reset_transform();   canvas.set_transform(&last_trfm);
+                prepare_matte(canvas, &scl.vl, &mut matte);
+                canvas.render_shapes(&ltm, &[DrawItem::Shape(path.into()),
+                    DrawItem::Style(RefCell::new((VGPaint::color(scl.sc.into()),
+                        FSOpts::Fill(FillRule::NonZero))).into())]);
+                compose_matte(canvas, &scl.vl, &mut matte, &ltm, fnth);
             }
             LayerItem::Image(_) | LayerItem::Text(_)  | LayerItem::Data(_)  |
             LayerItem::Audio(_) | LayerItem::Camera(_) => dbg!(),     // TODO:
@@ -201,101 +219,16 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
     }
 }
 
-fn render_shapes<T: Renderer>(canvas: &mut Canvas<T>, trfm: &TM2DwO, draws: &[DrawItem]) {
-    fn traverse_shapes<T: Renderer>(canvas: &mut Canvas<T>,
-        draws: &[DrawItem], style: &RefCell<(VGPaint, FSOpts)>) {
-
-        let last_trfm = canvas.transform();
-        draws.iter().rev().for_each(|draw| match draw {
-            DrawItem::Shape(path) => fill_stroke(canvas, path, style),
-
-            DrawItem::Group(grp, ts) => {
-                    canvas.set_transform(&ts.0);    traverse_shapes(canvas, grp, style);
-                    canvas.reset_transform();       canvas.set_transform(&last_trfm);
-            }   // apply transform in group-wise rather path-wise
-            DrawItem::Repli(grp, rep) =>
-                rep.iter().rev().for_each(|ts| {
-                    canvas.set_transform(&ts.0);    traverse_shapes(canvas, grp, style);
-                    canvas.reset_transform();       canvas.set_transform(&last_trfm);
-                }),
-            _ => (), // skip/ignore Style
-        });
-    }
-
-    let last_trfm = canvas.transform();
-    draws.iter().enumerate().rev().for_each(|(idx, draw)| match draw {
-        DrawItem::Style(style) =>
-            traverse_shapes(canvas, &draws[0..idx], style),
-        DrawItem::Group(grp, ts) => {
-                canvas.set_transform(&ts.0);
-                let mut ts = ts.clone();    ts.multiply(trfm);
-
-                canvas.set_global_alpha(ts.1);
-                render_shapes(canvas, &ts, grp);
-
-                canvas.reset_transform();   canvas.set_transform(&last_trfm);
-                canvas.set_global_alpha(trfm.1);
-        }   // apply transform in group-wise rather than path-wise
-        DrawItem::Repli(grp, rep) => {
-            rep.iter().rev().for_each(|ts| {
-                canvas.set_transform(&ts.0);
-                let mut ts = ts.clone();    ts.multiply(trfm);
-
-                canvas.set_global_alpha(ts.1);
-                render_shapes(canvas, &ts, grp);
-
-                canvas.reset_transform();   canvas.set_transform(&last_trfm);
-            }); canvas.set_global_alpha(trfm.1);
-        }
-        _ => (), // skip/ignore Shape
-    });
-}
-
-fn fill_stroke<T: Renderer>(canvas: &mut Canvas<T>,
-    path: &VGPath, style: &RefCell<(VGPaint, FSOpts)>) {
-    use femtovg::{FillRule as FFR, LineCap as FLC, LineJoin as FLJ};
-
-    match &style.borrow().1 {
-        FSOpts::Fill(rule) => {
-            let paint = &mut style.borrow_mut().0;
-            paint.set_fill_rule(match rule {
-                FillRule::EvenOdd => FFR::EvenOdd,
-                FillRule::NonZero => FFR::NonZero,
-            }); canvas.fill_path(path, paint);
-        }
-
-        FSOpts::Stroke { width, limit,
-            join, cap, dash } => {
-            let paint = &mut style.borrow_mut().0;
-            paint.set_line_width (*width);
-            paint.set_miter_limit(*limit);
-
-            paint.set_line_join(match join {
-                LineJoin::Miter => FLJ::Miter, LineJoin::Round => FLJ::Round,
-                LineJoin::Bevel => FLJ::Bevel,
-            });
-            paint.set_line_cap(match cap {
-                LineCap::Butt   => FLC::Butt,   LineCap::Round => FLC::Round,
-                LineCap::Square => FLC::Square,
-            });
-
-            if dash.len() < 3 { canvas.stroke_path(path, paint); } else {
-                canvas.stroke_path(&path.make_dash(dash[0], &dash[1..]), paint);
-            }
-        }
-    }
-}
-
 use femtovg::{PixelFormat, ImageFlags, RenderTarget};
 const CLEAR_COLOR: VGColor = VGColor::rgbaf(0., 0., 0., 0.);
 
-fn prepare_matte<T: Renderer>(canvas: &mut Canvas<T>, last_trfm: &TM2D,
+fn prepare_matte<T: Renderer>(canvas: &mut Canvas<T>,
     vl: &VisualLayer, matte: &mut Option<TrackMatte>) {
 	if vl.tt.is_none() && matte.is_none() { return }
 
 	// XXX: limit image to viewport/viewbox
 	let (w, h) = (canvas.width(), canvas.height());
-	let (lx, ty) = last_trfm.transform_point(0., 0.);
+	let (lx, ty) = canvas.transform().transform_point(0., 0.);
 	let (lx, ty) = (lx as u32, ty as u32);
 
     if vl.tt.is_some() || vl.has_mask {
@@ -319,8 +252,8 @@ fn prepare_matte<T: Renderer>(canvas: &mut Canvas<T>, last_trfm: &TM2D,
     matte.mskid = Some(mskid);
 }
 
-fn  render_matte<T: Renderer>(canvas: &mut Canvas<T>, last_trfm: &TM2D,
-    vl: &VisualLayer, matte: &mut Option<TrackMatte>, fnth: f32) {
+fn compose_matte<T: Renderer>(canvas: &mut Canvas<T>, vl: &VisualLayer,
+    matte: &mut Option<TrackMatte>, ltm: &TM2DwO, fnth: f32) {
 	if (vl.tt.is_some() || matte.is_none() ||
 		vl.td.is_some_and(|td| !td.as_bool())) && !vl.has_mask { return }
 
@@ -332,7 +265,7 @@ fn  render_matte<T: Renderer>(canvas: &mut Canvas<T>, last_trfm: &TM2D,
 	// XXX: limit image to viewport/viewbox
 	//let (w, h) = canvas.image_size(imgid).unwrap();
 	let (w, h) = (canvas.width(), canvas.height());
-	let (lx, ty) = last_trfm.transform_point(0., 0.);
+	let (lx, ty) = canvas.transform().transform_point(0., 0.);
 	path.rect(lx, ty, w as f32 - lx * 2., h as f32 - ty * 2.);
 
 	if  vl.has_mask {
@@ -353,7 +286,10 @@ fn  render_matte<T: Renderer>(canvas: &mut Canvas<T>, last_trfm: &TM2D,
 
 			canvas.clear_rect(lx as _, ty as _, w - lx as u32 * 2,
 												h - ty as u32 * 2, CLEAR_COLOR);
+
+            let last_trfm = canvas.apply_transform(&ltm.0, Some(ltm.1));
 			canvas.fill_path(&path, &mpaint);
+            canvas.reset_transform();    canvas.set_transform(&last_trfm);  // XXX:
 
 			let cop = match mask.mode {
 				MaskMode::Add       => Some(CompOp::DestinationIn),
@@ -367,9 +303,7 @@ fn  render_matte<T: Renderer>(canvas: &mut Canvas<T>, last_trfm: &TM2D,
 			if let Some(cop) = cop {
 				canvas.global_composite_operation (cop);
 				canvas.set_render_target(RenderTarget::Image(imgid));
-				let last_trfm = canvas.transform(); 	canvas.reset_transform();
 				canvas.fill_path(&path, &paint); 	canvas.flush();
-				canvas.set_transform(&last_trfm);
 			} 	canvas.set_render_target(RenderTarget::Image(mskid));
 		}); 	canvas.delete_image(mskid);
 	}
@@ -388,23 +322,16 @@ fn  render_matte<T: Renderer>(canvas: &mut Canvas<T>, last_trfm: &TM2D,
 			canvas.set_render_target(RenderTarget::Image(imgid));
 
 			let paint = VGPaint::image(mskid, 0., 0., w as _, h as _, 0., 1.);
-			let last_trfm = canvas.transform(); 	canvas.reset_transform();
 			canvas.fill_path(&path, &paint); 	canvas.flush();
-			canvas.set_transform(&last_trfm);
 		} 	canvas.delete_image(mskid);
 	}
 
 	canvas.set_render_target(RenderTarget::Screen);
     canvas.global_composite_operation(CompOp::SourceOver);
-	let last_trfm = canvas.transform(); 	canvas.reset_transform();
 	canvas.fill_path(&path, &VGPaint::image(imgid, 0., 0., w as _, h as _, 0., 1.));
 	canvas.flush(); 	canvas.delete_image(imgid); 	*matte = None;
-    canvas.set_transform(&last_trfm);
 }
 
 struct TrackMatte { mode: MatteMode, mlid: Option<u32>,
     imgid: femtovg::ImageId, mskid: Option<femtovg::ImageId> }
-
-type DrawItem = crate::style::DrawItem<femtovg::Path, femtovg::Paint, femtovg::Transform2D>;
-type TM2DwO = crate::style::TM2DwO<femtovg::Transform2D>;
 

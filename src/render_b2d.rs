@@ -7,8 +7,75 @@
 
 use crate::{helpers::*, pathm::*, style::*};
 
-use intvg::blend2d::{BLPoint, BLPath, BLMatrix2D, BLRgba32, BLSolidColor,
-    BLGradient, BLLinearGradientValues, BLRadialGradientValues};
+use intvg::blend2d::{BLPoint, BLPath, BLMatrix2D, BLContext, BLRgba32,
+    BLSolidColor, BLGradient, BLLinearGradientValues, BLRadialGradientValues};
+
+impl RenderContext for BLContext {
+    type TM2D = BLMatrix2D;
+    type VGStyle = BLStyle;
+    type VGPath  = BLPath;
+
+    fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA) {
+        self.fill_rect_i_rgba32(&(x, y, w, h).into(), color.into());
+        //self.clear_rect_d(&(x, y, w, h).into()); //self.clear_all();
+    }
+    fn reset_transform(&mut self, trfm: Option<&Self::TM2D>) {
+        self.reset_transform(trfm);     //self.set_global_alpha(1.);
+    }
+    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) -> Self::TM2D {
+        let last_trfm = self.get_transform(1);
+        if let Some(opacity) = opacity { self.set_global_alpha(opacity as _) }
+        self.apply_transform(trfm);     last_trfm
+    }
+
+    fn fill_stroke(&mut self, path: &Self::VGPath,
+        style: &core::cell::RefCell<(Self::VGStyle, FSOpts)>) {
+        use intvg::blend2d::{BLFillRule, BLStrokeJoin, BLStrokeCap};
+        use crate::schema::{FillRule, LineJoin, LineCap};
+
+        match &style.borrow().1 {
+            FSOpts::Fill(rule) => {
+                self.set_fill_rule(match rule {
+                    FillRule::NonZero => BLFillRule::BL_FILL_RULE_NON_ZERO,
+                    FillRule::EvenOdd => BLFillRule::BL_FILL_RULE_EVEN_ODD,
+                });
+
+                match &style.borrow().0 {
+                    BLStyle::Solid(color) => self.set_fill_style(color),
+                    BLStyle::Gradient(grad) => self.set_fill_style(grad),
+                }   self.fill_geometry(path);
+            }
+
+            FSOpts::Stroke { width, limit,
+                join, cap, dash } => {
+                self.set_stroke_width(*width as _);
+                self.set_stroke_miter_limit(*limit as _);
+
+                self.set_stroke_join(match join {
+                    LineJoin::Miter => BLStrokeJoin::BL_STROKE_JOIN_MITER_CLIP,
+                    LineJoin::Round => BLStrokeJoin::BL_STROKE_JOIN_ROUND,
+                    LineJoin::Bevel => BLStrokeJoin::BL_STROKE_JOIN_BEVEL,
+                });
+                self.set_stroke_caps(match cap {
+                    LineCap::Butt   => BLStrokeCap::BL_STROKE_CAP_BUTT,
+                    LineCap::Round  => BLStrokeCap::BL_STROKE_CAP_ROUND,
+                    LineCap::Square => BLStrokeCap::BL_STROKE_CAP_SQUARE,
+                });
+
+                if 2 < dash.len() {
+                    self.set_stroke_dash(dash[0] as _,
+                        &dash.iter().skip(1).map(|&x| x as _).collect::<Vec<_>>());
+                    //self.stroke_geometry(&path.make_dash(dash[0], &dash[1..]));
+                }
+
+                match &style.borrow().0 {
+                    BLStyle::Solid(color) => self.set_stroke_style(color),
+                    BLStyle::Gradient(grad) => self.set_stroke_style(grad),
+                }   self.stroke_geometry(path);
+            }
+        }
+    }
+}
 
 impl From<Vec2D> for BLPoint {
     #[inline] fn from(pt: Vec2D) -> Self { (pt.x, pt.y).into() }
@@ -55,10 +122,10 @@ impl PathBuilder for BLPath {
 
 impl MatrixConv for BLMatrix2D {
     #[inline] fn identity() -> Self { Self::identity() }
-    #[inline] fn rotate(&mut self, angle: f32) { self.rotate(angle as _, None) }
-    #[inline] fn translate(&mut self, pos: Vec2D) { self.translate(pos.into()) }
-    #[inline] fn skew_x(&mut self, sk: f32) { self.skew((sk as _, 0.)) }
-    #[inline] fn scale(&mut self, sl: Vec2D) { self.scale((sl.x as _, sl.y as _)) }
+    #[inline] fn rotate(&mut self, angle: f32) { self.post_rotate(angle as _, None) }
+    #[inline] fn translate(&mut self, pos: Vec2D) { self.post_translate(pos.into()) }
+    #[inline] fn skew_x(&mut self, sk: f32) { self.post_skew((sk as _, 0.)) }
+    #[inline] fn scale(&mut self, sl: Vec2D) { self.post_scale((sl.x as _, sl.y as _)) }
     #[inline] fn multiply(&mut self, tm: &Self) { self.transform(tm) }
 }
 

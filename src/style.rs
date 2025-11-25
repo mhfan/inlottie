@@ -11,18 +11,44 @@ use crate::pathm::{PathBuilder, PathFactory};
 pub trait RenderContext {
     type VGPath: PathBuilder;
     type VGStyle: StyleConv;    // (VGBrush/VGPaint, FSOpts)
-    type TM2D: MatrixConv;
+    type TM2D: MatrixConv + Clone;
 
-    //fn clear_rect(&mut self, rect: &Rect);
     //fn set_comp_op(&mut self, op: CompOp);
+    fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA);
 
-    fn get_transform(&self) -> Self::TM2D;
-    fn set_global_alpha(&mut self, alpha: f32);
     fn reset_transform(&mut self, trfm: Option<&Self::TM2D>);
-    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>); // alpha
+    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) -> Self::TM2D;
+    fn fill_stroke(&mut self, path: &Self::VGPath, style: &RefCell<(Self::VGStyle, FSOpts)>);
 
-    fn stroke_path(&mut self, path: &Self::VGPath, style: &Self::VGStyle, fso: &FSOpts);
-    fn   fill_path(&mut self, path: &Self::VGPath, style: &Self::VGStyle, fso: &FSOpts);
+    fn traverse_shapes(&mut self, ptm: &TM2DwO<Self::TM2D>,
+        draws: &[DrawItem<Self::VGPath, Self::VGStyle, Self::TM2D>],
+        style: &RefCell<(Self::VGStyle, FSOpts)>) {
+
+        // XXX: in which case shape/path and style need to apply different transforms?
+        let last_trfm = self.apply_transform(&ptm.0, Some(ptm.1));
+        draws.iter().rev().for_each(
+            |draw| match draw {
+            DrawItem::Shape(path) =>
+                self.fill_stroke(path, style),
+            DrawItem::Group(grp, rep) =>
+                rep.iter().rev().for_each(|gtm|
+                    self.traverse_shapes(&gtm.clone().compose(ptm), grp, style)),
+            _ => (), // skip/ignore Style
+        });     self.reset_transform(Some(&last_trfm));
+    }
+
+    fn render_shapes(&mut self, ptm: &TM2DwO<Self::TM2D>,
+        draws: &[DrawItem<Self::VGPath, Self::VGStyle, Self::TM2D>]) {
+        draws.iter().enumerate().rev().for_each(
+            |(idx, draw)| match draw {
+            DrawItem::Style(style) =>
+                self.traverse_shapes(ptm, &draws[0..idx], style),
+            DrawItem::Group(grp, rep) =>
+                rep.iter().rev().for_each(|gtm|
+                    self.render_shapes(&gtm.clone().compose(ptm), grp)),
+            _ => (), // skip/ignore Shape
+        });
+    }
 }
 
 /// calculate transform matrix, convert shapes to paths, modify/change the paths,
@@ -31,7 +57,7 @@ pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>
     shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
     (Vec<DrawItem<VGPath, VGPaint, TM2D>>, TM2DwO<TM2D>) {
     let mut draws = Vec::with_capacity(shapes.len());
-    let mut trfm = Default::default();
+    let mut ctm = Default::default();
 
     for shape in shapes.iter() { match shape {
         ShapeItem::Rectangle(rect)    if !rect.base.elem.hd =>
@@ -55,16 +81,14 @@ pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>
         ShapeItem::NoStyle(_) => eprintln!("Nothing to do here?"),
 
         ShapeItem::Group(group) if !group.elem.hd => {
-            let (grp, trfm) = convert_shapes(&group.shapes, fnth, ao);
-            draws.push(DrawItem::Group(grp, trfm));
+            let (grp, ctm) =
+                convert_shapes(&group.shapes, fnth, ao);
+            draws.push(DrawItem::Group(grp, vec![ctm]));
         }
 
         ShapeItem::Repeater(mdfr) if !mdfr.elem.hd => {
-            let grp = draws;    draws = vec![];
-            // repeat preceding (Shape/Style) items into new Groups?
-            //mdfr.get_matrix(fnth).into_iter().for_each(|ts|
-            //    draws.push(DrawItem::Group(grp.clone(), ts)));
-            draws.push(DrawItem::Repli(grp, mdfr.get_matrix(fnth)));
+            let grp = core::mem::take(&mut draws);
+            draws.push(DrawItem::Group(grp, mdfr.get_matrix(fnth)));
         }
 
         // other modifiers usually just affect on all preceding paths ever before
@@ -76,18 +100,18 @@ pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>
         ShapeItem::ZigZag(_) | ShapeItem::RoundedCorners(_) => dbg!(),  // TODO:
 
         ShapeItem::Transform(ts) if !ts.elem.hd =>
-            trfm = ts.trfm.to_matrix(fnth, ao),
+            ctm = ts.trfm.to_matrix(fnth, ao),
 
         _ => (),
-    } }     (draws, trfm)
+    } }     (draws, ctm)
 }
 
 use core::cell::RefCell;
+//  https://lottie.github.io/lottie-spec/latest/specs/shapes/#graphic-element
 pub enum DrawItem<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv> {
-    Shape(Box<VGPath>),     // DrawItem is the core Graphic Element
+    Shape(Box<VGPath>),                     // DrawItem is a.k.a Graphic Element
     Style(Box<RefCell<(VGPaint, FSOpts)>>), // RefCell interior mutation for femtovg
-    Group(Vec<DrawItem<VGPath, VGPaint, TM2D>>,     TM2DwO<TM2D>),
-    Repli(Vec<DrawItem<VGPath, VGPaint, TM2D>>, Vec<TM2DwO<TM2D>>), // as batch Groups
+    Group(Vec<Self>, Vec<TM2DwO<TM2D>>),    // support batch Groups for Repeater
 }
 
 fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
@@ -96,8 +120,6 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
         &mut [DrawItem<VGPath, VGPaint, TM2D>], closure: &mut impl FnMut(&mut VGPath)) {
         draws.iter_mut().for_each(|draw| match draw {
             DrawItem::Group(grp, _) =>
-                traverse_shapes(grp, closure),
-            DrawItem::Repli(grp, _) =>
                 traverse_shapes(grp, closure),
             DrawItem::Shape(path) => closure(path),
             _ => (), // skip/ignore Style
@@ -154,19 +176,19 @@ impl MatrixConv for kurbo::Affine {
     #[inline] fn scale(&mut self, sl: Vec2D) {
         *self *= Self::scale_non_uniform(sl.x as _, sl.y as _)
     }
-    #[inline] fn multiply(&mut self, tm: &Self) { *self *= *tm }
+    #[inline] fn multiply(&mut self, tm: &Self) { *self = *tm * *self }     // *self *= *tm
 }
 
-impl From<RGBA> for peniko::Color {
+#[cfg(feature = "vello")] impl From<RGBA> for vello::peniko::Color {
     #[inline] fn from(color: RGBA) -> Self {
         Self::from_rgba8(color.r, color.g, color.b, color.a)
     }
 }
-impl StyleConv for peniko::Brush {
+#[cfg(feature = "vello")] impl StyleConv for vello::peniko::Brush {
     #[inline] fn solid_color(color: RGBA) -> Self { Self::Solid(color.into()) }
     #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D,
             stops: &[(f32, RGBA)]) -> Self {
-        use peniko::{Gradient, ColorStop, color::DynamicColor};
+        use vello::peniko::{Gradient, ColorStop, color::DynamicColor};
         let stops = stops.iter().map(|&(offset, color)|
             (offset, DynamicColor::from_alpha_color(color.into())).into())
             .collect::<Vec<ColorStop>>();
@@ -174,7 +196,7 @@ impl StyleConv for peniko::Brush {
     }
     #[inline] fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
             stops: &[(f32, RGBA)]) -> Self {
-        use peniko::{Gradient, ColorStop, color::DynamicColor};
+        use vello::peniko::{Gradient, ColorStop, color::DynamicColor};
         let stops = stops.iter().map(|&(offset, color)|
             (offset, DynamicColor::from_alpha_color(color.into())).into())
             .collect::<Vec<ColorStop>>();
@@ -198,8 +220,8 @@ pub trait MatrixConv {
 impl<MC: MatrixConv> Default for TM2DwO<MC> {
     fn default() -> Self { Self(MC::identity(), 1.) } }
 impl<MC: MatrixConv> TM2DwO<MC> {
-    #[inline] pub fn multiply(&mut self, other: &Self) {
-            self.0  .multiply(&other.0);  self.1 *= other.1;
+    #[inline] pub fn compose(mut self, other: &Self) -> Self {
+        self.0.multiply(&other.0);  self.1 *= other.1;  self
     }
 }
 
@@ -229,7 +251,7 @@ impl Transform {
                 .map(|axis| axis.get_value(fnth).to_radians());
             if let Some(axis) = axis { trfm.rotate(-axis); }
 
-            let skew = -skew.get_value(fnth); //.clamp(-85., 85.); // SKEW_LIMIT
+            let skew = -skew.get_value(fnth).clamp(-85., 85.);  // SKEW_LIMIT
             trfm.skew_x(skew.to_radians().tan());
 
             if let Some(axis) = axis { trfm.rotate( axis); }
@@ -261,6 +283,20 @@ impl Transform {
                 if sv.z.is_some() { unimplemented!(); }
             }   _ => (),
         }   TM2DwO(trfm, opacity)
+    }
+}
+
+impl VisualLayer {
+    pub fn get_matrix<MC: MatrixConv>(&self, layers: &[LayerItem], fnth: f32) -> TM2DwO<MC> {
+        let ctm = self.ks.to_matrix(fnth, self.ao);
+        if let Some(pid) = self.base.parent {
+            let ptm = layers.iter().find_map(|layer|
+                layer.visual_layer().and_then(|vl|
+                    vl.base.ind.and_then(|ind| if ind == pid {
+                        Some(vl.ks.to_matrix(fnth, vl.ao)) } else { None })));
+
+            if let Some(ptm) = &ptm { ctm.compose(ptm) } else { unreachable!() }
+        } else { ctm }
     }
 }
 
