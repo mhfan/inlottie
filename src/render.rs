@@ -43,6 +43,9 @@ impl PathBuilder for VGPath {    // TODO: reserve capacity, current_pos
 }
 
 impl MatrixConv for TM2D {
+    /*  |a c e|     TM2D::multiply (A' = B * A)
+        |b d f|
+        |0 0 1| */
     #[inline] fn identity() -> Self { Self::identity() }
     #[inline] fn rotate(&mut self, angle: f32) {
         let mut tm = Self::identity();
@@ -61,7 +64,7 @@ impl MatrixConv for TM2D {
         let mut tm = Self::identity();
         tm.scale(sl.x, sl.y);   self.multiply(&tm);
     }
-    #[inline] fn multiply(&mut self, tm: &Self) { self.premultiply(tm) } // self.multiply(tm)
+    #[inline] fn premul(&mut self, tm: &Self) { self.premultiply(tm) }
 }
 
 impl From<RGBA> for VGColor {

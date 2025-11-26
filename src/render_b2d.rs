@@ -121,12 +121,15 @@ impl PathBuilder for BLPath {
 }
 
 impl MatrixConv for BLMatrix2D {
+    /*  | a b 0 |   BLMatrix2D::transform (A' = B * A)
+        | c d 0 |
+        | e f 1 | */
     #[inline] fn identity() -> Self { Self::identity() }
     #[inline] fn rotate(&mut self, angle: f32) { self.post_rotate(angle as _, None) }
     #[inline] fn translate(&mut self, pos: Vec2D) { self.post_translate(pos.into()) }
     #[inline] fn skew_x(&mut self, sk: f32) { self.post_skew((sk as _, 0.)) }
     #[inline] fn scale(&mut self, sl: Vec2D) { self.post_scale((sl.x as _, sl.y as _)) }
-    #[inline] fn multiply(&mut self, tm: &Self) { self.transform(tm) }
+    #[inline] fn premul(&mut self, tm: &Self) { self.transform(tm) }
 }
 
 impl From<RGBA> for BLRgba32 {

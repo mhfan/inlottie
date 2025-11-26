@@ -16,7 +16,7 @@ pub trait RenderContext {
     //fn set_comp_op(&mut self, op: CompOp);
     fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA);
 
-    fn reset_transform(&mut self, trfm: Option<&Self::TM2D>);
+    fn reset_transform(&mut self, trfm: Option<&Self::TM2D>);   // XXX: save/restore
     fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) -> Self::TM2D;
     fn fill_stroke(&mut self, path: &Self::VGPath, style: &RefCell<(Self::VGStyle, FSOpts)>);
 
@@ -169,14 +169,17 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
 }
 
 impl MatrixConv for kurbo::Affine {
+    /*  | a c e |   kurbo::Affine::Mul (A * B)
+        | b d f |
+        | 0 0 1 | */
     #[inline] fn identity() -> Self { Self::IDENTITY }
-    #[inline] fn rotate(&mut self, angle: f32) { *self *= Self::rotate(angle as _) }
-    #[inline] fn translate(&mut self, pos: Vec2D) { *self *= Self::translate(pos) }
-    #[inline] fn skew_x(&mut self, sk: f32) { *self *= Self::skew(sk as _, 0.) }
+    #[inline] fn rotate(&mut self, angle: f32) { *self = self.then_rotate(angle as _) }
+    #[inline] fn translate(&mut self, pos: Vec2D) { *self = Self::translate(pos) * *self }
+    #[inline] fn skew_x(&mut self, sk: f32) { *self = Self::skew(sk as _, 0.) * *self }
     #[inline] fn scale(&mut self, sl: Vec2D) {
-        *self *= Self::scale_non_uniform(sl.x as _, sl.y as _)
+        *self = self.then_scale_non_uniform(sl.x as _, sl.y as _)
     }
-    #[inline] fn multiply(&mut self, tm: &Self) { *self = *tm * *self }     // *self *= *tm
+    #[inline] fn premul(&mut self, tm: &Self) { *self *= *tm }
 }
 
 #[cfg(feature = "vello")] impl From<RGBA> for vello::peniko::Color {
@@ -207,7 +210,7 @@ impl MatrixConv for kurbo::Affine {
 
 pub trait MatrixConv {
     fn identity() -> Self;
-    fn multiply(&mut self, tm: &Self);
+    fn premul(&mut self, tm: &Self);
     //fn reset(&mut self, tm: Option<&Self>);
 
     fn rotate(&mut self, angle: f32);
@@ -221,7 +224,7 @@ impl<MC: MatrixConv> Default for TM2DwO<MC> {
     fn default() -> Self { Self(MC::identity(), 1.) } }
 impl<MC: MatrixConv> TM2DwO<MC> {
     #[inline] pub fn compose(mut self, other: &Self) -> Self {
-        self.0.multiply(&other.0);  self.1 *= other.1;  self
+        self.0.premul(&other.0);    self.1 *= other.1;  self
     }
 }
 
