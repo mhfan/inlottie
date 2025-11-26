@@ -310,7 +310,7 @@ impl WinitApp {
                          ContextApi::Gles(None)).build(raw_window_handle)))?
         }.make_current(&surface)?;
 
-        self.state  = Some((surface, glctx));
+        self.state = Some((surface, glctx));
         let mut ctx2d = Canvas::new(unsafe { OpenGl::new_from_function_cstr(
             |s| gl_display.get_proc_address(s) as *const _) }?)?;
         #[cfg(target_os = "macos")] let _ = ctx2d.add_font_dir("/Library/fonts");
@@ -696,12 +696,13 @@ fn render_nodes<T: Renderer>(ctx2d: &mut Canvas<T>, mouse: (f32, f32),
 fn some_test_case<T: Renderer>(ctx2d: &mut Canvas<T>) {
     let (w, h) = (ctx2d.width(), ctx2d.height());
     let (w, h) = (w as f32, h as f32);
-    use femtovg::{Path, Color, Paint};
+    use femtovg::{Path, Color, Paint, PixelFormat,
+        ImageFlags, RenderTarget, CompositeOperation};
 
     let imgid = ctx2d.create_image_empty(w as _, h as _,
-        femtovg::PixelFormat::Rgba8, femtovg::ImageFlags::FLIP_Y).unwrap();
-    ctx2d.set_render_target(femtovg::RenderTarget::Image(imgid));
-    ctx2d.clear_rect(0, 0, w as _, h as _, femtovg::Color::rgbaf(0., 0., 0., 0.));
+        PixelFormat::Rgba8, ImageFlags::FLIP_Y).unwrap();
+    ctx2d.set_render_target(RenderTarget::Image(imgid));
+    ctx2d.clear_rect(0, 0, w as _, h as _, Color::rgbaf(0., 0., 0., 0.));
 
     let (lx, ty) = (w / 4., h / 4.);
     let mut path = Path::new();     path.rect(lx, ty, w / 2., h / 2.);
@@ -709,23 +710,23 @@ fn some_test_case<T: Renderer>(ctx2d: &mut Canvas<T>) {
     ctx2d.  fill_path(&path, &Paint::color(Color::rgbaf(1., 0.5, 0.5, 1.)));
 
     let mskid = ctx2d.create_image_empty(w as _, h as _,
-        femtovg::PixelFormat::Rgba8, femtovg::ImageFlags::FLIP_Y).unwrap();
-    ctx2d.set_render_target(femtovg::RenderTarget::Image(mskid));
-    ctx2d.clear_rect(0, 0, w as _, h as _, femtovg::Color::rgbaf(0., 0., 0., 0.));
+        PixelFormat::Rgba8, ImageFlags::FLIP_Y).unwrap();
+    ctx2d.set_render_target(RenderTarget::Image(mskid));
+    ctx2d.clear_rect(0, 0, w as _, h as _, Color::rgbaf(0., 0., 0., 0.));
 
     let (mut path, rx, by) = (Path::new(), w - lx, h - ty - 10.);
     path.move_to(w / 2., ty); path.line_to(rx, by); path.line_to(lx, by); path.close();
     ctx2d.fill_path(&path, &Paint::color(Color::rgbaf(0., 1., 0., 1.)));
 
     path = Path::new();  path.rect(0., 0., w, h);
-    ctx2d.global_composite_operation(femtovg::CompositeOperation::DestinationIn);
-    ctx2d.set_render_target(femtovg::RenderTarget::Image(imgid));
-    let paint = femtovg::Paint::image(mskid, 0., 0., w, h, 0., 1.);
+    ctx2d.global_composite_operation(CompositeOperation::DestinationIn);
+    ctx2d.set_render_target(RenderTarget::Image(imgid));
+    let paint = Paint::image(mskid, 0., 0., w, h, 0., 1.);
     ctx2d.fill_path(&path, &paint);     ctx2d.flush();  ctx2d.delete_image(mskid);
 
-    ctx2d.global_composite_operation(femtovg::CompositeOperation::SourceOver);
-    ctx2d.set_render_target(femtovg::RenderTarget::Screen);
-    let paint = femtovg::Paint::image(imgid, 0., 0., w, h, 0., 1.);
+    ctx2d.global_composite_operation(CompositeOperation::SourceOver);
+    ctx2d.set_render_target(RenderTarget::Screen);
+    let paint = Paint::image(imgid, 0., 0., w, h, 0., 1.);
     ctx2d.fill_path(&path, &paint);     ctx2d.flush();  ctx2d.delete_image(imgid);
 }
 
