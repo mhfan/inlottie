@@ -17,7 +17,7 @@ pub struct ActiveRenderState<'s> {
 }
 
 enum RenderState<'s> {
-    Active(ActiveRenderState<'s>),
+    Active(Box<ActiveRenderState<'s>>),
     // Cache a window so that it can be reused when the app is resumed after being suspended
     Suspended(Option<Arc<Window>>),
 }
@@ -95,13 +95,15 @@ fn main() -> anyhow::Result<()> {
                 renderers.resize_with(render_cx.devices.len(), || None);
                 renderers[surface.dev_id].get_or_insert_with(|| Renderer::new(
                     &render_cx.devices[surface.dev_id].device,
-                    RendererOptions { surface_format: Some(surface.format), use_cpu: false,
+                    RendererOptions { //surface_format: Some(surface.format),
+                        use_cpu: false, pipeline_cache: None,
                         antialiasing_support: vello::AaSupport::all(),
                         num_init_threads: std::num::NonZeroUsize::new(1) }
                 ).expect("Couldn't create renderer"));
 
                 // Save the Window and Surface to a state variable
-                render_state = RenderState::Active(ActiveRenderState { window, surface });
+                render_state = RenderState::Active(Box::new(
+                    ActiveRenderState { window, surface }));
                 elwt.set_control_flow(ControlFlow::Poll);
             }
 
@@ -183,17 +185,17 @@ fn main() -> anyhow::Result<()> {
                         let device_handle = &render_cx.devices[surface.dev_id];
 
                         // Render to the surface's texture
-                        renderers[surface.dev_id].as_mut().unwrap().render_to_surface(
+                        renderers[surface.dev_id].as_mut().unwrap().render_to_texture(
                             &device_handle.device, &device_handle.queue,
-                            &scene, &surface_texture,   // Background color
-                            &vello::RenderParams { base_color: Color::rgb8(99, 99, 99), 
+                            &scene, &surface.target_view,   // Background color
+                            &vello::RenderParams { base_color: Color::from_rgb8(99, 99, 99),
                                 width, height, antialiasing_method: AaConfig::Msaa16 }
                         ).expect("failed to render to surface");
                         perf.update(prevt.elapsed().as_secs_f32());
 
                         // Queue the texture to be presented on the surface
                         surface_texture.present();
-                        device_handle.device.poll(wgpu::Maintain::Poll);
+                        let _ = device_handle.device.poll(wgpu::PollType::Poll);
                     }   _ => ()
                 }
             }   _ => ()
@@ -208,32 +210,32 @@ fn add_shapes_to_scene(scene: &mut Scene) {
     // Draw an outlined rectangle
     let stroke = Stroke::new(6.0);
     let rect = RoundedRect::new(10.0, 10.0, 240.0, 240.0, 20.0);
-    let rect_stroke_color = Color::rgb(0.9804, 0.702, 0.5294);
+    let rect_stroke_color = Color::new([0.9804, 0.702, 0.5294, 1.]);
     scene.stroke(&stroke, Affine::IDENTITY, rect_stroke_color, None, &rect);
 
     // Draw a filled circle
     let circle = Circle::new((420.0, 200.0), 120.0);
-    let circle_fill_color = Color::rgb(0.9529, 0.5451, 0.6588);
+    let circle_fill_color = Color::new([0.9529, 0.5451, 0.6588, 1.]);
     scene.fill(peniko::Fill::NonZero, Affine::IDENTITY, circle_fill_color, None, &circle);
 
     // Draw a filled ellipse
     let ellipse = Ellipse::new((250.0, 420.0), (100.0, 160.0), -90.0);
-    let ellipse_fill_color = Color::rgb(0.7961, 0.651, 0.9686);
+    let ellipse_fill_color = Color::new([0.7961, 0.651, 0.9686, 1.]);
     scene.fill(peniko::Fill::NonZero, Affine::IDENTITY, ellipse_fill_color, None, &ellipse);
 
     // Draw a straight line
     let line = Line::new((260.0, 20.0), (620.0, 100.0));
-    let line_stroke_color = Color::rgb(0.5373, 0.7059, 0.9804);
+    let line_stroke_color = Color::new([0.5373, 0.7059, 0.9804, 1.]);
     scene.stroke(&stroke, Affine::IDENTITY, line_stroke_color, None, &line);
 }
 
 pub struct PerfGraph { que: VecDeque<f32>, max: f32, sum: f32
-    /*, time: Instant*/, font: Option<peniko::Font> }
+    /*, time: Instant*/, font: Option<peniko::FontData> }
 
 impl PerfGraph {
     #[allow(clippy::new_without_default)] pub fn new() -> Self {
         let font = std::fs::read("data/Roboto-Regular.ttf").ok()
-            .map(|data| peniko::Font::new(peniko::Blob::new(Arc::new(data)), 0));
+            .map(|data| peniko::FontData::new(peniko::Blob::new(Arc::new(data)), 0));
         Self { que: VecDeque::with_capacity(100), max: 0., sum: 0.
             /*, time: Instant::now()*/, font }
     }
@@ -249,7 +251,7 @@ impl PerfGraph {
         let (rw, rh, mut path) = (100., 20., BezPath::new());
         let trfm = Affine::translate((x as f64, y as f64));
 
-        scene.fill(peniko::Fill::NonZero, trfm, Color::rgba8(0, 0, 0, 99),
+        scene.fill(peniko::Fill::NonZero, trfm, Color::from_rgba8(0, 0, 0, 99),
             None, &Rect::new(0., 0., rw, rh));  // to clear the exact area?
 
             path.move_to((0., rh));
@@ -258,12 +260,12 @@ impl PerfGraph {
                 rh - rh * self.que[i] as f64 / self.max  as f64));
         }   path.line_to((rw, rh));
 
-        scene.fill(peniko::Fill::NonZero, trfm, Color::rgba8(255, 192, 0, 128), None, &path);
+        scene.fill(peniko::Fill::NonZero, trfm, Color::from_rgba8(255, 192, 0, 128), None, &path);
         let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
 
         if self.font.is_none() { return }   let font = self.font.as_ref().unwrap();
         let (font_size, mut pen) = (14., (rw as f32 - 10., 0.));
-        use vello::skrifa::{raw::FileRef, MetadataProvider, instance::Size};
+        use skrifa::{raw::FileRef, MetadataProvider, instance::Size};
         let font_ref = match FileRef::new(font.data.as_ref()).unwrap() {
             FileRef::Collection(collection) => collection.get(font.index).unwrap(),
             FileRef::Font(font) => font,
@@ -276,7 +278,7 @@ impl PerfGraph {
         let charmap  = font_ref.charmap();
 
         scene.draw_glyphs(font).font_size(font_size).transform(trfm)
-             .brush(Color::rgba8(240, 240, 240, 255))
+             .brush(Color::from_rgba8(240, 240, 240, 255))
              .draw(peniko::Fill::NonZero, format!("{fps:.2} FPS").chars().rev().map(|ch| {
                 let gid =  charmap.map(ch).unwrap_or_default();
                 pen.0 -= metrics.advance_width(gid).unwrap_or_default();

@@ -48,27 +48,43 @@ use vello::{Scene, peniko};
     render_group(scene, svg.root(), &usvg::Transform::identity(), error_handler);
 }
 
-const DEFAULT_BM: peniko::BlendMode = peniko::BlendMode {
-    mix: peniko::Mix::Clip,  compose: peniko::Compose::SrcOver,
-};
-
 fn render_group<F: FnMut(&mut Scene, &usvg::Node)>(scene: &mut Scene,
     group: &usvg::Group, ts: &usvg::Transform, error_handler: &mut F) {
     for node in group.children() {
+        //let trfm = util::to_affine(ts) * util::to_affine(&node.abs_transform());
         match node {
             usvg::Node::Group(group) => {
-                let mut pushed_clip = false;
-                if let Some(clip_path) = group.clip_path() {
-                    if let Some(usvg::Node::Path(clip_path)) =
-                        clip_path.root().children().first() {
-                        // XXX: support clip-path with a single path only
-                        scene.push_layer(DEFAULT_BM, 1.0, util::to_affine(ts),
-                            &util::to_bez_path(clip_path));     pushed_clip = true;
-                    }
-                }   // TODO: deal with group.mask()/filters()
+                let mix = match group.blend_mode() {
+                    usvg::BlendMode::Normal     => peniko::Mix::Normal,
+                    usvg::BlendMode::Multiply   => peniko::Mix::Multiply,
+                    usvg::BlendMode::Screen     => peniko::Mix::Screen,
+                    usvg::BlendMode::Overlay    => peniko::Mix::Overlay,
+                    usvg::BlendMode::Darken     => peniko::Mix::Darken,
+                    usvg::BlendMode::Lighten    => peniko::Mix::Lighten,
+                    usvg::BlendMode::ColorDodge => peniko::Mix::ColorDodge,
+                    usvg::BlendMode::ColorBurn  => peniko::Mix::ColorBurn,
+                    usvg::BlendMode::HardLight  => peniko::Mix::HardLight,
+                    usvg::BlendMode::SoftLight  => peniko::Mix::SoftLight,
+                    usvg::BlendMode::Difference => peniko::Mix::Difference,
+                    usvg::BlendMode::Exclusion  => peniko::Mix::Exclusion,
+                    usvg::BlendMode::Hue        => peniko::Mix::Hue,
+                    usvg::BlendMode::Saturation => peniko::Mix::Saturation,
+                    usvg::BlendMode::Color      => peniko::Mix::Color,
+                    usvg::BlendMode::Luminosity => peniko::Mix::Luminosity,
+                };  // TODO: deal with group.mask()/filters()
 
-                render_group(scene, group, &ts.pre_concat(group.transform()), error_handler);
-                if pushed_clip { scene.pop_layer(); }
+                let clipped = match group.clip_path()
+                    .and_then(|path| path.root().children().first()) {
+                    Some(usvg::Node::Path(clip_path)) => {
+                        let local_path = util::to_bez_path(clip_path);
+                        scene.push_layer(peniko::BlendMode { mix,
+                                compose: peniko::Compose::SrcOver, },
+                            group.opacity().get(), util::to_affine(ts), &local_path);   true
+                    }   _ => false,
+                };  // support clip-path with a single path
+
+                render_group(scene, group, &usvg::Transform::identity(), error_handler);
+                if clipped { scene.pop_layer(); }
             }
             usvg::Node::Path(path) => if path.is_visible() {
                 let local_path = util::to_bez_path(path);
@@ -114,7 +130,7 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node)>(scene: &mut Scene,
                     usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) => {
                         let Ok(image) = util::decode_raw_raster_image(img.kind())
                         else { error_handler(scene, node); continue };
-                        scene.draw_image(&image, util::to_affine(ts));
+                        scene.draw_image(&util::into_image(image), util::to_affine(ts));
                     }
                     usvg::ImageKind::SVG(svg) =>
                         render_group(scene, svg.root(), ts, error_handler),
@@ -128,17 +144,17 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node)>(scene: &mut Scene,
 }
 
 mod util {
-use vello::peniko::{self, Brush, Color, Fill, Image};
-use vello::kurbo::{Affine, BezPath, Point, Rect, Stroke};
+use vello::kurbo::{Affine, BezPath, Rect, Stroke};
+use vello::peniko::{self, Brush, Color, Fill, color::palette};
 
 #[inline] pub fn to_affine(ts: &usvg::Transform) -> Affine {
-    Affine::new([ts.sx, ts.kx, ts.ky, ts.sy, ts.tx, ts.ty].map(f64::from))
+    Affine::new([ts.sx, ts.ky, ts.kx, ts.sy, ts.tx, ts.ty].map(f64::from))
 }
 
 pub fn to_stroke(stroke: &usvg::Stroke) -> Stroke {
     use usvg::{LineCap, LineJoin};  use vello::kurbo::{Cap, Join};
 
-    let mut conv_stroke = Stroke::new(stroke.width().get() as _)
+    let conv_stroke = Stroke::new(stroke.width().get() as _)
           .with_caps(match stroke.linecap() {
             LineCap::Butt   => Cap::Butt,
             LineCap::Round  => Cap::Round,
@@ -163,7 +179,7 @@ pub fn to_bez_path(path: &usvg::Path) -> BezPath {
         match elt {
             MoveTo(p) => local_path.move_to((p.x, p.y)),
             LineTo(p) => local_path.line_to((p.x, p.y)),
-            QuadTo(p1, p2) => local_path .quad_to((p1.x, p1.y), (p2.x, p2.y)),
+            QuadTo(p1, p2) => local_path.quad_to((p1.x, p1.y), (p2.x, p2.y)),
             CubicTo(p1, p2, p3) =>
                 local_path.curve_to((p1.x, p1.y), (p2.x, p2.y), (p3.x, p3.y)),
             Close => local_path.close_path(),
@@ -175,25 +191,23 @@ pub fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(Brush, A
     use peniko::{ColorStop, Gradient};
     #[inline] fn convert_stops(stops: &[usvg::Stop], opacity: usvg::Opacity) -> Vec<ColorStop> {
         stops.iter().map(|stop| ColorStop {     offset: stop.offset().get(),
-            color: Color::rgba8(stop.color().red, stop.color().green, stop.color().blue,
-            (stop.opacity() * opacity).to_u8())
+            color: Color::from_rgba8(stop.color().red, stop.color().green, stop.color().blue,
+                (stop.opacity() * opacity).to_u8()).into()
         }).collect()
     }
 
     match paint {
-        usvg::Paint::Color(color) => Some((Brush::Solid(Color::rgba8(
+        usvg::Paint::Color(color) => Some((Brush::Solid(Color::from_rgba8(
             color.red, color.green, color.blue, opacity.to_u8())), Affine::IDENTITY)),
         usvg::Paint::LinearGradient(gr) => {
             let gradient = Gradient::new_linear(
-                Point::new(gr.x1() as _, gr.y1() as _),
-                Point::new(gr.x2() as _, gr.y2() as _)
+                (gr.x1(), gr.y1()), (gr.x2(), gr.y2())
             ).with_stops(convert_stops(gr.stops(), opacity).as_slice());
             Some((Brush::Gradient(gradient), to_affine(&gr.transform())))
         }
         usvg::Paint::RadialGradient(gr) => {
             let gradient = Gradient::new_two_point_radial(
-                Point::new(gr.cx() as _, gr.cy() as _), 0.,
-                Point::new(gr.fx() as _, gr.fy() as _), gr.r().get(),
+                (gr.cx(), gr.cy()), 0., (gr.fx(), gr.fy()), gr.r().get(),
             ).with_stops(convert_stops(gr.stops(), opacity).as_slice());
             Some((Brush::Gradient(gradient), to_affine(&gr.transform())))
         }
@@ -208,25 +222,31 @@ pub fn default_error_handler(scene: &mut vello::Scene, node: &usvg::Node) {
     let bb = node.bounding_box();
     let rect = Rect { x0: bb.left()   as _, y0: bb.top()    as _,
                             x1: bb.right()  as _, y1: bb.bottom() as _, };
-    scene.fill(Fill::NonZero, Affine::IDENTITY, Color::RED.multiply_alpha(0.5), None, &rect);
+    scene.fill(Fill::NonZero, Affine::IDENTITY,
+        palette::css::RED.multiply_alpha(0.5), None, &rect);
 }
 
-pub fn decode_raw_raster_image(img: &usvg::ImageKind) -> Result<Image, image::ImageError> {
-    let image = match img {
-        usvg::ImageKind::WEBP(data) =>
-            image::load_from_memory_with_format(data, image::ImageFormat::WebP),
-        usvg::ImageKind::JPEG(data) =>
-            image::load_from_memory_with_format(data, image::ImageFormat::Jpeg),
-        usvg::ImageKind::PNG(data) =>
-            image::load_from_memory_with_format(data, image::ImageFormat::Png),
-        usvg::ImageKind::GIF(data) =>
-            image::load_from_memory_with_format(data, image::ImageFormat::Gif),
-        usvg::ImageKind::SVG(_) => unreachable!(),
-    }?.into_rgba8();
-
+pub fn into_image(image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>) -> peniko::ImageBrush {
     let (width, height) = (image.width(), image.height());
-    Ok(Image::new(peniko::Blob::new(std::sync::Arc::new(image.into_vec())),
-        peniko::Format::Rgba8, width, height))
+    peniko::ImageData {
+        data: peniko::Blob::new(std::sync::Arc::new(image.into_vec())),
+        alpha_type: peniko::ImageAlphaType::AlphaPremultiplied,
+        format: peniko::ImageFormat::Rgba8, width, height,
+    }.into()
+}
+
+pub fn decode_raw_raster_image(img: &usvg::ImageKind) ->
+    Result<image::RgbaImage, image::ImageError> {
+    let (data, format) = match img {
+        usvg::ImageKind::JPEG(data) => (data, image::ImageFormat::Jpeg),
+        usvg::ImageKind::PNG (data) => (data, image::ImageFormat::Png),
+        usvg::ImageKind::GIF (data) => (data, image::ImageFormat::Gif),
+        usvg::ImageKind::WEBP(data) => (data, image::ImageFormat::WebP),
+        usvg::ImageKind::SVG(_) => unreachable!(),
+    };
+
+    image::load_from_memory_with_format(data, format)
+        .map(|dyn_img| dyn_img.into_rgba8())
 }
 
 }
