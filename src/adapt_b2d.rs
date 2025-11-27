@@ -1,19 +1,29 @@
 /****************************************************************
- * $ID: render_b2d.rs  	Thu 20 Nov 2025 16:50:16+0800           *
+ * $ID: adapt_b2d.rs  	Thu 20 Nov 2025 16:50:16+0800           *
  *                                                              *
  * Maintainer: 范美辉 (MeiHui FAN) <mhfan@ustc.edu>              *
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::{helpers::*, pathm::*, style::*};
-
-use intvg::blend2d::{BLPoint, BLPath, BLMatrix2D, BLContext, BLRgba32,
-    BLSolidColor, BLGradient, BLLinearGradientValues, BLRadialGradientValues};
+use crate::{helpers::{Vec2D, RGBA}, pathm::{PathBuilder, BezPath},
+    schema::{FillRule, LineJoin, LineCap}, render::RenderContext,
+    style::{StyleConv, MatrixConv, FSOpts},
+};
+use intvg::blend2d::{BLPoint, BLPath, BLMatrix2D, BLContext, BLRgba32, BLImage,
+    BLSolidColor, BLGradient, BLLinearGradientValues, BLRadialGradientValues,
+    BLFillRule::*, BLStrokeJoin::*, BLStrokeCap::*,
+};
 
 impl RenderContext for BLContext {
+    type ImageID = BLImage;
     type TM2D = BLMatrix2D;
     type VGStyle = BLStyle;
     type VGPath  = BLPath;
+
+    fn get_size(&self) -> (u32, u32) {
+        let sz = self.get_target_size();
+        (sz.width() as _, sz.height() as _)
+    }
 
     fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA) {
         self.fill_rect_i_rgba32(&(x, y, w, h).into(), color.into());
@@ -21,7 +31,7 @@ impl RenderContext for BLContext {
     }
     fn reset_transform(&mut self, trfm: Option<&Self::TM2D>) {
         self.reset_transform(trfm);     //self.set_global_alpha(1.);
-    }
+    }   // XXX: BLContext.set_fill/stroke_alpha()
     fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) -> Self::TM2D {
         let last_trfm = self.get_transform(1);
         if let Some(opacity) = opacity { self.set_global_alpha(opacity as _) }
@@ -30,14 +40,12 @@ impl RenderContext for BLContext {
 
     fn fill_stroke(&mut self, path: &Self::VGPath,
         style: &core::cell::RefCell<(Self::VGStyle, FSOpts)>) {
-        use intvg::blend2d::{BLFillRule, BLStrokeJoin, BLStrokeCap};
-        use crate::schema::{FillRule, LineJoin, LineCap};
 
         match &style.borrow().1 {
             FSOpts::Fill(rule) => {
                 self.set_fill_rule(match rule {
-                    FillRule::NonZero => BLFillRule::BL_FILL_RULE_NON_ZERO,
-                    FillRule::EvenOdd => BLFillRule::BL_FILL_RULE_EVEN_ODD,
+                    FillRule::NonZero => BL_FILL_RULE_NON_ZERO,
+                    FillRule::EvenOdd => BL_FILL_RULE_EVEN_ODD,
                 });
 
                 match &style.borrow().0 {
@@ -52,14 +60,14 @@ impl RenderContext for BLContext {
                 self.set_stroke_miter_limit(*limit as _);
 
                 self.set_stroke_join(match join {
-                    LineJoin::Miter => BLStrokeJoin::BL_STROKE_JOIN_MITER_CLIP,
-                    LineJoin::Round => BLStrokeJoin::BL_STROKE_JOIN_ROUND,
-                    LineJoin::Bevel => BLStrokeJoin::BL_STROKE_JOIN_BEVEL,
+                    LineJoin::Miter => BL_STROKE_JOIN_MITER_CLIP,
+                    LineJoin::Round => BL_STROKE_JOIN_ROUND,
+                    LineJoin::Bevel => BL_STROKE_JOIN_BEVEL,
                 });
                 self.set_stroke_caps(match cap {
-                    LineCap::Butt   => BLStrokeCap::BL_STROKE_CAP_BUTT,
-                    LineCap::Round  => BLStrokeCap::BL_STROKE_CAP_ROUND,
-                    LineCap::Square => BLStrokeCap::BL_STROKE_CAP_SQUARE,
+                    LineCap::Butt   => BL_STROKE_CAP_BUTT,
+                    LineCap::Round  => BL_STROKE_CAP_ROUND,
+                    LineCap::Square => BL_STROKE_CAP_SQUARE,
                 });
 
                 if 2 < dash.len() {
@@ -77,9 +85,6 @@ impl RenderContext for BLContext {
     }
 }
 
-impl From<Vec2D> for BLPoint {
-    #[inline] fn from(pt: Vec2D) -> Self { (pt.x, pt.y).into() }
-}
 impl PathBuilder for BLPath {
     #[inline] fn new(capacity: u32) -> Self {
         let mut path = Self::new();
@@ -103,7 +108,8 @@ impl PathBuilder for BLPath {
     }
     #[inline] fn elliptic_arc_to(&mut self, radii: Vec2D,
         x_rot: f32, large: bool, sweep: bool, end: Vec2D) {
-        self.elliptic_arc_to((radii.x as _, radii.y as _), x_rot as _, large, sweep, end.into())
+        self.elliptic_arc_to((radii.x as _, radii.y as _),
+            x_rot as _, large, sweep, end.into())
     }
 
     fn to_kurbo(&self) -> BezPath {   use intvg::blend2d::BLPathItem::*;
@@ -119,6 +125,7 @@ impl PathBuilder for BLPath {
         }); pb
     }
 }
+impl From<Vec2D> for BLPoint { #[inline] fn from(pt: Vec2D) -> Self { (pt.x, pt.y).into() } }
 
 impl MatrixConv for BLMatrix2D {
     /*  | a b 0 |   BLMatrix2D::transform (A' = B * A)
@@ -132,10 +139,6 @@ impl MatrixConv for BLMatrix2D {
     #[inline] fn premul(&mut self, tm: &Self) { self.transform(tm) }
 }
 
-impl From<RGBA> for BLRgba32 {
-    #[inline] fn from(color: RGBA) -> Self { (color.r, color.g, color.b, color.a).into() }
-}
-pub enum BLStyle { Solid(BLSolidColor), Gradient(BLGradient), }
 impl StyleConv for BLStyle {
     #[inline] fn solid_color(color: RGBA) -> Self {
         Self::Solid(BLSolidColor::init_rgba32(color.into()))
@@ -155,5 +158,10 @@ impl StyleConv for BLStyle {
         Self::Gradient(BLGradient::new(&BLRadialGradientValues::
             new(cp.into(), fp.into(), (radii.0 as _, radii.1 as _))).with_stops(&stops))
     }
+}
+
+pub enum BLStyle { Solid(BLSolidColor), Gradient(BLGradient), }
+impl From<RGBA> for BLRgba32 {
+    #[inline] fn from(color: RGBA) -> Self { (color.r, color.g, color.b, color.a).into() }
 }
 

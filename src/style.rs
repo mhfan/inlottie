@@ -5,214 +5,83 @@
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::{schema::*, helpers::*};
-use crate::pathm::{PathBuilder, PathFactory};
-
-pub trait RenderContext {
-    type VGPath: PathBuilder;
-    type VGStyle: StyleConv;    // (VGBrush/VGPaint, FSOpts)
-    type TM2D: MatrixConv + Clone;
-
-    //fn set_comp_op(&mut self, op: CompOp);
-    fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA);
-
-    fn reset_transform(&mut self, trfm: Option<&Self::TM2D>);   // XXX: save/restore
-    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) -> Self::TM2D;
-    fn fill_stroke(&mut self, path: &Self::VGPath, style: &RefCell<(Self::VGStyle, FSOpts)>);
-
-    fn traverse_shapes(&mut self, ptm: &TM2DwO<Self::TM2D>,
-        draws: &[DrawItem<Self::VGPath, Self::VGStyle, Self::TM2D>],
-        style: &RefCell<(Self::VGStyle, FSOpts)>) {
-
-        // XXX: in which case shape/path and style need to apply different transforms?
-        let last_trfm = self.apply_transform(&ptm.0, Some(ptm.1));
-        draws.iter().rev().for_each(
-            |draw| match draw {
-            DrawItem::Shape(path) =>
-                self.fill_stroke(path, style),
-            DrawItem::Group(grp, rep) =>
-                rep.iter().rev().for_each(|gtm|
-                    self.traverse_shapes(&gtm.clone().compose(ptm), grp, style)),
-            _ => (), // skip/ignore Style
-        });     self.reset_transform(Some(&last_trfm));
-    }
-
-    fn render_shapes(&mut self, ptm: &TM2DwO<Self::TM2D>,
-        draws: &[DrawItem<Self::VGPath, Self::VGStyle, Self::TM2D>]) {
-        draws.iter().enumerate().rev().for_each(
-            |(idx, draw)| match draw {
-            DrawItem::Style(style) =>
-                self.traverse_shapes(ptm, &draws[0..idx], style),
-            DrawItem::Group(grp, rep) =>
-                rep.iter().rev().for_each(|gtm|
-                    self.render_shapes(&gtm.clone().compose(ptm), grp)),
-            _ => (), // skip/ignore Shape
-        });
-    }
-}
-
-/// calculate transform matrix, convert shapes to paths, modify/change the paths,
-/// and convert style(fill/stroke/gradient) to draw items, recursively
-pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
-    shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
-    (Vec<DrawItem<VGPath, VGPaint, TM2D>>, TM2DwO<TM2D>) {
-    let mut draws = Vec::with_capacity(shapes.len());
-    let mut ctm = Default::default();
-
-    for shape in shapes.iter() { match shape {
-        ShapeItem::Rectangle(rect)    if !rect.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(rect.to_path(fnth)))),
-        ShapeItem::Polystar(star) if !star.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(star.to_path(fnth)))),
-        ShapeItem::Ellipse(elps)        if !elps.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(elps.to_path(fnth)))),
-        ShapeItem::Path(curv)          if !curv.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(curv.to_path(fnth)))),
-
-        // styles affect on all preceding paths ever before
-        ShapeItem::Fill(fill)   if !fill.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(fill.to_style(fnth).into()))),
-        ShapeItem::Stroke(line) if !line.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(line.to_style(fnth).into()))),
-        ShapeItem::GradientFill(grad)   if !grad.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(grad.to_style(fnth).into()))),
-        ShapeItem::GradientStroke(grad) if !grad.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(grad.to_style(fnth).into()))),
-        ShapeItem::NoStyle(_) => eprintln!("Nothing to do here?"),
-
-        ShapeItem::Group(group) if !group.elem.hd => {
-            let (grp, ctm) =
-                convert_shapes(&group.shapes, fnth, ao);
-            draws.push(DrawItem::Group(grp, vec![ctm]));
-        }
-
-        ShapeItem::Repeater(mdfr) if !mdfr.elem.hd => {
-            let grp = core::mem::take(&mut draws);
-            draws.push(DrawItem::Group(grp, mdfr.get_matrix(fnth)));
-        }
-
-        // other modifiers usually just affect on all preceding paths ever before
-        ShapeItem::Trim(mdfr) if !mdfr.elem.hd =>
-            trim_shapes(mdfr, &mut draws, fnth),
-
-        ShapeItem::Merge (_) | ShapeItem::OffsetPath (_) |
-        ShapeItem::Twist (_) | ShapeItem::PuckerBloat(_) |
-        ShapeItem::ZigZag(_) | ShapeItem::RoundedCorners(_) => dbg!(),  // TODO:
-
-        ShapeItem::Transform(ts) if !ts.elem.hd =>
-            ctm = ts.trfm.to_matrix(fnth, ao),
-
-        _ => (),
-    } }     (draws, ctm)
-}
-
-use core::cell::RefCell;
-//  https://lottie.github.io/lottie-spec/latest/specs/shapes/#graphic-element
-pub enum DrawItem<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv> {
-    Shape(Box<VGPath>),                     // DrawItem is a.k.a Graphic Element
-    Style(Box<RefCell<(VGPaint, FSOpts)>>), // RefCell interior mutation for femtovg
-    Group(Vec<Self>, Vec<TM2DwO<TM2D>>),    // support batch Groups for Repeater
-}
-
-fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
-    mdfr: &TrimPath, draws: &mut [DrawItem<VGPath, VGPaint, TM2D>], fnth: f32) {
-    fn traverse_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(draws:
-        &mut [DrawItem<VGPath, VGPaint, TM2D>], closure: &mut impl FnMut(&mut VGPath)) {
-        draws.iter_mut().for_each(|draw| match draw {
-            DrawItem::Group(grp, _) =>
-                traverse_shapes(grp, closure),
-            DrawItem::Shape(path) => closure(path),
-            _ => (), // skip/ignore Style
-        });
-    }       // XXX: how to treat repeated shapes?
-
-    let offset   = mdfr.offset.get_value(fnth) as f64 / 360.;
-    let start    = mdfr. start.get_value(fnth) as f64 / 100.;
-    let mut trim = mdfr.   end.get_value(fnth) as f64 / 100. - start;
-    if 1. < trim { trim = 1.; } //debug_assert!((0.0..=1.).contains(&trim));
-    let start = (start + offset) % 1.;
-
-    if mdfr.multiple.is_some_and(|ml| matches!(ml, TrimMultiple::Simultaneously)) {
-        traverse_shapes(draws, &mut |path| *path = path.trim_path(start, trim));
-    } else {    use kurbo::ParamCurveArclen;
-        let (mut idx, mut suml) = (0u32, 0.);
-        let (mut lens, mut tri0) = (vec![], 0.);
-
-        traverse_shapes(draws, &mut |path| {
-            let len = kurbo::segments(path.to_kurbo()).fold(0.,
-                |acc, seg| acc + seg.arclen(ACCURACY_TOLERANCE));
-            lens.push(len);     suml += len;
-        });
-
-        if 1. < start + trim { tri0 = start + trim - 1.; trim = 1. - start; }
-        let (start, mut trim) = (suml * start, suml * trim);
-        tri0 *= suml;   suml = 0.;
-
-        traverse_shapes(draws, &mut |path| {    // same logic as in trim_path
-            let len = lens[idx as usize];   idx += 1;
-
-            if suml <= start &&  start < suml + len {   let start = start - suml;
-                if  start + trim < len {
-                    *path = path.trim_path(start / len, trim  / len);  trim = 0.;
-                } else { trim -= len - start;   let start = start / len;
-                    *path = path.trim_path(start, 1. - start);
-                }
-            } else if start < suml && 0. < trim { if trim < len {
-                    *path = path.trim_path(0., (trim / len) as _);     trim = 0.;
-                } else { trim -= len; }
-            } else if 0. < tri0 { if tri0 < len {
-                    *path = path.trim_path(0., (tri0 / len) as _);     tri0 = 0.;
-                } else { tri0 -= len; }
-            } else { *path = VGPath::new(0); }  suml += len;
-        });
-    }
-}
+use crate::{helpers::{Vec2D, RGBA, IntBool, math},
+    schema::{Transform, Translation, TransRotation, VisualLayer, LayerItem,
+        FillStrokeGrad, ColorGrad, FillStroke, FillRule, GradientType,
+        Repeater, Composite, LineJoin, LineCap, StrokeDashType}
+};
 
 impl MatrixConv for kurbo::Affine {
-    /*  | a c e |   kurbo::Affine::Mul (A * B)
+    /*  | a c e |          Affine::Mul (self * other)
         | b d f |
         | 0 0 1 | */
     #[inline] fn identity() -> Self { Self::IDENTITY }
     #[inline] fn rotate(&mut self, angle: f32) { *self = self.then_rotate(angle as _) }
     #[inline] fn translate(&mut self, pos: Vec2D) { *self = Self::translate(pos) * *self }
-    #[inline] fn skew_x(&mut self, sk: f32) { *self = Self::skew(sk as _, 0.) * *self }
-    #[inline] fn scale(&mut self, sl: Vec2D) {
+    #[inline] fn skew_x(&mut self, sk: f32) { *self = Self::skew(sk.tan() as _, 0.) * *self }
+    #[inline] fn scale(&mut self, sl: Vec2D) {      // Affine didn't do tan() inside
         *self = self.then_scale_non_uniform(sl.x as _, sl.y as _)
     }
     #[inline] fn premul(&mut self, tm: &Self) { *self *= *tm }
 }
 
-#[cfg(feature = "vello")] impl From<RGBA> for vello::peniko::Color {
+#[cfg(feature = "vello")] impl StyleConv for peniko::Brush {
+    #[inline] fn solid_color(color: RGBA) -> Self { Self::Solid(color.into()) }
+    #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D,
+            stops: &[(f32, RGBA)]) -> Self {
+        let stops = stops.iter().map(|&(offset, color)|
+            (offset, DynamicColor::from_alpha_color(color.into())).into())
+            .collect::<Vec<ColorStop>>();
+        Self::Gradient(peniko::Gradient::new_linear(sp, ep).with_stops(stops.as_slice()))
+    }
+    #[inline] fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
+            stops: &[(f32, RGBA)]) -> Self {
+        let stops = stops.iter().map(|&(offset, color)|
+            (offset, DynamicColor::from_alpha_color(color.into())).into())
+            .collect::<Vec<ColorStop>>();
+        Self::Gradient(peniko::Gradient::new_two_point_radial(cp, radii.0, fp, radii.1)
+            .with_stops(stops.as_slice()))
+    }
+}
+#[cfg(feature = "vello")] use vello::peniko::{self, ColorStop, color::DynamicColor};
+#[cfg(feature = "vello")] impl From<RGBA> for peniko::Color {
     #[inline] fn from(color: RGBA) -> Self {
         Self::from_rgba8(color.r, color.g, color.b, color.a)
     }
 }
-#[cfg(feature = "vello")] impl StyleConv for vello::peniko::Brush {
-    #[inline] fn solid_color(color: RGBA) -> Self { Self::Solid(color.into()) }
-    #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D,
-            stops: &[(f32, RGBA)]) -> Self {
-        use vello::peniko::{Gradient, ColorStop, color::DynamicColor};
-        let stops = stops.iter().map(|&(offset, color)|
-            (offset, DynamicColor::from_alpha_color(color.into())).into())
-            .collect::<Vec<ColorStop>>();
-        Self::Gradient(Gradient::new_linear(sp, ep).with_stops(stops.as_slice()))
-    }
-    #[inline] fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
-            stops: &[(f32, RGBA)]) -> Self {
-        use vello::peniko::{Gradient, ColorStop, color::DynamicColor};
-        let stops = stops.iter().map(|&(offset, color)|
-            (offset, DynamicColor::from_alpha_color(color.into())).into())
-            .collect::<Vec<ColorStop>>();
-        Self::Gradient(Gradient::new_two_point_radial(cp, radii.0, fp, radii.1)
-            .with_stops(stops.as_slice()))
-    }
-}
 
+/** ```
+    let  a = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let  b = [7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
+    let ab = [31.0, 46.0, 39.0, 58.0, 52.0, 76.0];
+    assert_eq!(Affine::new(a) * Affine::new(b), Affine::new(ab));
+
+    let to_f32 = |x: f64| x as f32;     // Into::into
+    let mut t = TM2D(a.map(to_f32));    t.premultiply(&TM2D(b.map(to_f32)));
+    assert_eq!(t, TM2D(ab.map(to_f32)));    use femtovg::Transform2D as TM2D;
+
+    use intvg::blend2d::BLMatrix2D;     use kurbo::Affine;
+    let mut t = BLMatrix2D::new(a);     t.transform(&BLMatrix2D::new(b));
+    assert_eq!(t.get_values(), BLMatrix2D::new(ab).get_values());
+
+    fn operate_matrix(t: &mut impl MatrixConv) {
+        t.translate(-Vec2D::from((1., 2.))); t.scale((3., 4.).into());
+        t.rotate(-0.5); t.skew_x(-0.6); t.rotate(0.5);
+        t.rotate(-0.7); t.translate((8., 9.).into());
+    }
+
+    use inlottie::{style::MatrixConv, helpers::Vec2D, adapt_b2d, adapt_nvg};
+    let mut t1 =     Affine::identity(); operate_matrix(&mut t1);
+    let mut t2 =       TM2D::identity(); operate_matrix(&mut t2);
+    let mut t3 = BLMatrix2D::identity(); operate_matrix(&mut t3);
+
+    println!("{t1:?}\n{t2:?}\nBLMatrix2D{:?}", t3.get_values());    //assert!(false);
+    t1.as_coeffs().iter().zip(t2.0.iter()).zip(t3.get_values().iter()).all(|((&v1, &v2), &v3)|
+        (v1 - v2 as f64).abs() < f64::EPSILON && (v1 - v3).abs() < f64::EPSILON);
+ ``` */
 pub trait MatrixConv {
     fn identity() -> Self;
     fn premul(&mut self, tm: &Self);
-    //fn reset(&mut self, tm: Option<&Self>);
-
     fn rotate(&mut self, angle: f32);
     fn translate(&mut self, pos: Vec2D);
     fn skew_x(&mut self, sk: f32);
@@ -221,7 +90,8 @@ pub trait MatrixConv {
 
 #[derive(Clone)] pub struct TM2DwO<MC: MatrixConv>(pub MC, pub f32);
 impl<MC: MatrixConv> Default for TM2DwO<MC> {
-    fn default() -> Self { Self(MC::identity(), 1.) } }
+    #[inline] fn default() -> Self { Self(MC::identity(), 1.) }
+}
 impl<MC: MatrixConv> TM2DwO<MC> {
     #[inline] pub fn compose(mut self, other: &Self) -> Self {
         self.0.premul(&other.0);    self.1 *= other.1;  self
@@ -229,7 +99,10 @@ impl<MC: MatrixConv> TM2DwO<MC> {
 }
 
 impl Transform {
+    /// https://lottie.github.io/lottie-spec/latest/single-page/#specs-helpers-transform
+    ///
     /// Multiplications are RIGHT multiplications (Next = Previous * StepOperation).
+    ///
     /// If your transform is transposed (`tx`, `ty` are on the last column),
     /// perform LEFT multiplication instead. Perform the following operations on a
     /// matrix starting from the identity matrix (or the parent object's transform matrix):
@@ -255,7 +128,7 @@ impl Transform {
             if let Some(axis) = axis { trfm.rotate(-axis); }
 
             let skew = -skew.get_value(fnth).clamp(-85., 85.);  // SKEW_LIMIT
-            trfm.skew_x(skew.to_radians().tan());
+            trfm.skew_x(skew.to_radians());     // do tan() inside
 
             if let Some(axis) = axis { trfm.rotate( axis); }
         }
@@ -359,7 +232,8 @@ pub trait StyleConv {
         stops: &[(f32, RGBA)]) -> Self;
 }
 
-pub enum FSOpts {   Fill(FillRule),     /// dash\[0\] is offset indeed; use SmallVec for dash?
+pub enum FSOpts {   Fill(FillRule),
+    /// dash\[0\] is offset indeed; XXX: use SmallVec for dash?
     Stroke { width: f32, limit: f32, join: LineJoin, cap: LineCap, dash: Vec<f32>, }
 }
 
@@ -389,7 +263,6 @@ impl FillStrokeGrad {
                         ha.get_value(fnth).to_radians()) + math::fast_atan2(dy, dx);
                     let fp = Vec2D::from_polar(ha) * hl + sp;
 
-                    //ctx.createRadialGradient(sp.x, sp.y, 0., fp.x, fp.y, radius); // XXX:
                     // Lottie doesn't have any focal radius concept
                          SC::radial_gradient(sp, fp, (0., radius), &stops)
                 } else { SC::linear_gradient(sp, ep, &stops) }

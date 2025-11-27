@@ -6,7 +6,8 @@
  ****************************************************************/
 
 use core::f32::consts::PI;
-use crate::{schema::*, helpers::*};
+use crate::{helpers::{Vec2D, ACCURACY_TOLERANCE},
+    schema::{Rectangle, Polystar, Ellipse, FreePath, ShapeProperty, StarType}};
 
 // https://docs.rs/kurbo/latest/kurbo/offset/index.html
 // https://github.com/nical/lyon/blob/main/crates/algorithms/src/walk.rs
@@ -54,6 +55,12 @@ pub trait PathBuilder {     //type Point; type Path;
     fn current_pos(&self) -> Option<Vec2D>;
     fn to_kurbo(&self) -> BezPath;
 
+    #[inline] fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.move_to((x + w, y).into());
+        self.line_to((x + w, y + h).into());
+        self.line_to((x,     y + h).into());
+        self.line_to((x,     y).into());    self.close();
+    }
     #[inline] fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
         kurbo::Arc::new(center, radii, start as _, sweep as _, 0.)  // in radians
             .to_cubic_beziers(ACCURACY_TOLERANCE, |ocp, icp, end|
