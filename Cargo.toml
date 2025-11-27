@@ -47,7 +47,7 @@ image = { version = "0.25", optional = true } #features = [ "png", "jpeg", "gif"
 #wgpu  = { version = "0.20", optional = true }
 
 winit = "0.30"
-femtovg = { version = "0.9", features = [ "image-loading" ]}
+femtovg = { version = "0.19", features = [ "image-loading" ]}
 
 rive-rs = { optional = true, git = "https://github.com/rive-app/rive-rs" }
 

@@ -58,18 +58,10 @@ impl MatrixConv for femtovg::Transform2D {
         |b d f|
         |0 0 1| */
     #[inline] fn identity() -> Self { Self::identity() }
-    #[inline] fn rotate(&mut self, angle: f32) { //self.rotate(angle)
-        let mut tm = Self::identity();  tm.rotate(angle);   self.multiply(&tm)
-    }
-    #[inline] fn translate(&mut self, pos: Vec2D) { //self.translate(pos.x, pos.y)
-        let mut tm = Self::identity();  tm.translate(pos.x, pos.y);     self.multiply(&tm);
-    }
-    #[inline] fn skew_x(&mut self, sk: f32) { //self.skew_x(sk)
-        let mut tm = Self::identity();  tm.skew_x(sk);  self.multiply(&tm);
-    }
-    #[inline] fn scale(&mut self, sl: Vec2D) { //self.scale(sl.x, sl.y)
-        let mut tm = Self::identity();  tm.scale(sl.x, sl.y);   self.multiply(&tm);
-    }
+    #[inline] fn skew_x(&mut self, sk: f32) { self.skew_x(sk) }
+    #[inline] fn rotate(&mut self, angle: f32) { self.rotate(angle) }
+    #[inline] fn translate(&mut self, pos: Vec2D) { self.translate(pos.x, pos.y) }
+    #[inline] fn scale(&mut self, sl: Vec2D) { self.scale(sl.x, sl.y) }
     #[inline] fn premul(&mut self, tm: &Self) { self.premultiply(tm) }
 }
 
@@ -90,7 +82,7 @@ impl From<RGBA> for VGColor {
     #[inline] fn from(color: RGBA) -> Self { Self::rgba(color.r, color.g, color.b, color.a) }
 }
 
-impl<T: femtovg::Renderer> RenderContext for femtovg::Canvas<T> {
+impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canvas<T> {
     type TM2D = femtovg::Transform2D;
     type ImageID = femtovg::ImageId;
     type VGStyle = femtovg::Paint;

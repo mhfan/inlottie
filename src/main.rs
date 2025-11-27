@@ -88,7 +88,7 @@ impl ApplicationHandler for WinitApp {
             }
             WindowEvent::MouseWheel { delta: MouseScrollDelta::LineDelta(_, y), .. } => {
                 let Some(ctx2d) = &mut self.ctx2d else { return };
-                let pt = ctx2d.transform().inversed()
+                let pt = ctx2d.transform().inverse()
                     .transform_point(self.mouse_pos.0, self.mouse_pos.1);
                 let scale = y / 10. + 1.;   ctx2d.translate( pt.0,  pt.1);
                 ctx2d.scale(scale, scale);       ctx2d.translate(-pt.0, -pt.1);
@@ -96,7 +96,7 @@ impl ApplicationHandler for WinitApp {
             WindowEvent::CursorMoved { position, .. } => {
                 if self.dragging {
                     if let Some(ctx2d) = &mut self.ctx2d {
-                        let trfm = ctx2d.transform().inversed();
+                        let trfm = ctx2d.transform().inverse();
                         let p0 = trfm.transform_point(
                             self.mouse_pos.0, self.mouse_pos.1);
                         let p1 = trfm.transform_point(
@@ -693,7 +693,7 @@ fn render_nodes<T: Renderer>(ctx2d: &mut Canvas<T>, mouse: (f32, f32),
     } }
 }
 
-fn some_test_case<T: Renderer>(ctx2d: &mut Canvas<T>) {
+fn some_test_case<T: femtovg::renderer::SurfacelessRenderer>(ctx2d: &mut Canvas<T>) {
     let (w, h) = (ctx2d.width(), ctx2d.height());
     let (w, h) = (w as f32, h as f32);
     use femtovg::{Path, Color, Paint, PixelFormat,
