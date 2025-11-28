@@ -466,8 +466,14 @@ impl Vec2D {
     let easing = CubicBezierEasing::new((0., 0.), (1., 0.5));
     assert_eq!(easing.curve(0.5), 0.3125);
     assert_eq!(easing.get_y(0.5), 0.3125);
-    assert_eq!(easing.get_y(1.0), 1.);
-    assert_eq!(easing.get_y(0.0), 0.);
+    assert_eq!(easing.get_y(1.), 1.);
+    assert_eq!(easing.get_y(0.), 0.);
+
+    let easing = CubicBezierEasing::from((0.6, 0.1, 0.9, 0.4));
+    assert!((easing.get_y(0.7)  - easing.curve(0.7)).abs() < f32::EPSILON);
+    assert_eq!(easing.get_y(0.3), easing.curve(0.3));
+    assert!(easing.get_y(0.2) > easing.get_y(0.1));
+    assert!(easing.get_y(0.8) > easing.get_y(0.2));
 ``` */
 pub struct CubicBezierEasing { p1: (f32, f32), p2: (f32, f32), }
 
@@ -492,10 +498,11 @@ impl CubicBezierEasing {    // https://pomax.github.io/bezierinfo
     }
 
     fn calc_t(x: f32, x1: f32, x2: f32) -> f32 {    // Newton-Raphson iteration
-        let mut guess_t = x;    for _ in 0..4 {
+        let mut guess_t = x;    for _ in 0..5 {
             let current_slope = Self::slope(guess_t, x1, x2);
             if  current_slope < f32::EPSILON { break }
-            guess_t -= (Self::at(guess_t, x1, x2) - x) / current_slope;
+            let delta = (Self::at(guess_t, x1, x2) - x) / current_slope;
+            guess_t -= delta;   //if delta.abs() < 1e-5 { break }
         }   guess_t
     }
 
@@ -516,6 +523,12 @@ impl CubicBezierEasing {    // https://pomax.github.io/bezierinfo
         }
     }
     #[inline] pub fn new(p1: (f32, f32), p2: (f32, f32)) -> Self { Self { p1, p2 } }
+
+    pub fn linear()      -> Self { Self::new((0.00, 0.0), (1.00, 1.0)) }
+    pub fn ease()        -> Self { Self::new((0.25, 0.1), (0.25, 1.0)) }
+    pub fn ease_in()     -> Self { Self::new((0.42, 0.0), (1.00, 1.0)) }
+    pub fn ease_out()    -> Self { Self::new((0.00, 0.0), (0.58, 1.0)) }
+    pub fn ease_in_out() -> Self { Self::new((0.42, 0.0), (0.58, 1.0)) }
 
     pub fn curve(&self, x: f32) -> f32 {
         let cp1 = (self.p1.0 as _, self.p1.1 as _);
@@ -541,28 +554,23 @@ impl From<(f32, f32, f32, f32)> for CubicBezierEasing {
 }
 
 /*  https://www.w3.org/TR/css-easing-1/#cubic-bezier-easing-functions
-    "ease":        [0.25, 0.1, 0.25, 1.0],
-    "linear":      [0.00, 0.0, 1.00, 1.0],
-    "ease-in":     [0.42, 0.0, 1.00, 1.0],
-    "ease-out":    [0.00, 0.0, 0.58, 1.0],
-    "ease-in-out": [0.42, 0.0, 0.58, 1.0],
     http://robertpenner.com/easing/, https://lib.rs/keywords/easing,
     https://github.com/orhanbalci/rust-easing, https://github.com/sanbox-irl/tween */
 impl From<[f32; 4]> for CubicBezierEasing {
     #[inline] fn from(cp: [f32; 4]) -> Self { Self::new((cp[0], cp[1]), (cp[2], cp[3])) }
 }
 
-pub trait Lerp { fn lerp(&self, other: &Self, t: f32) -> Self;  // Linear intERPolation
+pub trait Tween { fn lerp(&self, other: &Self, t: f32) -> Self; // Linear intERPolation
     fn bezc(&self, _: &Self, _: f32, _: &PositionExtra) -> Self
         where Self: Sized { unreachable!() }    // Cubic Bezier interpolation
 }
 
-impl Lerp for f32 {
+impl Tween for f32 {
     #[inline] fn lerp(&self, other: &Self, t: f32) -> Self { self + (other - self) * t }
     //#[inline] fn lerp(&self, other: &Self, t: f32) -> Self { self * (1. - t) + other * t }
 }
 
-impl Lerp for Vec2D {
+impl Tween for Vec2D {
     fn lerp(&self, other: &Self, t: f32) -> Self {
         Self {  x: self.x + (other.x - self.x) * t,
                 y: self.y + (other.y - self.y) * t, }
@@ -602,7 +610,7 @@ impl Lerp for Vec2D {
     }
 }
 
-impl Lerp for RGBA {
+impl Tween for RGBA {
     fn lerp(&self, other: &Self, t: f32) -> Self {
         Self {  r: self.r + ((other.r - self.r) as f32 * t) as u8,
                 g: self.g + ((other.g - self.g) as f32 * t) as u8,
@@ -612,7 +620,7 @@ impl Lerp for RGBA {
     }
 }
 
-impl Lerp for Bezier {
+impl Tween for Bezier {
     fn lerp(&self, other: &Self, t: f32) -> Self {
         let closure =
             |val: (&Vec2D, &Vec2D)| val.0.lerp(val.1, t);
@@ -624,21 +632,21 @@ impl Lerp for Bezier {
     }
 }
 
-/* impl Lerp for Vec<Bezier> {
+/* impl Tween for Vec<Bezier> {
     fn lerp(&self, other: &Self, t: f32) -> Self {
         self.iter().zip(other.iter())
             .map(|val| val.0.lerp(val.1, t)).collect()
     }
 } */
 
-impl Lerp for ColorList {
+impl Tween for ColorList {
     fn lerp(&self, other: &Self, t: f32) -> Self {
         Self(self.0.iter().zip(other.0.iter()).map(|(first, second)|
             (first.0 + (second.0 - first.0) * t, first.1.lerp(&second.1, t))).collect())
     }
 }
 
-impl Lerp for Vec<f32> {    // aka MultiD
+impl Tween for Vec<f32> {   // aka MultiD
     fn lerp(&self, other: &Self, t: f32) -> Self {
         self.iter().zip(other.iter()).map(|val| //val.0.lerp(val.1, t)
             *val.0 + (*val.1 - *val.0) * t).collect()
@@ -662,7 +670,7 @@ impl<T> KeyframeBase<T> {
     }
 }
 
-impl<T: Clone + math::Lerp> AnimatedProperty<T> {
+impl<T: Clone + math::Tween> AnimatedProperty<T> {
     #[inline] pub fn from_value(val: T) -> Self {
         Self { animated: false.into(), keyframes: AnimatedValue::Static(val), sid: None }
     }
