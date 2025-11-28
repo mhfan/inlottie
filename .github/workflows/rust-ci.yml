@@ -73,8 +73,8 @@ jobs:
     #-  uses: taiki-e/install-action@nextest
     - name: Test and Build
       run: |
-        cargo t -- --nocapture #cargo nextest r
         cargo b -F "b2d"
+        cargo t -F "b2d" -- --no-capture #cargo nextest r
         cargo b -F "vello" --bin vello
       #  cargo b -F "rive-rs"
 
@@ -106,7 +106,7 @@ jobs:
       env:
         CC:  clang
         CXX: clang++
-      run: cargo +nightly llvm-cov --doctests --lcov --output-path lcov.info #--workspace --all-features --include-ffi
+      run: cargo +nightly llvm-cov -F b2d --doctests --lcov --output-path lcov.info --no-cfg-coverage #--workspace --all-features --include-ffi
       #  cargo tarpaulin --run-types 'Tests,Doctests' --out Lcov --exclude-files 'inperse/src/*'
       #  cargo install tarpaulin
       #uses: actions-rs/tarpaulin@v0.1    # XXX: no more working
