@@ -73,10 +73,10 @@ jobs:
     #-  uses: taiki-e/install-action@nextest
     - name: Test and Build
       run: |
-        cargo b -F "b2d"
-        cargo t -F "b2d" -- --no-capture #cargo nextest r
-        cargo b -F "vello" --bin vello
-      #  cargo b -F "rive-rs"
+        cargo b -F b2d
+        cargo t -F b2d -- --no-capture #cargo nextest r
+        cargo b -F vello --bin vello
+        cargo b -F rive-rs
 
     #- name: Benchmark
     #  run: |

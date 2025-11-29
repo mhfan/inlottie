@@ -8,13 +8,14 @@
 use crate::helpers::Vec2D;
 use rive_rs::{path as rpath, Scene, Instantiate, File, Artboard, Handle,
     renderer::{self, PaintStyle, BlendMode, BufferType, BufferFlags}};
-use femtovg::{Renderer, FillRule, CompositeOperation as CompOp,
+use femtovg::{renderer::SurfacelessRenderer as Renderer, FillRule, CompositeOperation as CompOp,
     Transform2D as TM2D, Path as VGPath, Paint as VGPaint};
 
 pub struct RiveNVG<T: Renderer + 'static>(&'static mut femtovg::Canvas<T>);
 
 impl<T: Renderer> RiveNVG<T> {
     #[inline] pub fn new(canvas: &mut femtovg::Canvas<T>) -> Self {
+        #[allow(clippy::missing_transmute_annotations)]
         Self(unsafe { std::mem::transmute(canvas) }) // force pretend to be 'static
     }
 
@@ -257,7 +258,7 @@ impl renderer::Paint for Paint {    type Gradient = Gradient;
 
 enum GradientBase {
     Linear { sx: f32, sy: f32, ex: f32, ey: f32 },
-    Radial { /* fx: f32, fy: f32, */cx: f32, cy: f32, radius: f32 },
+    Radial { cx: f32, cy: f32, radius: f32/*, fx: f32, fy: f32, r1: f32*/ },
 }
 
 pub struct Gradient {   base: GradientBase,
@@ -303,15 +304,15 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
     let ((a, d), (b, e), (c, f)) = (mesh[0], mesh[1], mesh[2]);
 
     let det_recip = (a.x * b.y + b.x * c.y + c.x * a.y -
-                     a.x * c.y - b.x * a.y - c.x * b.y).recip();
+                          a.x * c.y - b.x * a.y - c.x * b.y).recip();
 
     let p = (d * (b.y - c.y) - e * (a.y - c.y) + f * (a.y - b.y)) * det_recip;
     let q = (e * (a.x - c.x) - d * (b.x - c.x) - f * (a.x - b.x)) * det_recip;
 
     let t = (d * (b.x * c.y - b.y * c.x) - e * (a.x * c.y - a.y * c.x) +
-             f * (a.x * b.y - a.y * b.x)) * det_recip;
+                    f * (a.x * b.y - a.y * b.x)) * det_recip;
 
-    TM2D::identity().new(p.x, p.y, q.x, q.y, t.x, t.y)
+    TM2D::new(p.x, p.y, q.x, q.y, t.x, t.y)
 }
 
 #[allow(unused)] mod schema {
@@ -321,7 +322,7 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
 /// The format was designed to provide a balance of quick load times, small file sizes,
 /// and flexibility with regards to future changes/addition of features.
 /// https://rive.app/community/doc/format/docxcTF9lJxR
-
+///
 /// ### Binary Types:
 /// A binary reader for Rive runtime files needs to be able to read these data types
 /// from the stream. **Byte order is little endian.**
@@ -330,8 +331,8 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
 /// - string (u32 followed by utf-8 encoded byte array of provided length)
 /// - u32, f32
 ///
-/// https://github.com/rive-app/rive-cpp/blob/master/src/core/binary_reader.cpp
-pub struct VarUInt(u32); // u128?
+/// https://github.com/rive-app/rive-runtime/blob/master/src/core/binary_reader.cpp
+pub struct VarUInt(u32); // u64/u128?
 
 /// ### Header:
 /// A ToC (table of contents/field definition) is provided which allows the runtime to
@@ -361,17 +362,21 @@ pub struct Header {
     /// integer id/key. Following the properties is a bit array which is composed of the read
     /// property count / 4 bytes. Every property gets 2 bits to define which backing type
     /// deserializer can be used to read past it.
-    ///
-    /// Backing Type | 2 bit value
-    /// -------------|------------
-    /// Uint/Bool    | 0
-    /// String       | 1
-    /// Float        | 2
-    /// Color        | 3
-    toc: Vec<u8>, // byte aligned bit array
+    toc: Vec<u8>, // XXX: byte aligned bit array
 }
 
-/*/ ## Content:
+/// ### Field Types:
+/// There are 5 fundamental backing types but they are serialized in 4 different ways.
+/// Knowing how the type is serialized allows the runtime to know how to read it in.
+/// Even if it reads the wrong value or interprets it incorrectly, the important aspect
+/// is being able to read past it so the rest of the file can be read in safely.
+///
+/// For example, a boolean can be read as an unsigned integer as the backing type and
+/// serializer is compatible. Even though reading the boolean as an integer will not
+/// provide the valid value for the property, the runtime can still just read past it.
+#[repr(C)] pub enum BackingType { UintBool = 0, String, Float, Color } // 2 bits value
+
+/// ## Content:
 /// The rest of the file is simply a list of objects, each containing a list of their
 /// properties and values. An object is represented as a varuint type key. It is immediately
 /// followed by the list of properties. Properties are terminated with a 0 varuint. If a non 0
@@ -379,14 +384,24 @@ pub struct Header {
 /// type key, it will know the backing type and how to decode it. The bytes following the type
 /// key will be one of the binary types specified earlier. If it is unknown, it can determine
 /// from the ToC what the backing type is and read past it.
-pub struct Content {}
+pub struct Content(Vec<Object>);
+
+/// Example Serialized Object:
+/// Data    Type/Size       Description
+/// 2       varuint         object of type 2 (Node)
+/// 13      varuint         X  property for the Node
+/// 100.0   4 byte float    the X value for the Node
+/// 14      varuint         Y  property for the Node
+/// 22.0    4 byte float    the Y value for the Node
+/// 0       varuint         Null terminator.
+pub struct Object(Vec<(Property)>); // type key (VarUint)
 
 /// ## Core:
 /// All objects and properties are defined in a set of files we call core defs for
-/// [Core Definitions](https://github.com/rive-app/rive-cpp/tree/master/dev/defs). These are
-/// defined in a series of JSON objects and help Rive generate serialization, deserialization,
-/// and animation property code. The C++ and Flutter runtimes both have helpers to read and
-/// generate a lot of the boilerplate code for these types.
+/// [Core Definitions](https://github.com/rive-app/rive-runtime/tree/master/dev/defs).
+/// These are defined in a series of JSON objects and help Rive generate serialization,
+/// deserialization, and animation property code. The C++ and Flutter runtimes both have
+/// helpers to read and generate a lot of the boilerplate code for these types.
 ///
 /// ### Object:
 /// A core object is represented by its Core type key. For example, a Shape has core type key 3.
@@ -414,7 +429,8 @@ pub struct Content {}
 /// as a core def property. The value is always an unsigned integer representing the index
 /// within the Artboard of the ContainerComponent derived object that makes a valid parent.
 ///
-/// https://github.com/rive-app/rive-cpp/src */
+/// https://github.com/rive-app/rive-runtime/src
+pub struct Property(Vec<u8>); // XXX: type key (VarUint)
 
 }
 
