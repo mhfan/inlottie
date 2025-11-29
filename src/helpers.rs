@@ -592,7 +592,7 @@ impl Tween for Vec2D {
         }   let pt = bezier.point_at_pos((tmin + tmax) / 2.); */
 
         #[allow(non_local_definitions)] impl From<Vec2D> for Point {
-            #[inline] fn from(val: Vec2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
+            #[inline] fn from(val: Vec2D) -> Self { (val.x, val.y).into() }
         }   use kurbo::{CubicBez, ParamCurve, ParamCurveArclen, Point};
         let curve = CubicBez::new::<Point>((*self).into(), (*self + extra.to).into(),
             (*other + extra.ti).into(), (*other).into());
@@ -672,7 +672,9 @@ impl<T> KeyframeBase<T> {
 
 impl<T: Clone + math::Tween> AnimatedProperty<T> {
     #[inline] pub fn from_value(val: T) -> Self {
-        Self { animated: false.into(), keyframes: AnimatedValue::Static(val), sid: None }
+        Self { animated: false.into(), keyframes: AnimatedValue::Static(val), sid: None,
+            #[cfg(feature = "expression")] expr: None,
+        }
     }
 
     // XXX: wrapped in Option, and use Cow<&T> to avoid unnecessary clone?

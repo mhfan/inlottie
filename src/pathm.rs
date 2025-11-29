@@ -72,7 +72,7 @@ pub trait PathBuilder {     //type Point; type Path;
         let svg_arc = kurbo::SvgArc {
             to: end.into(), radii: radii.into(),
             x_rotation: x_rot as _, large_arc: large, sweep,
-            from: self.current_pos().unwrap().into(),   // XXX:
+            from: self.current_pos().map_or(Default::default(), Into::into),
         };
         if let Some(arc) = kurbo::Arc::from_svg_arc(&svg_arc) {
             arc.to_cubic_beziers(ACCURACY_TOLERANCE, |ocp, icp, end|
@@ -83,7 +83,7 @@ pub trait PathBuilder {     //type Point; type Path;
     fn from_kurbo(path: BezPath) -> Self where Self: Sized {
         let mut pb = Self::new(path.elements().len() as _);
 
-        #[allow(non_local_definitions)] impl From<kurbo::Point> for Vec2D {
+        #[allow(non_local_definitions)] impl From<kurbo::Point> for Vec2D { #[inline]
             fn from(pt: kurbo::Point) -> Self { Self { x: pt.x as _, y: pt.y as _ } }
         }   use kurbo::PathEl::*;
 

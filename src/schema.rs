@@ -296,7 +296,7 @@ type Color = RGBA; // Vec<f32>;
     //#[serde(default, skip_serializing_if = "String::is_empty")]
     /** Slot ID, One of the ID in the file's slots */ pub sid: Option<Box<String>>,
 
-    #[cfg(feature = "expression")] #[serde(flatten)] expr: Option<Box<Expression>>,
+    #[cfg(feature = "expression")] #[serde(flatten)] pub expr: Option<Box<Expression>>,
 }
 
 #[derive(Deserialize, Serialize)] #[serde(untagged)]
