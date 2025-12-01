@@ -315,7 +315,8 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
     TM2D::new(p.x, p.y, q.x, q.y, t.x, t.y)
 }
 
-#[allow(unused)] mod schema {
+pub mod schema {
+use std::io::{Read, Result, Error, ErrorKind::InvalidData, Seek};
 
 /// ## Rive runtime format:
 /// Binary representation of Artboards, Shapes, Animations, State Machines, etc.
@@ -332,7 +333,59 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
 /// - u32, f32
 ///
 /// https://github.com/rive-app/rive-runtime/blob/master/src/core/binary_reader.cpp
-pub struct VarUInt(u32); // u64/u128?
+///
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct VarUInt(pub u32); // u64/u128?
+
+impl VarUInt {
+    #[inline] pub fn new(value: u32) -> Self { Self(value) }
+    pub fn read<R: Read>(reader: &mut R) -> Result<Self> {
+        let (mut val, mut cnt) = (0u32, 0);
+        while cnt < (std::mem::size_of::<VarUInt>() * 8) as u32 {
+            let mut buf = [0u8];
+            reader.read_exact(&mut buf)?;
+            val |= ((buf[0] & 0x7F) as u32) << cnt;
+            if buf[0] < 0x80 { return Ok(Self(val)) }   cnt += 7;
+        }   Err(Error::new(InvalidData, "VarUInt too large for u32"))
+    }
+}
+
+pub struct BinaryReader<R: Read> { reader: R, }
+
+impl<R: Read> BinaryReader<R> {
+    #[inline] pub fn new(reader: R) -> Self { Self { reader } }
+    #[inline] pub fn read_varuint(&mut self) -> Result<VarUInt> {
+        VarUInt::read(&mut self.reader)
+    }
+
+    pub fn read_u32(&mut self) -> Result<u32> {
+        let mut buffer = [0u8; 4];
+        self.reader.read_exact(&mut buffer)?;
+        Ok(u32::from_le_bytes(buffer))
+    }
+
+    pub fn read_f32(&mut self) -> Result<f32> {
+        let mut buffer = [0u8; 4];
+        self.reader.read_exact(&mut buffer)?;
+        Ok(f32::from_le_bytes(buffer))
+    }
+
+    pub fn read_bytes(&mut self) -> Result<Vec<u8>> {
+        let length = self.read_varuint()?.0 as usize;
+        let mut buffer = vec![0u8; length];
+        self.reader.read_exact(&mut buffer)?;
+        Ok(buffer)
+    }
+
+    pub fn read_magic(&mut self) -> Result<()> {
+        let mut magic = [0u8; 4];
+        self.reader.read_exact(&mut magic)?;
+
+        if magic != *b"RIVE" {
+            return Err(Error::new(InvalidData, "Invalid Rive file magic number"));
+        }   Ok(())
+    }
+}
 
 /// ### Header:
 /// A ToC (table of contents/field definition) is provided which allows the runtime to
@@ -341,16 +394,16 @@ pub struct VarUInt(u32); // u64/u128?
 /// An older runtime can at least attempt to load an older file and display it without
 /// the objects and properties it doesn't understand.
 pub struct Header {
-    //magic: [u8; 4], // Fingerprint: 0x52 0x49 0x56 0x45 / "RIVE"
+    //pub magic: [u8; 4], // Fingerprint: 0x52 0x49 0x56 0x45 / "RIVE"
     /// Major versions are not cross-compatible.
-    majorv: VarUInt,
+    pub majorv: VarUInt,
     /// Minor version changes are compatible with each other provided the major version is
     /// the same. However, certain newer features may not be available if the runtime is of
     /// a different minor version.
-    minorv: VarUInt,
+    pub minorv: VarUInt,
     /// a unique identifier for the file that in the future will be able to
     /// be used to distinguish the file
-    fileid: VarUInt,
+    pub fileid: VarUInt,
 
     /// The Table of Contents section of the header is a list of the properties in the file
     /// along with their backing type. This allows the runtime to read past properties it
@@ -362,7 +415,43 @@ pub struct Header {
     /// integer id/key. Following the properties is a bit array which is composed of the read
     /// property count / 4 bytes. Every property gets 2 bits to define which backing type
     /// deserializer can be used to read past it.
-    toc: Vec<u8>, // XXX: byte aligned bit array
+    pub toc: HashMap<VarUInt, FieldType>,
+}   use std::collections::HashMap;
+
+impl Header {
+    pub fn read<R: Read>(reader: &mut BinaryReader<R>) -> Result<Self> {
+        let majorv = reader.read_varuint()?;
+        let minorv = reader.read_varuint()?;
+        let fileid = reader.read_varuint()?;
+
+        let mut prop_keys = Vec::new();
+        loop {  let  key = reader.read_varuint()?;
+            if  key.0 == 0 { break }   prop_keys.push(key);
+        }
+
+        //let mut toc = create_core_toc();
+        let mut toc = HashMap::with_capacity(prop_keys.len());
+        let (mut current_uint, mut bit_position) = (None, 0);
+
+        for key in &prop_keys {
+            if  current_uint.is_none() || bit_position > 30 {
+                current_uint = Some(reader.read_u32()?);
+                bit_position = 0;
+            }
+
+            if let Some(uint_value) = current_uint {
+                let field_index = ((uint_value >> bit_position) & 0x03) as u8;
+                let field_type = unsafe {
+                    std::mem::transmute::<u8, FieldType>(field_index) };
+                //if !toc.contains_key(key) { toc.insert(*key, field_type); }
+                toc.entry(*key).or_insert(field_type);  bit_position += 2;
+            }
+        }       Ok(Self { majorv, minorv, fileid, toc })
+    }
+
+    #[inline] pub fn get_prop_type(&self, prop_key: VarUInt) -> Option<FieldType> {
+        self.toc.get(&prop_key).copied()
+    }
 }
 
 /// ### Field Types:
@@ -374,7 +463,8 @@ pub struct Header {
 /// For example, a boolean can be read as an unsigned integer as the backing type and
 /// serializer is compatible. Even though reading the boolean as an integer will not
 /// provide the valid value for the property, the runtime can still just read past it.
-#[repr(C)] pub enum BackingType { UintBool = 0, String, Float, Color } // 2 bits value
+#[derive(Debug, Clone, Copy, PartialEq)] #[repr(u8)]
+pub enum FieldType { UIntBool = 0, String, Float, Color } // 1 byte, 2 bits used
 
 /// ## Content:
 /// The rest of the file is simply a list of objects, each containing a list of their
@@ -384,7 +474,28 @@ pub struct Header {
 /// type key, it will know the backing type and how to decode it. The bytes following the type
 /// key will be one of the binary types specified earlier. If it is unknown, it can determine
 /// from the ToC what the backing type is and read past it.
-pub struct Content(Vec<Object>);
+#[derive(Debug, PartialEq)] pub enum FieldValue {
+    VarUInt(VarUInt), Bytes(Vec<u8>), Float32(f32), Color(u32),
+}
+
+impl FieldValue {
+    pub fn read_with_type<R: Read>(reader: &mut BinaryReader<R>,
+        field_type: FieldType) -> Result<Self> {
+        match field_type {
+            FieldType::UIntBool => { Ok(Self::VarUInt(reader.read_varuint()?)) },
+            FieldType::String   => { Ok(Self::Bytes  (reader.read_bytes()?)) },
+            FieldType::Float => { Ok(Self::Float32(reader.read_f32()?)) },
+            FieldType::Color => { Ok(Self::Color  (reader.read_u32()?)) },
+        }
+    }
+
+    #[inline] pub fn get_type(&self) -> FieldType { match self {
+        Self::VarUInt(_) => FieldType::UIntBool,
+        Self::Float32(_) => FieldType::Float,
+        Self::Bytes(_)   => FieldType::String,
+        Self::Color(_)   => FieldType::Color,
+    } }
+}
 
 /// Example Serialized Object:
 /// Data    Type/Size       Description
@@ -394,7 +505,48 @@ pub struct Content(Vec<Object>);
 /// 14      varuint         Y  property for the Node
 /// 22.0    4 byte float    the Y value for the Node
 /// 0       varuint         Null terminator.
-pub struct Object(Vec<(Property)>); // type key (VarUint)
+pub struct Object { pub type_id: VarUInt, pub props: Vec<(VarUInt, FieldValue)>, }
+
+impl Object {
+    pub fn read_with_header<R: Read>(reader: &mut BinaryReader<R>,
+        header: &Header) -> Result<Self> {
+        let type_id = reader.read_varuint()?;
+        let mut props = Vec::new();
+
+        while let Ok(prop_id) = reader.read_varuint() {
+            if  prop_id.0 == 0 { break }
+
+            let prop_value = match header.get_prop_type(prop_id) {
+                Some(field_type) => match field_type {
+                    FieldType::UIntBool => FieldValue::VarUInt(
+                        reader.read_varuint().unwrap_or(VarUInt::new(0))),
+                    FieldType::String => FieldValue::Bytes(
+                        reader.read_bytes  ().unwrap_or_default()),
+                    FieldType::Float => FieldValue::Float32(reader.read_f32().unwrap_or(0.)),
+                    FieldType::Color => FieldValue::Color  (reader.read_u32().unwrap_or(0)),
+                },
+                None => {
+                    eprintln!("Unknown property id: {:4} of object type {}",
+                        prop_id.0, type_id.0);  //let _ = reader.read_varuint();
+                    continue
+                }
+            };  props.push((prop_id, prop_value));
+        }       Ok(Self { type_id, props })
+    }
+
+    pub fn new_simple(type_id: u32) -> Self {
+        Self { props: Vec::new(), type_id: VarUInt::new(type_id), }
+    }
+
+    pub fn add_prop(&mut self, prop_id: VarUInt, value: FieldValue) {
+        self.props.push((prop_id, value));
+    }
+
+    pub fn get_prop(&self, prop_id: u32) -> Option<&FieldValue> {
+        self.props.iter().find(|(id, _)|
+            id.0 == prop_id).map(|(_, value)| value)
+    }
+}
 
 /// ## Core:
 /// All objects and properties are defined in a set of files we call core defs for
@@ -430,7 +582,29 @@ pub struct Object(Vec<(Property)>); // type key (VarUint)
 /// within the Artboard of the ContainerComponent derived object that makes a valid parent.
 ///
 /// https://github.com/rive-app/rive-runtime/src
-pub struct Property(Vec<u8>); // XXX: type key (VarUint)
+pub struct RiveFile { pub header: Header, pub ocoll: Vec<Object>, }
 
+impl RiveFile {
+    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self> {
+        let mut binary_reader = BinaryReader::new(reader);
+        let mut ocoll = Vec::new();
+
+        binary_reader.read_magic()?;
+        let header = Header::read(&mut binary_reader)?;
+        loop {
+            match Object::read_with_header(&mut binary_reader, &header) {
+                Ok(object) => ocoll.push(object),
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::UnexpectedEof => break,
+                    _ => {  eprintln!("Failed to read object: {e}");
+                        if binary_reader.reader.stream_position().is_err() { break }
+                    }
+                }
+            }
+        }       Ok(Self { header, ocoll })
+    }
 }
 
+//include!("../target/rive_defs.rs");     // cargo r --bin rive_defs_parser
+
+}
