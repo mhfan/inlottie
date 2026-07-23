@@ -1,7 +1,7 @@
 
 [package]
 name = "inlottie"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 default-run = "inlottie"
 license = "MIT OR Apache-2.0"
@@ -37,8 +37,8 @@ serde_json = "1.0"
 serde_repr = "0.1"
 
 #flo_curves = "0.7"
-kurbo = "0.12"
-usvg  = "0.45"
+kurbo = "0.13"
+usvg  = "0.47"
 
 softbuffer = { version = "0.4", optional = true }
 intvg = { version = "0.1", optional = true, features = [ "b2d" ], git = "https://github.com/mhfan/intvg" }
@@ -92,4 +92,3 @@ panic = 'abort'
 lto = 'fat' # true
 
 [workspace]
-

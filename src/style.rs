@@ -27,19 +27,20 @@ impl MatrixConv for kurbo::Affine {
 
 #[cfg(feature = "vello")] impl StyleConv for peniko::Brush {
     #[inline] fn solid_color(color: RGBA) -> Self { Self::Solid(color.into()) }
-    #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D,
-            stops: &[(f32, RGBA)]) -> Self {
+    #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
         let stops = stops.iter().map(|&(offset, color)|
             (offset, DynamicColor::from_alpha_color(color.into())).into())
             .collect::<Vec<ColorStop>>();
-        Self::Gradient(peniko::Gradient::new_linear(sp, ep).with_stops(stops.as_slice()))
+        Self::Gradient(peniko::Gradient::new_linear(
+            (sp.x, sp.y), (ep.x, ep.y)).with_stops(stops.as_slice()))
     }
     #[inline] fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
             stops: &[(f32, RGBA)]) -> Self {
         let stops = stops.iter().map(|&(offset, color)|
             (offset, DynamicColor::from_alpha_color(color.into())).into())
             .collect::<Vec<ColorStop>>();
-        Self::Gradient(peniko::Gradient::new_two_point_radial(cp, radii.0, fp, radii.1)
+        Self::Gradient(peniko::Gradient::new_two_point_radial(
+            (cp.x, cp.y), radii.0, (fp.x, fp.y), radii.1)
             .with_stops(stops.as_slice()))
     }
 }
@@ -51,33 +52,42 @@ impl MatrixConv for kurbo::Affine {
 }
 
 /** ```
-    let  a = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-    let  b = [7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
-    let ab = [31.0, 46.0, 39.0, 58.0, 52.0, 76.0];
-    assert_eq!(Affine::new(a) * Affine::new(b), Affine::new(ab));
+//#[cfg(test)] mod tests { use super::*;
+//    #[test] fn test_matrix_transform() {
+        let  a = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let  b = [7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
+        let ab = [31.0, 46.0, 39.0, 58.0, 52.0, 76.0];
 
-    let to_f32 = |x: f64| x as f32;     // Into::into
-    let mut t = TM2D(a.map(to_f32));    t.premultiply(&TM2D(b.map(to_f32)));
-    assert_eq!(t, TM2D(ab.map(to_f32)));    use femtovg::Transform2D as TM2D;
+        fn operate_matrix(t: &mut impl MatrixConv) {
+            t.translate(-Vec2D::from((1., 2.))); t.scale((3., 4.).into());
+            t.rotate(-0.5); t.skew_x(-0.6); t.rotate(0.5);
+            t.rotate(-0.7); t.translate((8., 9.).into());
+        }   use kurbo::Affine;
 
-    use intvg::blend2d::BLMatrix2D;     use kurbo::Affine;
-    let mut t = BLMatrix2D::new(a);     t.transform(&BLMatrix2D::new(b));
-    assert_eq!(t.get_values(), BLMatrix2D::new(ab).get_values());
+        assert_eq!(Affine::new(a) * Affine::new(b), Affine::new(ab));
+        let mut t1 =     Affine::identity(); operate_matrix(&mut t1);
+        use inlottie::{style::MatrixConv, helpers::Vec2D};
 
-    fn operate_matrix(t: &mut impl MatrixConv) {
-        t.translate(-Vec2D::from((1., 2.))); t.scale((3., 4.).into());
-        t.rotate(-0.5); t.skew_x(-0.6); t.rotate(0.5);
-        t.rotate(-0.7); t.translate((8., 9.).into());
-    }
+        let to_f32 = |x: f64| x as f32;     // Into::into
+        let mut t = TM2D(a.map(to_f32));    t.premultiply(&TM2D(b.map(to_f32)));
+        assert_eq!(t, TM2D(ab.map(to_f32)));    use femtovg::Transform2D as TM2D;
 
-    use inlottie::{style::MatrixConv, helpers::Vec2D, adapt_b2d, adapt_nvg};
-    let mut t1 =     Affine::identity(); operate_matrix(&mut t1);
-    let mut t2 =       TM2D::identity(); operate_matrix(&mut t2);
-    let mut t3 = BLMatrix2D::identity(); operate_matrix(&mut t3);
+        let mut t2 =       TM2D::identity(); operate_matrix(&mut t2);
+        assert!(t1.as_coeffs().iter().zip(t2.0.iter())
+            .all(|(&v1, &v2)| (v1 - v2 as f64).abs() < 1e-5));
 
-    println!("{t1:?}\n{t2:?}\nBLMatrix2D{:?}", t3.get_values());    //assert!(false);
-    t1.as_coeffs().iter().zip(t2.0.iter()).zip(t3.get_values().iter()).all(|((&v1, &v2), &v3)|
-        (v1 - v2 as f64).abs() < f64::EPSILON && (v1 - v3).abs() < f64::EPSILON);
+        #[cfg(feature = "b2d")] {
+            use intvg::blend2d::BLMatrix2D;
+            let mut t = BLMatrix2D::new(a);     t.transform(&BLMatrix2D::new(b));
+            assert_eq!(t.get_values(), BLMatrix2D::new(ab).get_values());
+
+            let mut t3 = BLMatrix2D::identity(); operate_matrix(&mut t3);
+            println!("{t1:?}\n{t2:?}\nBLMatrix2D{:?}", t3.get_values());
+            assert!(t1.as_coeffs().iter().zip(t3.get_values().iter())
+                .all(|(&v1, &v2)| (v1 - v2).abs() < f64::EPSILON));
+        }
+//    }
+//}
  ``` */
 pub trait MatrixConv {
     fn identity() -> Self;
@@ -164,15 +174,15 @@ impl Transform {
 
 impl VisualLayer {
     pub fn get_matrix<MC: MatrixConv>(&self, layers: &[LayerItem], fnth: f32) -> TM2DwO<MC> {
-        let ctm = self.ks.to_matrix(fnth, self.ao);
-        if let Some(pid) = self.base.parent {
-            let ptm = layers.iter().find_map(|layer|
-                layer.visual_layer().and_then(|vl|
-                    vl.base.ind.and_then(|ind| if ind == pid {
-                        Some(vl.ks.to_matrix(fnth, vl.ao)) } else { None })));
-
-            if let Some(ptm) = &ptm { ctm.compose(ptm) } else { unreachable!() }
-        } else { ctm }
+        let mut ctm = self.ks.to_matrix(fnth, self.ao);
+        let (mut parent, mut seen) = (self.base.parent, std::collections::HashSet::new());
+        while let Some(pid) = parent {
+            if !seen.insert(pid) { break }
+            let Some(vl) = layers.iter().find_map(|layer| layer.visual_layer()
+                .filter(|vl| vl.base.ind == Some(pid))) else { break };
+            ctm = ctm.compose(&vl.ks.to_matrix(fnth, vl.ao));
+            parent = vl.base.parent;
+        }   ctm
     }
 }
 
@@ -287,22 +297,22 @@ impl FillStrokeGrad {
         let (mut dpat, mut sum) = (vec![], 0.);
         if let FillStroke::Stroke(stroke) = &self.base {
             let len = stroke.dash.len();
-            if  len < 3 { return dpat }
+            if  len < 2 { return dpat }
 
             dpat.reserve(len);   dpat.push(0.);
-            stroke.dash.iter().for_each(|sd| {
+            for sd in &stroke.dash {
                 let value = sd.value.get_value(fnth);
                 match sd.r#type {   // Offset should be at end of the array?
                     StrokeDashType::Offset => dpat[0] = value,
                     StrokeDashType::Length | StrokeDashType::Gap => {
-                        if value < 0. { dpat.clear(); return }
+                        if value < 0. { return Vec::new() }
                         dpat.push(value);   sum += value;
 
                         debug_assert!(dpat.len() % 2 ==
                             if matches!(sd.r#type, StrokeDashType::Gap) { 1 } else { 0 });
                     }   // Length and Gap should be alternating and positive
                 }
-            });
+            }
         }
 
         if sum < f32::EPSILON { dpat.clear(); }   dpat
@@ -310,3 +320,23 @@ impl FillStrokeGrad {
     }
 }
 
+#[cfg(test)] mod tests {
+    use crate::schema::Animation;
+
+    #[test] fn layer_matrix_includes_all_ancestors_and_tolerates_missing_parent() {
+        let animation: Animation = serde_json::from_str(r#"{ "layers": [
+            {"ty":3,"ind":1,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[10,0]}}},
+            {"ty":3,"ind":2,"parent":1,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[0,20]}}},
+            {"ty":3,"ind":3,"parent":2,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[3,4]}}},
+            {"ty":3,"ind":4,"parent":99,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[5,6]}}}
+        ] }"#).unwrap();
+
+        let child = animation.layers[2].visual_layer().unwrap();
+        assert_eq!(child.get_matrix::<kurbo::Affine>(&animation.layers, 0.).0.as_coeffs(),
+            [1., 0., 0., 1., 13., 24.]);
+
+        let orphan = animation.layers[3].visual_layer().unwrap();
+        assert_eq!(orphan.get_matrix::<kurbo::Affine>(&animation.layers, 0.).0.as_coeffs(),
+            [1., 0., 0., 1., 5., 6.]);
+    }
+}

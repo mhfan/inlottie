@@ -212,10 +212,9 @@ pub fn create_core_toc() -> HashMap<VarUInt, FieldType> {{")?;
 fn visit_defs_dir<F>(dir: &Path, callback: &mut F) -> Result<()>
     where F: FnMut(&Path) -> Result<()> {
     if !dir.is_dir() { return callback(dir) }
-    fs::read_dir(dir)?.flatten().try_for_each(|entry| {
-        let path = entry.path();
+    fs::read_dir(dir)?.try_for_each(|entry| {
+        let path = entry?.path();
         if  path.is_dir() { visit_defs_dir(&path, callback)
         } else { callback(&path) }
     })
 }
-

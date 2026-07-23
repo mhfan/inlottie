@@ -51,6 +51,7 @@ impl ApplicationHandler for WinitApp {
             WindowEvent::Focused(bl) => self.focused = bl,
 
             #[cfg(not(target_arch = "wasm32"))] WindowEvent::Resized(size) => {
+                if size.width == 0 || size.height == 0 { return }
                 if let Some((surface, // move into resize_viewport?
                     glctx)) = &self.state {
                     surface.resize(glctx, size.width .try_into().unwrap(),
@@ -64,15 +65,11 @@ impl ApplicationHandler for WinitApp {
                 Key::Named(NamedKey::Space)  => {   self.paused = !self.paused;
                                                     self.prevt = Instant::now(); }
                 #[cfg(feature =  "lottie")]
-                Key::Character(ch) => if self.paused { match ch {
-                    "n" | "N" => {  use std::time::Duration;  // XXX:
-                        let AnimGraph::Lottie(lottie) =
-                            &self.graph else { return };
-                        self.prevt = Instant::now() -
-                            Duration::from_millis((1000. / lottie.fr) as _);
-                        self.request_redraw();
-                    }   _ => (),
-                } }     _ => (),
+                Key::Character("n") | Key::Character("N") if self.paused => {
+                    let AnimGraph::Lottie(lottie) = &self.graph else { return };
+                    self.prevt = Instant::now() - Duration::from_millis((1000. / lottie.fr) as _);
+                    self.request_redraw();  use std::time::Duration;  // XXX:
+                }   _ => (),
             }
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
                 self.dragging = matches!(state, ElementState::Pressed);
@@ -286,7 +283,7 @@ impl WinitApp {
                     configs.reduce(|config, accum| {
                         if (config.supports_transparency().unwrap_or(false) &
                             !accum.supports_transparency().unwrap_or(false)) ||
-                            config.num_samples() < accum.num_samples() { config } else { accum }
+                            config.num_samples() > accum.num_samples() { config } else { accum }
                     }).unwrap())?;
 
         self.window = window;   let window = self.window.as_ref().unwrap();
@@ -432,7 +429,9 @@ impl WinitApp {
 
             #[cfg(feature = "rive-rs")] Some("riv")  =>
                 AnimGraph::Rive((RiveNVG::new_scene(
-                    &fs::read(path)?).unwrap(), Default::default())),
+                    &fs::read(path)?).ok_or_else(|| std::io::Error::new(
+                        std::io::ErrorKind::InvalidData, "invalid Rive scene"))?,
+                    Default::default())),
 
             Some("svg") => {
                 let mut usvg_opts = usvg::Options::default();
@@ -464,6 +463,7 @@ impl WinitApp {
         };
 
         ctx2d.reset_transform();
+        if csize.0 <= 0. || csize.1 <= 0. || wsize.0 <= 0. || wsize.1 <= 0. { return }
         let scale = (wsize.0 / csize.0).min(wsize.1  / csize.1) * 0.98;     // XXX:
         ctx2d.translate( (wsize.0 - csize.0 * scale) / 2.,
                          (wsize.1 - csize.1 * scale) / 2.);
@@ -520,7 +520,8 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
 
     pub fn update(&mut self, ft: f32) { //debug_assert!(f32::EPSILON < ft);
         //let ft = self.time.elapsed().as_secs_f32();   self.time = Instant::now();
-        let fps = 1. / ft;  if self.max <  fps { self.max = fps } // (ft + f32::EPSILON)
+        let fps = 1. / ft.max(f32::EPSILON);
+        if self.max < fps { self.max = fps }
         if self.que.len() == 100 {  self.sum -= self.que.pop_front().unwrap_or(0.); }
         self.que.push_back(fps);    self.sum += fps;
     }
@@ -545,7 +546,7 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
         paint.set_text_align(femtovg::Align::Right);
         paint.set_font_size(14.0); // some fixed values can be moved into the structure
 
-        let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
+        let fps = if self.que.is_empty() { 0. } else { self.sum / self.que.len() as f32 };
         let _ = ctx2d.fill_text(rw - 10., 0., format!("{fps:.2} FPS"), &paint);
         ctx2d.reset_transform();    ctx2d.set_transform(&last_trfm);    //ctx2d.restore();
     }
@@ -569,7 +570,7 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
         //paint.set_text_align(femtovg::Align::Right);
         //paint.set_font_size(14.0); // some fixed values can be moved into the structure
 
-        let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
+        let fps = if self.que.is_empty() { 0. } else { self.sum / self.que.len() as f32 };
         if let Some(font) = &self.font {
             blctx.fill_utf8_text_d_rgba32((10., 15.).into(), font,  // XXX:
                 &format!("{fps:.2} FPS"), (240, 240, 240, 255).into());
@@ -681,7 +682,8 @@ fn render_nodes<T: Renderer>(ctx2d: &mut Canvas<T>, mouse: (f32, f32),
         usvg::Node::Image(img) => if img.is_visible() {
             match img.kind() {
                 usvg::ImageKind::GIF(_) | usvg::ImageKind::WEBP(_) |
-                usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) => todo!(),
+                usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) =>
+                    eprintln!("Raster SVG images are not supported by the femtovg viewer"),
                 // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
                 usvg::ImageKind::SVG(svg) => render_nodes(ctx2d, mouse, svg.root(), trfm),
             }
@@ -863,7 +865,8 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
         usvg::Node::Image(img) => if img.is_visible() {
             match img.kind() {
                 usvg::ImageKind::GIF(_) | usvg::ImageKind::WEBP(_) |
-                usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) => todo!(),
+                usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) =>
+                    eprintln!("Raster SVG images are not supported by the Blend2D viewer"),
                 // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
                 usvg::ImageKind::SVG(svg) => render_nodes(blctx, mouse, svg.root(), trfm),
             }

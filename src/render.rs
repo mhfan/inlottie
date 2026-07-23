@@ -18,12 +18,16 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
         rctx: &mut RC, elapsed: f32) -> bool {
         //debug_assert!(0. < self.fr && 0. <= self.ip && 1. < self.op - self.ip);
 
+        if self.fnth < self.ip || self.op <= self.fnth { self.fnth = self.ip; }
             self.elapsed += elapsed * self.fr;
         if  self.elapsed < 1. && self.ip < self.fnth { return false }
 
         if  2. <= self.elapsed {    // advance/skip elapsed frames
             let elapsed = (self.elapsed - 1.).floor();
-            self.fnth = (self.fnth + elapsed) % self.op;
+            let duration = self.op - self.ip;
+            if 0. < duration {
+                self.fnth = self.ip + (self.fnth - self.ip + elapsed).rem_euclid(duration);
+            }
             self.elapsed -= elapsed;
         }
 
@@ -32,7 +36,7 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
         self.render_layers(rctx, &TM2DwO::default(), &self.layers, self.fnth);
 
         self.elapsed -= 1.;       self.fnth += 1.;
-        if self.op <= self.fnth { self.fnth  = 0.; }    true
+        if self.op <= self.fnth { self.fnth = self.ip; }    true
     }
 
     /// The render order goes from the last element to the first,
@@ -43,10 +47,8 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
 
         for layer in layers.iter().rev() { match layer {
             LayerItem::Shape(shpl) => if !shpl.vl.should_hide(fnth) {
-                let ltm =
-                    shpl.vl.get_matrix(layers, fnth).compose(ptm);
-                let (draws, ctm) =
-                    convert_shapes(&shpl.shapes, fnth, shpl.vl.ao);
+                let ltm = shpl.vl.get_matrix(layers, fnth).compose(ptm);
+                let (draws, ctm) = convert_shapes(&shpl.shapes, fnth, shpl.vl.ao);
 
                 rctx.prepare_matte(&shpl.vl, &mut matte);
                 rctx.render_shapes(&ctm.compose(&ltm), &draws);
@@ -56,25 +58,22 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
                 if let Some(pcomp) = self.assets.iter().find_map(|asset|
                     match asset { AssetItem::Precomp(pcomp)
                         if pcomp.base.id == pcl.rid => Some(pcomp), _ => None }) {
-                    let fnth = (fnth - pcl.vl.base.st) / pcl.vl.base.sr;
+                    let child_fnth = (fnth - pcl.vl.base.st) / pcl.vl.base.sr;
 
-                    let fnth = pcl.tm.as_ref().map_or(fnth, // handle time remapping
-                        |tm| tm.get_value(fnth) * pcomp.fr);
-                    let ltm =
-                        pcl.vl.get_matrix(layers, fnth).compose(ptm);
+                    let child_fnth = pcl.tm.as_ref().map_or(child_fnth, // handle time remapping
+                        |tm| tm.get_value(child_fnth) * pcomp.fr);
+                    let ltm = pcl.vl.get_matrix(layers, fnth).compose(ptm);
 
                     rctx.prepare_matte(&pcl.vl, &mut matte);
-                    self.render_layers(rctx, &ltm, &pcomp.layers, fnth);
+                    self.render_layers(rctx, &ltm, &pcomp.layers, child_fnth);
                     rctx.compose_matte(&pcl.vl, &mut matte, &ltm, fnth);
                 }   // XXX: clipping(pcl.w, pcl.h)?
             }
             LayerItem::SolidColor(scl) => if !scl.vl.should_hide(fnth) {
-                let ltm =
-                    scl.vl.get_matrix(layers, fnth).compose(ptm);
+                let ltm = scl.vl.get_matrix(layers, fnth).compose(ptm);
 
                 let mut path = RC::VGPath::new(5);
-                path.rect((self.w as f32 - scl.sw) / 2., // 0., 0.,
-                          (self.h as f32 - scl.sh) / 2., scl.sw, scl.sh);
+                path.rect(0., 0., scl.sw, scl.sh);
 
                 rctx.prepare_matte(&scl.vl, &mut matte);
                 rctx.render_shapes(&ltm, &[DrawItem::Shape(path.into()),
@@ -218,11 +217,11 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
         });
     }       // XXX: how to treat repeated shapes?
 
-    let offset   = mdfr.offset.get_value(fnth) as f64 / 360.;
-    let start    = mdfr. start.get_value(fnth) as f64 / 100.;
-    let mut trim = mdfr.   end.get_value(fnth) as f64 / 100. - start;
-    if 1. < trim { trim = 1.; } //debug_assert!((0.0..=1.).contains(&trim));
-    let start = (start + offset) % 1.;
+    let (start, mut trim) = normalize_trim(
+        mdfr.start .get_value(fnth) as f64 / 100.,
+        mdfr.end   .get_value(fnth) as f64 / 100.,
+        mdfr.offset.get_value(fnth) as f64 / 360.,
+    );
 
     if mdfr.multiple.is_some_and(|ml| matches!(ml, TrimMultiple::Simultaneously)) {
         traverse_shapes(draws, &mut |path| *path = path.trim_path(start, trim));
@@ -260,3 +259,53 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
     }
 }
 
+#[inline] fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
+    ((start.min(end) + offset).rem_euclid(1.), (end - start).abs().min(1.))
+}
+
+#[cfg(test)] mod tests { use super::*;
+    use crate::{helpers::Vec2D, pathm::BezPath};
+
+    struct TestStyle;
+    impl StyleConv for TestStyle {
+        fn solid_color(_: RGBA) -> Self { Self }
+        fn linear_gradient(_: Vec2D, _: Vec2D, _: &[(f32, RGBA)]) -> Self { Self }
+        fn radial_gradient(_: Vec2D, _: Vec2D, _: (f32, f32), _: &[(f32, RGBA)]) -> Self { Self }
+    }
+
+    struct TestContext;
+    impl RenderContext for TestContext {
+        type VGPath = BezPath;
+        type VGStyle = TestStyle;
+        type TM2D = kurbo::Affine;
+        type ImageID = ();
+
+        fn get_size(&self) -> (u32, u32) { (1, 1) }
+        fn clear_rect_with(&mut self, _: u32, _: u32, _: u32, _: u32, _: RGBA) {}
+        fn reset_transform(&mut self, _: Option<&Self::TM2D>) {}
+        fn apply_transform(&mut self, trfm: &Self::TM2D, _: Option<f32>) -> Self::TM2D { *trfm }
+        fn fill_stroke(&mut self, _: &Self::VGPath, _: &RefCell<(Self::VGStyle, FSOpts)>) {}
+    }
+
+    #[test] fn playback_starts_and_wraps_at_the_in_point() {
+        let mut animation: Animation =
+            serde_json::from_str(r#"{"ip":10,"op":12,"fr":1,"layers":[]}"#).unwrap();
+        let mut context = TestContext;
+
+        assert!(animation.render_next_frame(&mut context, 1.));
+        assert_eq!(animation.fnth, 11.);
+        assert!(animation.render_next_frame(&mut context, 1.));
+        assert_eq!(animation.fnth, 10.);
+
+        assert!(animation.render_next_frame(&mut context, 2.));
+        assert_eq!(animation.fnth, 10.);
+    }
+
+    #[test] fn trim_range_normalizes_direction_and_negative_offset() {
+        assert_eq!(normalize_trim(0., 0.5, -0.25), (0.75, 0.5));
+        assert_eq!(normalize_trim(0., 0.5,  0.75), (0.75, 0.5));
+        assert_eq!(normalize_trim(0.75, 0.25, 0.), (0.25, 0.5));
+        assert_eq!(normalize_trim(0., 0.5, -1.25), (0.75, 0.5));
+        assert_eq!(normalize_trim(0., 1.5,  0.25), (0.25, 1.0));
+    }
+}

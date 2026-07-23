@@ -1,7 +1,9 @@
 
 use serde::{Deserialize, Serialize};
 use serde_repr::{Serialize_repr, Deserialize_repr}; // for the underlying repr of a C-like enum
-use crate::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyValue, AnyAsset, defaults};
+use crate::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyAsset, defaults, str_to_rgba,
+    str_from_rgba, deserialize_nonempty_vec, deserialize_strarray, //serialize_animated,
+};
 
 /// Top level object, describing the animation.
 ///
@@ -101,8 +103,6 @@ type DataLayer =  ImageLayer;   // refId of the data source in assets
     /// the corresponding frame of the precomposition.
     #[serde(skip_serializing_if = "Option::is_none")] pub tm: Option<Value>,
 }
-
-use crate::helpers::{str_to_rgba, str_from_rgba, deserialize_strarray};
 
 /// Layer with a solid color rectangle
 #[derive(Deserialize, Serialize)] pub struct SolidLayer {
@@ -287,7 +287,7 @@ type Color = RGBA; // Vec<f32>;
 
 /// An animatable property that holds an array of numbers
 #[derive(Deserialize, Serialize)] pub struct AnimatedProperty<T> {
-    //#[serde(serialize_with = "crate::helpers::serialize_animated")]
+    //#[serde(serialize_with = "serialize_animated")]
     #[serde(rename = "k")] pub keyframes: AnimatedValue<T>,
     /// Whether the property is animated. Note some old animations might not have this
     #[serde(rename = "a", default)] pub animated: IntBool,
@@ -301,8 +301,8 @@ type Color = RGBA; // Vec<f32>;
 
 #[derive(Deserialize, Serialize)] #[serde(untagged)]
 pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
-    /** Array of keyframes, when `a` == `1` */ Animated(Vec<KeyframeBase<T>>),
-    /** Any unexpected value, used for debugging only */ DebugAny(Box<AnyValue>),
+    /** Array of keyframes, when `a` == `1` */
+    Animated(#[serde(deserialize_with = "deserialize_nonempty_vec")] Vec<KeyframeBase<T>>),
 }
 
 /** Properties can have expressions associated with them, when this is the case
@@ -361,7 +361,9 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
 }
 
 #[derive(Deserialize, Serialize)] #[serde(untagged)]
-pub enum ArrayScalar<T> { Array(Vec<T>), Scalar(T), }
+pub enum ArrayScalar<T> { Scalar(T),
+    Array(#[serde(deserialize_with = "deserialize_nonempty_vec")] Vec<T>),
+}
 
 #[derive(Clone, Copy, Default, PartialEq, Deserialize_repr, Serialize_repr)]
 /** Layer and shape blend mode */ #[repr(u8)] pub enum BlendMode {
@@ -844,9 +846,9 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 #[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
 #[repr(u8)] pub enum TextShape { Square = 1, RampUp, RampDown, Triangle, Round, Smooth, }
 
-#[derive(Deserialize, Serialize)] #[serde(untagged)]
-pub enum AssetItem { Precomp(Precomp), Image(Image), Sound(Sound),
-    DataSource(DataSource), DebugAny(AnyAsset),
+#[derive(Serialize)] #[serde(untagged)]
+pub enum AssetItem { Precomp(Precomp), Image(Image),
+    DataSource(DataSource), Sound(Sound), DebugAny(AnyAsset),
 }
 
 #[derive(Deserialize, Serialize)] pub struct Image { // External image
@@ -1214,4 +1216,3 @@ type LayerStyle = VisualObject; // Style applied to a layer
     #[serde(rename = "d")] Darken,
     #[serde(rename = "f")] Difference,
 }
-

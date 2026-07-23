@@ -140,6 +140,7 @@ fn main() -> anyhow::Result<()> {
 
                     // Resize the surface when the window is resized
                     WindowEvent::Resized(size) => {
+                        if size.width == 0 || size.height == 0 { return }
                         if let Some(tree) = &tree {
                             let wsize = (size.width as f32, size.height as f32);
                             let csize = (tree.size().width(), tree.size().height());
@@ -178,8 +179,9 @@ fn main() -> anyhow::Result<()> {
                         let height = surface.config.height;
 
                         // Get the surface's texture
-                        let surface_texture = surface.surface
-                            .get_current_texture().expect("failed to get surface texture");
+                        let Ok(surface_texture) = surface.surface.get_current_texture() else {
+                            render_state.window.request_redraw();   return;
+                        };
 
                         // Get a handle to the device
                         let device_handle = &render_cx.devices[surface.dev_id];
@@ -242,7 +244,8 @@ impl PerfGraph {
 
     pub fn update(&mut self, ft: f32) { //debug_assert!(f32::EPSILON < ft);
         //let ft = self.time.elapsed().as_secs_f32();   self.time = Instant::now();
-        let fps = 1. / ft;  if self.max <  fps { self.max = fps } // (ft + f32::EPSILON)
+        let fps = 1. / ft.max(f32::EPSILON);
+        if self.max < fps { self.max = fps }
         if self.que.len() == 100 {  self.sum -= self.que.pop_front().unwrap_or(0.); }
         self.que.push_back(fps);    self.sum += fps;
     }
@@ -261,7 +264,7 @@ impl PerfGraph {
         }   path.line_to((rw, rh));
 
         scene.fill(peniko::Fill::NonZero, trfm, Color::from_rgba8(255, 192, 0, 128), None, &path);
-        let fps = self.sum / self.que.len() as f32; // self.que.iter().sum::<f32>()
+        let fps = if self.que.is_empty() { 0. } else { self.sum / self.que.len() as f32 };
 
         if self.font.is_none() { return }   let font = self.font.as_ref().unwrap();
         let (font_size, mut pen) = (14., (rw as f32 - 10., 0.));
@@ -286,4 +289,3 @@ impl PerfGraph {
              }));   // XXX: not as decent as canvas.fill_text(...) of femtovg
     }
 }
-

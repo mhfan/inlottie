@@ -17,9 +17,7 @@
 //!
 //! Missing features include:
 //! - text (supported by usvg text flatten feature)
-//! - group opacity
-//! - mix-blend-modes
-//! - clipping (?)
+//! - complex clip paths
 //! - masking
 //! - filter effects
 //! - group background
@@ -45,15 +43,16 @@ use vello::{Scene, peniko};
 /// for a list of some unsupported svg features
 #[inline] pub fn render_tree_with<F: FnMut(&mut Scene, &usvg::Node)>(
     scene: &mut Scene, svg: &usvg::Tree, error_handler: &mut F) {
-    render_group(scene, svg.root(), &usvg::Transform::identity(), error_handler);
+    render_group(scene, svg.root(), vello::kurbo::Affine::IDENTITY, error_handler);
 }
 
 fn render_group<F: FnMut(&mut Scene, &usvg::Node)>(scene: &mut Scene,
-    group: &usvg::Group, ts: &usvg::Transform, error_handler: &mut F) {
+    group: &usvg::Group, ts: vello::kurbo::Affine, error_handler: &mut F) {
     for node in group.children() {
-        //let trfm = util::to_affine(ts) * util::to_affine(&node.abs_transform());
+        let trfm = ts * util::to_affine(&node.abs_transform());
         match node {
             usvg::Node::Group(group) => {
+                let alpha = group.opacity().get();
                 let mix = match group.blend_mode() {
                     usvg::BlendMode::Normal     => peniko::Mix::Normal,
                     usvg::BlendMode::Multiply   => peniko::Mix::Multiply,
@@ -72,23 +71,32 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node)>(scene: &mut Scene,
                     usvg::BlendMode::Color      => peniko::Mix::Color,
                     usvg::BlendMode::Luminosity => peniko::Mix::Luminosity,
                 };  // TODO: deal with group.mask()/filters()
+                let blend = peniko::BlendMode { mix, compose: peniko::Compose::SrcOver, };
 
                 let clipped = match group.clip_path()
                     .and_then(|path| path.root().children().first()) {
                     Some(usvg::Node::Path(clip_path)) => {
                         let local_path = util::to_bez_path(clip_path);
-                        scene.push_layer(peniko::BlendMode { mix,
-                                compose: peniko::Compose::SrcOver, },
-                            group.opacity().get(), util::to_affine(ts), &local_path);   true
-                    }   _ => false,
+                        if mix == peniko::Mix::Normal && alpha == 1. {
+                            scene.push_clip_layer(trfm, &local_path);
+                        } else {
+                            scene.push_layer(blend, alpha, trfm, &local_path);
+                        }   true
+                    }
+                    _ if mix != peniko::Mix::Normal || alpha < 1. => {
+                        let bb = group.layer_bounding_box();
+                        let rect = vello::kurbo::Rect::from_origin_size(
+                            (bb.x(), bb.y()), (bb.width() as f64, bb.height() as f64));
+                        scene.push_layer(blend, alpha, trfm, &rect);   true
+                    }
+                    _ => false,
                 };  // support clip-path with a single path
 
-                render_group(scene, group, &usvg::Transform::identity(), error_handler);
+                render_group(scene, group, ts, error_handler);
                 if clipped { scene.pop_layer(); }
             }
             usvg::Node::Path(path) => if path.is_visible() {
                 let local_path = util::to_bez_path(path);
-                let trfm = util::to_affine(ts);
 
                 let do_fill =
                     |scene: &mut Scene, error_handler: &mut F| {
@@ -130,15 +138,14 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node)>(scene: &mut Scene,
                     usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) => {
                         let Ok(image) = util::decode_raw_raster_image(img.kind())
                         else { error_handler(scene, node); continue };
-                        scene.draw_image(&util::into_image(image), util::to_affine(ts));
+                        scene.draw_image(&util::into_image(image), trfm);
                     }
                     usvg::ImageKind::SVG(svg) =>
-                        render_group(scene, svg.root(), ts, error_handler),
+                        render_group(scene, svg.root(), trfm, error_handler),
                 }
             }
-            usvg::Node::Text(text) => { let group = text.flattened();
-                render_group(scene, group, &ts.pre_concat(group.transform()), error_handler);
-            }
+            usvg::Node::Text(text) =>
+                render_group(scene, text.flattened(), trfm, error_handler),
         }
     }
 }
@@ -230,7 +237,7 @@ pub fn into_image(image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>) -> peniko
     let (width, height) = (image.width(), image.height());
     peniko::ImageData {
         data: peniko::Blob::new(std::sync::Arc::new(image.into_vec())),
-        alpha_type: peniko::ImageAlphaType::AlphaPremultiplied,
+        alpha_type: peniko::ImageAlphaType::Alpha,
         format: peniko::ImageFormat::Rgba8, width, height,
     }.into()
 }
@@ -249,4 +256,12 @@ pub fn decode_raw_raster_image(img: &usvg::ImageKind) ->
         .map(|dyn_img| dyn_img.into_rgba8())
 }
 
+}
+
+#[cfg(test)] mod tests {
+    #[test] fn decoded_rgba_images_are_marked_as_straight_alpha() {
+        let image = image::RgbaImage::from_raw(1, 1, vec![255, 0, 0, 128]).unwrap();
+        let brush = super::util::into_image(image);
+        assert_eq!(brush.image.alpha_type, vello::peniko::ImageAlphaType::Alpha);
+    }
 }

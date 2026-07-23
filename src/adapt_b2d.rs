@@ -35,7 +35,7 @@ impl RenderContext for BLContext {
     fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) -> Self::TM2D {
         let last_trfm = self.get_transform(1);
         if let Some(opacity) = opacity { self.set_global_alpha(opacity as _) }
-        self.apply_transform(trfm);     last_trfm
+        self.reset_transform(Some(trfm));     last_trfm
     }
 
     fn fill_stroke(&mut self, path: &Self::VGPath,
@@ -74,7 +74,7 @@ impl RenderContext for BLContext {
                     self.set_stroke_dash(dash[0] as _,
                         &dash.iter().skip(1).map(|&x| x as _).collect::<Vec<_>>());
                     //self.stroke_geometry(&path.make_dash(dash[0], &dash[1..]));
-                }
+                } else { self.set_stroke_dash(0., &[]); }
 
                 match &style.borrow().0 {
                     BLStyle::Solid(color) => self.set_stroke_style(color),
@@ -164,4 +164,3 @@ pub enum BLStyle { Solid(BLSolidColor), Gradient(BLGradient), }
 impl From<RGBA> for BLRgba32 {
     #[inline] fn from(color: RGBA) -> Self { (color.r, color.g, color.b, color.a).into() }
 }
-

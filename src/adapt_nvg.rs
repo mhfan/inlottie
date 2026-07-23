@@ -106,9 +106,10 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
         style: &core::cell::RefCell<(Self::VGStyle, FSOpts)>) {
         use femtovg::{FillRule as FFR, LineCap as FLC, LineJoin as FLJ};
 
-        match &style.borrow().1 {
+        let mut style = style.borrow_mut();
+        let (paint, options) = &mut *style;
+        match options {
             FSOpts::Fill(rule) => {
-                let paint = &mut style.borrow_mut().0;
                 paint.set_fill_rule(match rule {
                     FillRule::NonZero => FFR::NonZero,
                     FillRule::EvenOdd => FFR::EvenOdd,
@@ -117,7 +118,6 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
 
             FSOpts::Stroke { width, limit,
                 join, cap, dash } => {
-                let paint = &mut style.borrow_mut().0;
                 paint.set_line_width (*width);
                 paint.set_miter_limit(*limit);
 
@@ -145,12 +145,14 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
         let (w, h) = (self.width(), self.height());
         let (lx, ty) = self.transform().transform_point(0., 0.);
         let (lx, ty) = (lx as u32, ty as u32);
+        let (cw, ch) = (w.saturating_sub(lx.saturating_mul(2)),
+                        h.saturating_sub(ty.saturating_mul(2)));
 
         if vl.tt.is_some() || vl.has_mask {
             let imgid = self.create_image_empty(w as _, h as _,
                 PixelFormat::Rgba8, ImageFlags::FLIP_Y).unwrap();
             self.set_render_target(RenderTarget::Image(imgid));
-            self.clear_rect(lx, ty, w - lx * 2, h - ty * 2, CLEAR_COLOR);
+            self.clear_rect(lx, ty, cw, ch, CLEAR_COLOR);
 
             *matte = Some(TrackMatte { mode: vl.tt.unwrap_or(MatteMode::Normal),
                 mlid: vl.tp, imgid, mskid: None }); 	return
@@ -163,7 +165,7 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
         let mskid = self.create_image_empty(w as _, h as _,
             PixelFormat::Rgba8, ImageFlags::FLIP_Y).unwrap();
         self.set_render_target(RenderTarget::Image(mskid));
-        self.clear_rect(lx, ty, w - lx * 2, h - ty * 2, CLEAR_COLOR);
+        self.clear_rect(lx, ty, cw, ch, CLEAR_COLOR);
         matte.mskid = Some(mskid);
     }
 
@@ -200,7 +202,8 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
                 mpaint.set_color(VGColor::rgbaf(0., 0., 0., opacity));
 
                 self.clear_rect(lx as _, ty as _,
-                    w - lx as u32 * 2, h - ty as u32 * 2, CLEAR_COLOR);
+                    w.saturating_sub((lx as u32).saturating_mul(2)),
+                    h.saturating_sub((ty as u32).saturating_mul(2)), CLEAR_COLOR);
 
                 let last_trfm = self.apply_transform(&ltm.0, Some(ltm.1));
                 self.fill_path(&path, &mpaint);
@@ -247,4 +250,3 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
         self.flush();   self.delete_image(imgid); 	*matte = None;
     }
 }
-

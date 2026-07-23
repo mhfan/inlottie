@@ -32,7 +32,9 @@ impl RGBA {
 impl<'de> Deserialize<'de> for RGBA {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let v = Vec::<f32>::deserialize(deserializer)?;     // use SmallVec?
-        debug_assert!(2 < v.len() && v.len() < 5);
+        if !(3..=4).contains(&v.len()) {
+            return Err(D::Error::invalid_length(v.len(), &"an RGB or RGBA array"));
+        }
         Ok(Self::new_f32(v[0], v[1], v[2], v.get(3).cloned().unwrap_or(1.)))
     }
 }
@@ -46,7 +48,10 @@ impl Serialize for RGBA {
 }
 
 impl std::str::FromStr for RGBA { type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> { //debug_assert!(s.len() == 7);
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !matches!(s.len(), 7 | 9) {
+            return Err("expected #RRGGBB or #RRGGBBAA".to_owned());
+        }
         let v = u32::from_str_radix(s.strip_prefix('#')
             .ok_or("not prefixed with '#'".to_owned())?, 16)
             .map_err(|err| err.to_string())?;
@@ -59,8 +64,8 @@ impl std::str::FromStr for RGBA { type Err = String;
 
 impl core::fmt::Display for RGBA {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, r"#{:2x}{:2x}{:2x}", self.r, self.g, self.b)?;
-        if self.a < 255 { write!(f,  r"{:2x}", self.a)?; }  Ok(())
+        write!(f, r"#{:02x}{:02x}{:02x}", self.r, self.g, self.b)?;
+        if self.a < 255 { write!(f, r"{:02x}", self.a)?; }  Ok(())
     }
 }
 
@@ -79,7 +84,9 @@ impl From<(f32, f32)> for Vec2D {   // for Point/Size/Position/Scale
 impl<'de> Deserialize<'de> for Vec2D {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let v = Vec::<f32>::deserialize(deserializer)?;     // use SmallVec?
-        debug_assert!(!v.is_empty() && v.len() < 4); // XXX: ignore extra 3rd value?
+        if !(1..=3).contains(&v.len()) {
+            return Err(D::Error::invalid_length(v.len(), &"a 1- to 3-element vector"));
+        }
         Ok(Self { x: v[0], y: v.get(1).cloned().unwrap_or(0.) })
     }
 }
@@ -161,23 +168,54 @@ impl Animation {
     }
 }
 
+pub(crate) fn deserialize_nonempty_vec<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+    where D: Deserializer<'de>, T: Deserialize<'de> {
+    let values = Vec::deserialize(d)?;
+    if  values.is_empty() { Err(D::Error::invalid_length(0, &"a non-empty array")) }
+    else { Ok(values) }
+}
+
+impl<'de> Deserialize<'de> for AssetItem {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut value = serde_json::Value::deserialize(d)?;
+        if  value.get("layers").is_some() {
+            return Precomp::deserialize(value).map(Self::Precomp).map_err(D::Error::custom);
+        }
+
+        match value.get("t").and_then(serde_json::Value::as_u64) {
+            Some(3) => DataSource::deserialize(value)
+                .map(Self::DataSource).map_err(D::Error::custom),
+            Some(2) => FileAsset::deserialize(value).map(Self::Sound).map_err(D::Error::custom),
+            Some(1) => {
+                value.as_object_mut().expect("asset must be an object").remove("t");
+                Image::deserialize(value).map(Self::Image).map_err(D::Error::custom)
+            },
+            Some(ty) => Err(D::Error::custom(format!("unknown asset type {ty}"))),
+            None if value.get("p").is_some() => Image::deserialize(value)
+                .map(Self::Image).map_err(D::Error::custom),
+            None => AnyAsset::deserialize(value).map(Self::DebugAny).map_err(D::Error::custom),
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for LayerItem {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
-        Ok( match value.get("ty").and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| D::Error::missing_field("ty"))? as u32 {
+        Ok(match value.get("ty").and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| D::Error::missing_field("ty"))? {
 
             0 => Self::PrecompLayer(PrecompLayer::
                 deserialize(value).map_err(D::Error::custom)?),
             1 => Self::SolidColor(SolidLayer::deserialize(value).map_err(D::Error::custom)?),
-            2 | 15 => Self::Image(ImageLayer::deserialize(value).map_err(D::Error::custom)?),
+            2 => Self::Image(ImageLayer::deserialize(value).map_err(D::Error::custom)?),
             3 => Self::Null(VisualLayer::deserialize(value).map_err(D::Error::custom)?),
             4 => Self::Shape(ShapeLayer::deserialize(value).map_err(D::Error::custom)?),
             5 => Self::Text (Box::new(TextLayer::deserialize(value).map_err(D::Error::custom)?)),
             6 => Self::Audio(AudioLayer::deserialize(value).map_err(D::Error::custom)?),
            13 => Self::Camera(CameraLayer::deserialize(value).map_err(D::Error::custom)?),
+           15 => Self::Data(ImageLayer::deserialize(value).map_err(D::Error::custom)?),
 
-            _ => unreachable!()
+            ty => return Err(D::Error::custom(format!("unknown layer type {ty}"))),
         })
     }
 }
@@ -219,8 +257,8 @@ pub(crate) fn deserialize_strarray<'de, D: Deserializer<'de>>(d: D) ->
 impl<'de> Deserialize<'de> for EffectValueItem {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
-        Ok( match value.get("ty").and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| D::Error::missing_field("ty"))? as u32 {
+        Ok(match value.get("ty").and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| D::Error::missing_field("ty"))? {
 
             0 => Self::Slider(EffectValue::<Value>::
                 deserialize(value).map_err(D::Error::custom)?),
@@ -240,7 +278,7 @@ impl<'de> Deserialize<'de> for EffectValueItem {
            10 => Self::EffectLayer(EffectValue::<Value>::
                 deserialize(value).map_err(D::Error::custom)?),
             //   Self::NoValue
-            _ => unreachable!()
+            ty => return Err(D::Error::custom(format!("unknown effect value type {ty}"))),
         })
     }
 }
@@ -248,8 +286,8 @@ impl<'de> Deserialize<'de> for EffectValueItem {
 impl<'de> Deserialize<'de> for LayerStyleItem {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
-        Ok( match value.get("ty").and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| D::Error::missing_field("ty"))? as u32 {
+        Ok(match value.get("ty").and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| D::Error::missing_field("ty"))? {
 
             0 => Self::Stroke(StrokeStyle::deserialize(value).map_err(D::Error::custom)?),
             1 => Self::DropShadow (DropShadowStyle::
@@ -266,7 +304,7 @@ impl<'de> Deserialize<'de> for LayerStyleItem {
             8 => Self::GradientOverlay(GradientOverlayStyle::
                 deserialize(value).map_err(D::Error::custom)?),
 
-            _ => unreachable!()
+            ty => return Err(D::Error::custom(format!("unknown layer style type {ty}"))),
         })
     }
 }
@@ -277,7 +315,7 @@ impl<'de> Deserialize<'de> for  AnyAsset {
         let value = serde_json::Value::deserialize(d)?;
         //eprintln!("{}", value.to_string().get(0..20).unwrap());
         //let _ = Precomp::deserialize(&value).unwrap();
-        let value = AssetBase::deserialize(value).unwrap();
+        let value = AssetBase::deserialize(value).map_err(D::Error::custom)?;
         eprintln!("Failed with asset: {}", value.id);   Ok(AnyAsset(value))
     }
 }
@@ -292,6 +330,58 @@ impl<'de> Deserialize<'de> for AnyValue {
 
 #[cfg(test)] mod test { use super::*;
     use serde_test::{Token, assert_tokens/*, assert_de_tokens, assert_ser_tokens*/};
+
+    #[test] fn rgba_text_roundtrip_and_validation() {
+        let color = RGBA::new_u8(1, 2, 15, 16);
+        assert_eq!(color.to_string(), "#01020f10");
+        let parsed: RGBA = color.to_string().parse().unwrap();
+        assert_eq!((parsed.r, parsed.g, parsed.b, parsed.a), (1, 2, 15, 16));
+        assert!("#123".parse::<RGBA>().is_err());
+    }
+
+    #[test] fn vector_deserialization_rejects_invalid_lengths() {
+        assert!(serde_json::from_str::<RGBA>("[]").is_err());
+        assert!(serde_json::from_str::<RGBA>("[1, 1]").is_err());
+        assert!(serde_json::from_str::<Vec2D>("[]").is_err());
+        assert!(serde_json::from_str::<Vec2D>("[1, 2, 3, 4]").is_err());
+        assert!(serde_json::from_str::<LayerItem>(r#"{"ty":99}"#).is_err());
+        assert!(serde_json::from_str::<EffectValueItem>(r#"{"ty":99}"#).is_err());
+        assert!(serde_json::from_str::<LayerStyleItem>(r#"{"ty":99}"#).is_err());
+    }
+
+    #[test] fn rgba_lerp_handles_decreasing_channels() {
+        let from = RGBA::new_u8(255, 200, 100, 50);
+        let to = RGBA::new_u8(0, 100, 50, 0);
+        let color = math::Tween::lerp(&from, &to, 0.5);
+        assert_eq!((color.r, color.g, color.b, color.a), (127, 150, 75, 25));
+    }
+
+    #[test] fn asset_variants_use_their_discriminating_fields() {
+        let data = serde_json::from_str::<AssetItem>(r#"{"id":"data","p":"data.json","t":3}"#)
+            .unwrap();
+        assert!(matches!(data, AssetItem::DataSource(_)));
+
+        let image = serde_json::from_str::<AssetItem>(r#"{"id":"image","p":"image.png","w":10}"#)
+            .unwrap();
+        assert!(matches!(image, AssetItem::Image(_)));
+
+        let typed_image = serde_json::from_str::<AssetItem>(
+            r#"{"id":"image","p":"image.png","t":1}"#).unwrap();
+        assert!(matches!(typed_image, AssetItem::Image(_)));
+
+        let sound = serde_json::from_str::<AssetItem>(r#"{"id":"sound","p":"sound.mp3","t":2}"#)
+            .unwrap();
+        assert!(matches!(sound, AssetItem::Sound(_)));
+    }
+
+    #[test] fn animated_properties_reject_empty_keyframes() {
+        let property = serde_json::from_str::<Value>(r#"{"a":1,"k":[]}"#);
+        assert!(property.is_err());
+
+        let property = serde_json::from_str::<Value>(
+            r#"{"a":1,"k":[{"t":0,"s":[]}]}"#);
+        assert!(property.is_err());
+    }
 
     #[test] fn test_enum_type() {
         let tokens = [
@@ -612,10 +702,11 @@ impl Tween for Vec2D {
 
 impl Tween for RGBA {
     fn lerp(&self, other: &Self, t: f32) -> Self {
-        Self {  r: self.r + ((other.r - self.r) as f32 * t) as u8,
-                g: self.g + ((other.g - self.g) as f32 * t) as u8,
-                b: self.b + ((other.b - self.b) as f32 * t) as u8,
-                a: self.a + ((other.a - self.a) as f32 * t) as u8,
+        let channel = |from: u8, to: u8| (from as f32 + (to as f32 - from as f32) * t) as u8;
+        Self {  r: channel(self.r, other.r),
+                g: channel(self.g, other.g),
+                b: channel(self.b, other.b),
+                a: channel(self.a, other.a),
         }
     }
 }
@@ -714,7 +805,7 @@ impl<T: Clone + math::Tween> AnimatedProperty<T> {
                     //debug_assert!(TypeId::of::<T>() == TypeId::of::<Vec2D>());
                     kf_prev.bezc(kf_next, time, extra)
                 } else { kf_prev.lerp(kf_next, time) }
-            }   _ => unreachable!(),
+            }
         }
     }
 }
@@ -747,4 +838,3 @@ impl VisualLayer {
         self.base.hd || fnth < self.base.ip || self.base.op <= fnth || fnth < self.base.st
     }
 }
-

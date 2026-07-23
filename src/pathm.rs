@@ -104,33 +104,36 @@ pub trait PathBuilder {     //type Point; type Path;
 
     // https://lottiefiles.github.io/lottie-docs/scripts/lottie_bezier.js
     // or use curve_length(curve, merr) and subdivide(t, seg) of flo_curves
-    fn trim_path(&self, start: f64, mut trim: f64) -> Self where Self: Sized {
+    fn trim_path(&self, start: f64, trim: f64) -> Self where Self: Sized {
         let path = self.to_kurbo();
 
         use kurbo::{ParamCurve, ParamCurveArclen};
-        //let segments = kurbo::segments(path.iter());
-        let (mut tri0, mut suml) = (0., path.segments().fold(0.,
-            |acc, seg| acc + seg.arclen(ACCURACY_TOLERANCE)));
-        if 1. < start + trim { tri0 = start + trim - 1.; trim = 1. - start; }
-        let (start, mut trim) = (suml * start, suml * trim);
-        tri0 *= suml;  suml = 0.;
+        if trim <= 0. { return Self::new(0) }
+        if 1. <= trim { return Self::from_kurbo(path) }
 
-        Self::from_kurbo(BezPath::from_path_segments(path.segments().filter_map(|seg| {
-            let len = seg.arclen(ACCURACY_TOLERANCE);
+        let total = path.segments().fold(0.,
+            |acc, seg| acc + seg.arclen(ACCURACY_TOLERANCE));
+        if  total == 0. { return Self::new(0) }
 
-            let range = if suml <= start && start < suml + len {
-                let start = start - suml;   let end = start + trim;
-                if  end < len { trim = 0.;      start / len .. end / len
-                } else { trim -= len - start;   start / len .. 1. }
-            } else if start < suml && 0. < trim {
-                if trim < len { let end = trim / len;   trim = 0.;  0.0 .. end
-                } else { trim -= len;   0.0 .. 1. }
-            } else if 0. < tri0 {   // rewound part
-                if tri0 < len { let end = tri0 / len;   tri0 = 0.;  0.0 .. end
-                } else { tri0 -= len;   0.0 .. 1. }
-            } else {     suml += len;   return None };
-            suml += len;    Some(seg.subsegment(range))
-        })))
+        let start = start.rem_euclid(1.);
+        let end   = start + trim;
+        let mut output = Vec::<kurbo::PathSeg>::new();
+        let mut append_range = |from: f64, to: f64| {
+            let (from, to, mut offset) = (from * total, to * total, 0.);
+            for seg in path.segments() {
+                let len = seg.arclen(ACCURACY_TOLERANCE);
+                let next = offset + len;
+                let (lo, hi) = (from.max(offset), to.min(next));
+                if lo < hi && 0. < len {
+                    output.push(seg.subsegment((lo - offset) / len .. (hi - offset) / len));
+                }
+                offset = next;
+            }
+        };
+
+        append_range(start, end.min(1.));
+        if 1. < end { append_range(0., end - 1.); }
+        Self::from_kurbo(BezPath::from_path_segments(output.into_iter()))
     }
 
 }
@@ -194,38 +197,38 @@ impl PathFactory for Rectangle {
                           (erb.x, tlt.y).into(), (erb.x, clt.y).into());
         }   path.close(); 	return path; */
 
-        let radii = (radius, radius).into();
+        let (radii, quarter) = ((radius, radius).into(), PI / 2.);
         if self.base.is_ccw() {
             //path.arc_to((erb.x, elt.y).into(), (crb.x, elt.y).into(), radii);
-            path.add_arc((crb.x, clt.y).into(), radii,  0.,  (PI / 2.) as _);
+            path.add_arc((crb.x, clt.y).into(), radii, 0., -quarter);
             path.line_to((clt.x, elt.y).into());
 
             //path.arc_to(elt, (elt.x, clt.y).into(), radii);
-            path.add_arc(clt, radii,  (PI / 2.) as _,  PI as _);
+            path.add_arc(clt, radii, -quarter, -quarter);
             path.line_to((elt.x, crb.y).into());
 
             //path.arc_to((elt.x, erb.y).into(), (clt.x, erb.y).into(), radii);
-            path.add_arc((clt.x, crb.y).into(), radii,  PI as _, -(PI / 2.) as _);
+            path.add_arc((clt.x, crb.y).into(), radii, PI as _, -quarter);
             path.line_to((crb.x, erb.y).into());
 
             //path.arc_to(erb, (erb.x, crb.y).into(), radii);
-            path.add_arc(crb, radii, -(PI / 2.) as _,  0.);
+            path.add_arc(crb, radii, quarter, -quarter);
             //path.line_to((erb.x, clt.y).into());
         } else {
             path.line_to((erb.x, crb.y).into());
-            path.add_arc(crb, radii,  0., -(PI / 2.) as _);
+            path.add_arc(crb, radii, 0., quarter);
             //path.arc_to(erb, (crb.x, erb.y).into(), radii);
 
             path.line_to((clt.x, erb.y).into());
-            path.add_arc((clt.x, crb.y).into(), radii, -(PI / 2.) as _,  PI as _);
+            path.add_arc((clt.x, crb.y).into(), radii, quarter, quarter);
             //path.arc_to((elt.x, erb.y).into(), (elt.x, crb.y).into(), radii);
 
             path.line_to((elt.x, clt.y).into());
-            path.add_arc(clt, radii,  PI as _,  (PI / 2.) as _);
+            path.add_arc(clt, radii, PI as _, quarter);
             //path.arc_to(elt, (clt.x, elt.y).into(), radii);
 
             path.line_to((crb.x, elt.y).into());
-            path.add_arc((crb.x, clt.y).into(), radii,  (PI / 2.) as _,  0.);
+            path.add_arc((crb.x, clt.y).into(), radii, -quarter, quarter);
             //path.arc_to((erb.x, elt.y).into(), (erb.x, clt.y).into(), radii);
         }   path.close();   path
     }
@@ -262,8 +265,8 @@ impl PathFactory for Polystar {
 			let rp = Vec2D::from_polar(angle) * radius;
 			let pt = center + rp; 	//let rp = rp * rr;
 
-            let rd = rd * rr;
-            path.cubic_to(lot, pt + rd, pt);    lot = pt - rd
+            let nrd = rd * rr;
+            path.cubic_to(lot, pt + nrd, pt);   lot = pt - nrd
         };
 
         for _ in 0..nvp {
@@ -312,8 +315,8 @@ impl PathFactory for FreePath {
     fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
         if !self.base.is_ccw() { return self.shape.to_path(fnth); }
         let curv = self.shape.get_value(fnth);
-        debug_assert!(curv.vp.len() == curv.it.len() &&
-                      curv.it.len() == curv.ot.len() && !curv.vp.is_empty());
+        if  curv.vp.is_empty() || curv.vp.len() != curv.it.len() ||
+            curv.it.len() != curv.ot.len() { return PB::new(0) }
 
         let n = curv.vp.len();
         let pt = *curv.vp.last().unwrap();
@@ -338,8 +341,8 @@ impl PathFactory for FreePath {
 impl PathFactory for ShapeProperty {    // for mask
     fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
         let curv = self.get_value(fnth);
-        debug_assert!(curv.vp.len() == curv.it.len() &&
-                      curv.it.len() == curv.ot.len() && !curv.vp.is_empty());
+        if  curv.vp.is_empty() || curv.vp.len() != curv.it.len() ||
+            curv.it.len() != curv.ot.len() { return PB::new(0) }
 
         let n = curv.vp.len();
         let pt = *curv.vp.first().unwrap(); //curv.vp[0];
@@ -364,3 +367,39 @@ impl PathFactory for ShapeProperty {    // for mask
     }
 }
 
+#[cfg(test)] mod tests { use super::*;
+    use crate::schema::{AnimatedProperty, Bezier};
+
+    #[test] fn rounded_rectangle_has_four_quarter_curves() {
+        let rect: Rectangle = serde_json::from_str(
+            r#"{"ty":"rc","s":{"k":[100,80]},"p":{"k":[0,0]},"r":{"k":10}}"#,
+        ).unwrap();
+        let path = rect.to_path::<BezPath>(0.);
+        let ends = path.elements().iter().filter_map(|el| match el {
+            kurbo::PathEl::CurveTo(_, _, end) => Some(*end), _ => None,
+        }).collect::<Vec<_>>();
+        assert_eq!(ends.len(), 4);
+        for (actual, expected) in ends.iter().zip(
+            [(40., 40.), (-50., 30.), (-40., -40.), (50., -30.), ]) {
+            assert!((actual.x - expected.0).abs() < 1e-9);
+            assert!((actual.y - expected.1).abs() < 1e-9);
+        }
+    }
+
+    #[test] fn invalid_bezier_produces_an_empty_path() {
+        let shape = AnimatedProperty::from_value(Bezier {
+            closed: true, vp: Vec::new(), it: Vec::new(), ot: Vec::new(),
+        }); assert!(shape.to_path::<BezPath>(0.).is_empty());
+    }
+
+    #[test] fn trim_path_wraps_across_the_path_end() {
+        let mut path = BezPath::new();
+        path.move_to((0., 0.)); path.line_to((100., 0.));
+
+        let segments = PathBuilder::trim_path(&path, 0.75, 0.5)
+            .segments().collect::<Vec<_>>();
+        assert_eq!(segments.len(), 2);  use kurbo::ParamCurve;
+        assert_eq!((segments[0].start().x, segments[0].end().x), (75., 100.));
+        assert_eq!((segments[1].start().x, segments[1].end().x), (0., 25.));
+    }
+}
