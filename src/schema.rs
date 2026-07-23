@@ -94,7 +94,7 @@ type DataLayer =  ImageLayer;   // refId of the data source in assets
     #[serde(flatten)] pub vl: VisualLayer,
     /// ID of the precomp as specified in the assets
     #[serde(rename = "refId")] pub rid: String,
-    /**  Width of the clipping rect */ pub w: u32,
+    /**  Width of the clipping rect */ pub w: u32, // XXX: let w,h be default or Option?
     /** Height of the clipping rect */ pub h: u32,
 
     /// Time Remapping, The `tm` property maps the time in seconds of the precomposition
@@ -116,7 +116,7 @@ type DataLayer =  ImageLayer;   // refId of the data source in assets
 #[derive(Deserialize, Serialize)] /** A layer playing sounds */ pub struct AudioLayer {
     #[serde(flatten)] pub base: LayerInfo,
     /// ID of the sound as specified in the assets
-    #[serde(rename = "refId")] pub rid: String,  // a workaround for issues missing `au`
+    #[serde(rename = "refId")] pub rid: String,  // XXX: a workaround for issues missing `au`
     #[serde(skip_serializing_if = "Option::is_none")] pub au: Option<AudioSettings>,
 }
 
@@ -179,7 +179,7 @@ type DataLayer =  ImageLayer;   // refId of the data source in assets
 
 #[derive(Deserialize, Serialize)] pub struct LayerInfo {
     //* Layer type */ pub ty: u8,  // handled in LayerItem parsing
-    /** Start Time */ pub st: f32, // XXX: what is `st` used for?
+    #[serde(default)] /** Start Time */ pub st: f32, // XXX: what is `st` used for?
     /**  In Point  */ pub ip: f32,
     /** Out Point  */ pub op: f32,
 
@@ -286,17 +286,12 @@ pub type MultiD = AnimatedProperty<Vec<f32>>;
 type Color = RGBA; // Vec<f32>;
 
 /// An animatable property that holds an array of numbers
-#[derive(Deserialize, Serialize)] pub struct AnimatedProperty<T> {
-    //#[serde(serialize_with = "serialize_animated")]
-    #[serde(rename = "k")] pub keyframes: AnimatedValue<T>,
-    /// Whether the property is animated. Note some old animations might not have this
-    #[serde(rename = "a", default)] pub animated: IntBool,
+pub struct AnimatedProperty<T> { pub source: PropertySource<T>,
+    #[cfg(feature = "expression")] pub expr: Option<Box<Expression>>,
+}
 
-    // TODO: lookup by 'sid' in slots and override the value, in loading/parsing stage
-    //#[serde(default, skip_serializing_if = "String::is_empty")]
-    /** Slot ID, One of the ID in the file's slots */ pub sid: Option<Box<String>>,
-
-    #[cfg(feature = "expression")] #[serde(flatten)] pub expr: Option<Box<Expression>>,
+pub enum PropertySource<T> {       Inline(AnimatedValue<T>),
+    Slot { id: Box<str>, fallback: Option<AnimatedValue<T>> },
 }
 
 #[derive(Deserialize, Serialize)] #[serde(untagged)]
@@ -423,7 +418,8 @@ type ShapeList = Vec<ShapeItem>; // List of valid shapes
     #[serde(flatten)] pub base: ShapeBase,
     #[serde(rename = "s")] pub size: Animated2D,
     /** Center of the rectangle */ #[serde(rename = "p")] pub pos: Position,
-    /** Rounded corners radius  */ #[serde(rename = "r")] pub rcr: Value,
+    #[serde(rename = "r", skip_serializing_if = "Option::is_none")]
+    /** Rounded corners radius  */ pub rcr: Option<Value>,
 }
 
 #[derive(Deserialize, Serialize)] /** Star or regular polygon */ pub struct Polystar {
@@ -848,7 +844,10 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
 
 #[derive(Serialize)] #[serde(untagged)]
 pub enum AssetItem { Precomp(Precomp), Image(Image),
+    // Asset types defined by the Lottie Community 1.0 specification.
+    // LottieFiles/Bodymovin extensions retained for compatibility.
     DataSource(DataSource), Sound(Sound), DebugAny(AnyAsset),
+    // Preserve otherwise unsupported assets instead of rejecting the whole animation.
 }
 
 #[derive(Deserialize, Serialize)] pub struct Image { // External image
@@ -866,7 +865,7 @@ pub enum AssetItem { Precomp(Precomp), Image(Image),
     #[serde(rename = "t")] /** default `3` const */ pub r#type: u32,
 }
 
-type Sound = FileAsset; // External sound
+type Sound = FileAsset; // External sound, from the LottieFiles/Bodymovin asset extensions.
 #[derive(Deserialize, Serialize)] pub struct FileAsset {
     #[serde(rename = "p")] /** Filename or data url */ pub url: String,
     #[serde(flatten)] pub base: AssetBase,
@@ -977,17 +976,7 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
 }
 
 type SlotDict = std::collections::HashMap<String, SlotProp>;
-#[derive(Deserialize, Serialize)] pub struct SlotProp { pub p: SlotValue }
-
-#[derive(Deserialize, Serialize)] #[serde(untagged)]  pub enum SlotValue {
-    Value(Value),
-    Position(Position),
-    ColorValue(ColorValue),
-    ShapeProperty(Box<ShapeProperty>),
-    Image(Box<Image>),
-    MultiD(MultiD),
-    AnimatedTextDoc(AnimatedTextDoc),
-}
+#[derive(Deserialize, Serialize)] pub struct SlotProp { pub p: serde_json::Value }
 
 /// Layers can have post-processing effects applied to them.
 /// Many effects have unused values which are labeled with a number.

@@ -144,7 +144,8 @@ impl PathFactory for Rectangle {
     fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
         let center = self. pos.get_value(fnth);
         let halves = self.size.get_value(fnth) / 2.;
-        let radius = self.rcr.get_value(fnth).min(halves.x).min(halves.y);
+        let radius = self.rcr.as_ref().map_or(0.,
+            |v| v.get_value(fnth).min(halves.x).min(halves.y));
         let (elt, erb) = (center - halves, center + halves);
 
         // Note that unlike other shapes, on lottie web when the `d` attribute is missing,

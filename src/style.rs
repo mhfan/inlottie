@@ -153,7 +153,7 @@ impl Transform {
         match &self.position {
             Some(Translation::Normal(apos)) => {
                 let pos  = apos.get_value(fnth);
-                if  ao.as_bool() &&  apos.animated.as_bool() {
+                if  ao.as_bool() && apos.is_animated() {
                     let orient = pos - apos.get_value(fnth - 1.);
                     trfm.rotate(math::fast_atan2(orient.y, orient.x));
                 }   trfm.translate(pos);
