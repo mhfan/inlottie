@@ -12,6 +12,13 @@ on:
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -19,6 +26,7 @@ jobs:
   testbuild:
     #name: Build Rust Project
     runs-on: ubuntu-latest  # https://github.com/actions/virtual-environments
+    timeout-minutes: 9
 
     #strategy:
     #  matrix:
@@ -48,27 +56,19 @@ jobs:
     #  uses: dtolnay/rust-toolchain@stable
 
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
-    #- uses: actions/checkout@v4
+    #- uses: actions/checkout@v6
     #  with:
     #    repository: rive-app/rive-rs
     #    path: rive-rs
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         repository: zimond/lottie-rs
         sparse-checkout: fixtures # used as test data
         path: lottie-rs
 
-    - uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    - uses: Swatinem/rust-cache@v2
 
     #-  uses: taiki-e/install-action@nextest
     - name: Test and Build
@@ -88,18 +88,21 @@ jobs:
     #  with:
     #    registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  #coverage:   # https://github.com/xd009642/tarpaulin
-  #  runs-on: ubuntu-latest
-  #  #container:
-  #  #  image: xd009642/tarpaulin:develop-nightly
-  #  #  options: --security-opt seccomp=unconfined
-  #
-  #  steps:
-  #  - name: Checkout repository
-  #    uses: actions/checkout@v4
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+
+    - uses: actions/checkout@v6
+      with:
+        repository: zimond/lottie-rs
+        sparse-checkout: fixtures # used as test data
+        path: lottie-rs
 
     - run: rustup toolchain install nightly --profile minimal --component llvm-tools
-    #- uses: Swatinem/rust-cache@v2  # should be after rustup
+    - uses: Swatinem/rust-cache@v2  # should be after rustup
 
     - uses: taiki-e/install-action@cargo-llvm-cov # https://github.com/taiki-e/cargo-llvm-cov
     - name: Generate code coverage  # https://github.com/actions-rs/tarpaulin
@@ -116,10 +119,10 @@ jobs:
       #  run-types: 'Tests,Doctests'
 
     - name: Upload to codecov.io
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         token: ${{secrets.CODECOV_TOKEN}}  # not required for public repos
-      #  fail_ci_if_error: true
+        #fail_ci_if_error: true
         files: lcov.info
 
     #- name: Archive code coverage results
@@ -127,4 +130,3 @@ jobs:
     #  with:
     #    name: code-coverage-report
     #    path: cobertura.xml
-
