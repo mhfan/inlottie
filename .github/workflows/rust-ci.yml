@@ -58,10 +58,12 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v6
 
-    #- uses: actions/checkout@v6
-    #  with:
-    #    repository: rive-app/rive-rs
-    #    path: rive-rs
+    - name: Checkout Rive Rust runtime and definitions
+      uses: actions/checkout@v6
+      with:
+        repository: rive-app/rive-rs
+        path: rive-rs
+        submodules: recursive
     - uses: actions/checkout@v6
       with:
         repository: zimond/lottie-rs
@@ -94,6 +96,13 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v6
+
+    - name: Checkout Rive definitions
+      uses: actions/checkout@v6
+      with:
+        repository: rive-app/rive-cpp # rive-runtime
+        sparse-checkout: dev/defs
+        path: rive-cpp
 
     - uses: actions/checkout@v6
       with:

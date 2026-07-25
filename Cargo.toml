@@ -28,8 +28,8 @@ path = "src/winit_vello.rs"
 required-features = [ "vello" ]
 
 [[bin]]
-name = "rive_defs_parser"
-path = "src/rive_defs_parser.rs"
+name = "parse_rive_defs"
+path = "src/rive/parse_defs.rs"
 
 [dependencies]
 serde = { version = "1.0", features = [ "derive" ] }
@@ -75,6 +75,8 @@ serde_test = "1.0"
 glob = "0.3"
 
 [build-dependencies]
+serde = { version = "1.0", features = [ "derive" ] }
+serde_json = "1.0"
 chrono = "0.4"
 
 [profile.dev]
