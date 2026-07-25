@@ -20,6 +20,8 @@ const DEFAULT_OUTPUT: &str = "target/rive_defs.rs";
 #[derive(Debug, Deserialize)] struct PropertyDef {
     #[serde(rename = "type")] type_name: String,
     #[serde(rename = "typeRuntime", default)] type_runtime: Option<String>,
+    #[serde(rename = "initialValue", default)] initial_value: Option<String>,
+    #[serde(rename = "initialValueRuntime", default)] initial_value_runtime: Option<String>,
     #[serde(default)] runtime: Option<bool>,
     #[serde(default)] key: Option<Key>,
     #[serde(default)] description: Option<String>,
@@ -38,6 +40,8 @@ const DEFAULT_OUTPUT: &str = "target/rive_defs.rs";
     name: String,
     type_name: String,
     type_runtime: Option<String>,
+    initial_value: Option<String>,
+    initial_value_runtime: Option<String>,
     property_id: Option<u32>,
     property_key: Option<String>,
     object_name: String, // Used to produce a unique property constant name.
@@ -97,6 +101,8 @@ pub fn generate(defs_dir: &Path, output: &Path) -> Result<()> {
                 name: prop_name.clone(),
                 type_name: prop_def.type_name.clone(),
                 type_runtime: prop_def.type_runtime.clone(),
+                initial_value: prop_def.initial_value.clone(),
+                initial_value_runtime: prop_def.initial_value_runtime.clone(),
                 property_id:  prop_def.key.as_ref().map(|k| k.int),
                 property_key: prop_def.key.as_ref().map(|k| k.string.clone()),
                 object_name: def.name.clone(),
@@ -155,16 +161,37 @@ fn pascal_case(name: &str) -> String {
     }).collect()
 }
 
-fn accessor(type_name: &str, type_runtime: Option<&str>) -> (&'static str, &'static str) {
-    let semantic = type_name.to_ascii_lowercase();
-    let runtime = type_runtime.unwrap_or(type_name).to_ascii_lowercase();
+fn accessor(prop: &PropertyInfo) -> (&'static str, &'static str, Option<String>) {
+    let semantic = prop.type_name.to_ascii_lowercase();
+    let runtime = prop.type_runtime.as_deref().unwrap_or(&prop.type_name).to_ascii_lowercase();
+    let value = prop.initial_value_runtime.as_deref().or(prop.initial_value.as_deref());
     match runtime.as_str() {
-        "bytes" | "string" => ("bytes", "&[u8]"),
-        "float" | "double" => ("float", "f32"),
-        "color" => ("color", "u32"),
-        _ if semantic == "bool" => ("boolean", "bool"),
-        _ => ("varuint", "u32"),
+        "bytes" | "string" => ("bytes", "&[u8]", value.and_then(string_default)),
+        "float" | "double" => ("float", "f32", value.and_then(float_default)),
+        "color" => ("color", "u32", value.and_then(uint_default)),
+        _ if semantic == "bool" =>
+            ("boolean", "bool", value.filter(|v| matches!(*v, "true" | "false"))
+                .map(str::to_owned)),
+        _ => ("varuint", "u32", value.and_then(uint_default)),
     }
+}
+
+fn float_default(value: &str) -> Option<String> {
+    value.parse::<f32>().ok().filter(|value| value.is_finite())
+        .map(|value| format!("{value:?}_f32"))
+}
+
+fn uint_default(value: &str) -> Option<String> {
+    if matches!(value, "-1" | "Core.missingId" | "CoreContext.invalidPropertyKey") {
+        return Some("u32::MAX".to_owned())
+    }
+    value.strip_prefix("0x").map(|value| u32::from_str_radix(value, 16))
+        .unwrap_or_else(|| value.parse()).ok().map(|value: u32| value.to_string())
+}
+
+fn string_default(value: &str) -> Option<String> {
+    let value = value.strip_prefix('\'')?.strip_suffix('\'')?;
+    (!value.contains('\\')).then(|| format!("b{value:?}"))
 }
 
 fn collect_properties<'a>(object: &'a ObjectInfo,
@@ -276,11 +303,16 @@ fn generate_rs_file(objects: &[ObjectInfo], output: &Path) -> Result<()> {
         for (method, prop) in accessors {
             let Some(prop_id) = prop.property_id else { continue };
             let prop_const = id_to_const_name.get(&prop_id).unwrap();
-            let (accessor, return_type) =
-                accessor(&prop.type_name, prop.type_runtime.as_deref());
-            writeln!(writer,
-                "        pub fn {method}(&self) -> Result<Option<{return_type}>> {{ \
-                 self.0.{accessor}(property_ids::{prop_const}) }}")?;
+            let (accessor, return_type, default) = accessor(prop);
+            if let Some(default) = default {
+                writeln!(writer,
+                    "        pub fn {method}(&self) -> Result<{return_type}> {{ \
+                     Ok(self.0.{accessor}(property_ids::{prop_const})?.unwrap_or({default})) }}")?;
+            } else {
+                writeln!(writer,
+                    "        pub fn {method}(&self) -> Result<Option<{return_type}>> {{ \
+                     self.0.{accessor}(property_ids::{prop_const}) }}")?;
+            }
         }
         writeln!(writer, "    }}\n")?;
     }

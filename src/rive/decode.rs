@@ -326,33 +326,32 @@ impl Object {
     }
 
     pub fn get_prop(&self, prop_id: u32) -> Option<&FieldValue> {
-        self.props.iter().find(|(id, _)|
-            id.0 == prop_id).map(|(_, value)| value)
+        self.props.iter().find(|(id, _)| id.0 == prop_id).map(|(_, value)| value)
     }
 
-    pub fn varuint(&self, prop_id: u32) -> Result<Option<u32>> {
+    pub(crate) fn varuint(&self, prop_id: u32) -> Result<Option<u32>> {
         self.typed_prop(prop_id, FieldType::UIntBool, |value| match value {
             FieldValue::VarUInt(value) => Some(value.0), _ => None,
         })
     }
 
-    pub fn boolean(&self, prop_id: u32) -> Result<Option<bool>> {
+    pub(crate) fn boolean(&self, prop_id: u32) -> Result<Option<bool>> {
         self.varuint(prop_id).map(|value| value.map(|value| value != 0))
     }
 
-    pub fn bytes(&self, prop_id: u32) -> Result<Option<&[u8]>> {
+    pub(crate) fn bytes(&self, prop_id: u32) -> Result<Option<&[u8]>> {
         self.typed_prop(prop_id, FieldType::String, |value| match value {
             FieldValue::Bytes(value) => Some(value.as_slice()), _ => None,
         })
     }
 
-    pub fn float(&self, prop_id: u32) -> Result<Option<f32>> {
+    pub(crate) fn float(&self, prop_id: u32) -> Result<Option<f32>> {
         self.typed_prop(prop_id, FieldType::Float, |value| match value {
             FieldValue::Float32(value) => Some(*value), _ => None,
         })
     }
 
-    pub fn color(&self, prop_id: u32) -> Result<Option<u32>> {
+    pub(crate) fn color(&self, prop_id: u32) -> Result<Option<u32>> {
         self.typed_prop(prop_id, FieldType::Color, |value| match value {
             FieldValue::Color(value) => Some(*value), _ => None,
         })
@@ -434,7 +433,7 @@ include!(concat!(env!("OUT_DIR"), "/rive_defs.rs"));
     use std::io::Cursor;
 
     fn varuint(mut value: u32) -> Vec<u8> {
-        let mut encoded = Vec::new();
+        let mut encoded = Vec::with_capacity(5);
         loop {
             let mut byte = (value & 0x7f) as u8;
             value >>= 7;
@@ -534,9 +533,20 @@ include!(concat!(env!("OUT_DIR"), "/rive_defs.rs"));
         object.add_prop(VarUInt(property_ids::NODE_X), FieldValue::Float32(42.5));
 
         let node = objects::Node::try_from(&object).unwrap();
-        assert_eq!(node.x().unwrap(), Some(42.5));
+        assert_eq!(node.x().unwrap(), 42.5);
         assert!(std::ptr::eq(node.object(), &object));
         assert!(matches!(TypedObject::try_from(&object), Ok(TypedObject::Node(_))));
+
+        let default_node = Object::new_simple(object_ids::NODE);
+        assert_eq!(objects::Node::try_from(&default_node).unwrap().x().unwrap(), 0.0);
+
+        let artboard = Object::new_simple(object_ids::ARTBOARD);
+        let artboard = objects::Artboard::try_from(&artboard).unwrap();
+        assert!(!artboard.include_in_export().unwrap());
+        assert_eq!(artboard.default_state_machine_id().unwrap(), u32::MAX);
+
+        let component = Object::new_simple(object_ids::COMPONENT);
+        assert_eq!(objects::Component::try_from(&component).unwrap().name().unwrap(), b"");
 
         let shape = objects::Shape::try_from(&object);
         assert!(matches!(shape, Err(DecodeError::ObjectTypeMismatch {
@@ -544,12 +554,11 @@ include!(concat!(env!("OUT_DIR"), "/rive_defs.rs"));
 
         let mut shape = Object::new_simple(object_ids::SHAPE);
         shape.add_prop(VarUInt(property_ids::NODE_X), FieldValue::Float32(7.0));
-        assert_eq!(objects::Shape::try_from(&shape).unwrap().x().unwrap(), Some(7.0));
+        assert_eq!(objects::Shape::try_from(&shape).unwrap().x().unwrap(), 7.0);
 
         object.props[0].1 = FieldValue::VarUInt(VarUInt(1));
         assert!(matches!(objects::Node::try_from(&object).unwrap().x(),
-            Err(DecodeError::PropTypeMismatch {
-                prop_id: property_ids::NODE_X,
+            Err(DecodeError::PropTypeMismatch { prop_id: property_ids::NODE_X,
                 expected: FieldType::Float, actual: FieldType::UIntBool })));
     }
 
