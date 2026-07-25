@@ -1,9 +1,10 @@
 
 use serde::{Deserialize, Serialize};
 use serde_repr::{Serialize_repr, Deserialize_repr}; // for the underlying repr of a C-like enum
-use crate::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyAsset, defaults, str_to_rgba,
-    str_from_rgba, deserialize_nonempty_vec, deserialize_strarray, //serialize_animated,
+use crate::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyAsset, defaults,
+    str_to_rgba, str_from_rgba,
 };
+use crate::schema_impl::{des_nonempty_vec, des_strarray, des_static_value};
 
 /// Top level object, describing the animation.
 ///
@@ -294,10 +295,13 @@ pub enum PropertySource<T> {       Inline(AnimatedValue<T>),
     Slot { id: Box<str>, fallback: Option<AnimatedValue<T>> },
 }
 
-#[derive(Deserialize, Serialize)] #[serde(untagged)]
-pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
+#[derive(Deserialize, Serialize)]
+#[serde(untagged, bound(deserialize = "T: Deserialize<'de>"))]
+pub enum AnimatedValue<T> {
+    /** `a` == `0`; scalar properties may also encode the value as `[value]`. */
+    Static(#[serde(deserialize_with = "des_static_value")] T),
     /** Array of keyframes, when `a` == `1` */
-    Animated(#[serde(deserialize_with = "deserialize_nonempty_vec")] Vec<KeyframeBase<T>>),
+    Animated(#[serde(deserialize_with = "des_nonempty_vec")] Vec<KeyframeBase<T>>),
 }
 
 /** Properties can have expressions associated with them, when this is the case
@@ -325,7 +329,7 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
     /// keep the same value until the next keyframe.
     #[serde(rename = "h", default, skip_serializing_if = "defaults::is_default")]
     pub hold: IntBool,
-    //#[serde(skip, deserialize_with = "deserialize_strarray")] pub n: Vec<String>,
+    //#[serde(skip, deserialize_with = "des_strarray")] pub n: Vec<String>,
     //  Value at the end of the keyframe, note that this is deprecated and
     //  you should use `s` from the next keyframe to get this value.
     //#[serde(skip_serializing)] pub e: Option<ArrayScalar<T>>,
@@ -357,7 +361,7 @@ pub enum AnimatedValue<T> { /**  `a` == `0` */ Static(T),
 
 #[derive(Deserialize, Serialize)] #[serde(untagged)]
 pub enum ArrayScalar<T> { Scalar(T),
-    Array(#[serde(deserialize_with = "deserialize_nonempty_vec")] Vec<T>),
+    Array(#[serde(deserialize_with = "des_nonempty_vec")] Vec<T>),
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Deserialize_repr, Serialize_repr)]
@@ -816,7 +820,7 @@ pub type ShapeProperty = AnimatedProperty<Bezier>; // ShapeKeyframe
     pub group: Option<TextGrouping>,
 }
 
-#[derive(Clone, Copy, Deserialize_repr, Serialize_repr)]
+#[derive(Clone, Copy, Serialize_repr)]
 #[repr(u8)] pub enum TextGrouping { Characters = 1, Word, Line, All, }
 
 /// Uses the path described by a layer mask to put the text on said path.
@@ -967,7 +971,7 @@ pub enum ShapePrecomp { Shapes(CharacterShapes), Precomp(Box<CharacterPrecomp>),
     #[serde(default, skip_serializing_if = "String::is_empty", rename = "g")]
     /** Software used to generate the file */ pub gen: String,
     #[serde(default, skip_serializing_if =    "Vec::is_empty", rename = "k",
-        deserialize_with = "deserialize_strarray")] pub keywords: Vec<String>,
+        deserialize_with = "des_strarray")] pub keywords: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize)] pub struct UserMetadata {
@@ -1034,6 +1038,8 @@ type SlotDict = std::collections::HashMap<String, SlotProp>;
     /*  7 */DropDown(EffectValue<Value>),
     NoValue, // What is its usage/purpose?
     /* 10 */EffectLayer(EffectValue<Value>),
+    /** Recognized non-standard effect encoding, preserved without assigning false semantics. */
+    Unsupported(serde_json::Value),
 }
 
 #[derive(Deserialize, Serialize)] pub struct EffectValue<T> {

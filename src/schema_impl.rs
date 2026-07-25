@@ -1,11 +1,35 @@
 use serde::{de::Error, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{
-    helpers::{math, IntBool},
-    schema::*,
-};
+use crate::{helpers::{math, IntBool}, schema::*};
+
+pub(crate) fn des_static_value<'de, D, T>(d: D) -> Result<T, D::Error>
+where D: Deserializer<'de>, T: Deserialize<'de> {
+    #[derive(Deserialize)] #[serde(untagged)]
+    enum StaticValue<T> { Direct(T), Singleton([T; 1]) }
+
+    Ok(match StaticValue::deserialize(d)? {
+        StaticValue::Direct(value) => value,
+        StaticValue::Singleton([value]) => value,
+    })
+}
 
 impl FontList { #[inline] pub fn is_empty(&self) -> bool { self.list.is_empty() } }
+impl<'de> Deserialize<'de> for TextGrouping {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = f64::deserialize(d)?;
+        if !value.is_finite() || value.fract() != 0. {
+            return Err(D::Error::custom("text grouping must be an integer"));
+        }
+        match value as u8 {
+            1 => Ok(Self::Characters),
+            2 => Ok(Self::Word),
+            3 => Ok(Self::Line),
+            4 => Ok(Self::All),
+            _ => Err(D::Error::custom(format!("unknown text grouping {value}"))),
+        }
+    }
+}
+
 impl Animation {
     pub fn from_reader<R: std::io::Read>(r: R) -> Result<Self, serde_json::Error> {
         let mut value = serde_json::Value::deserialize(
@@ -51,14 +75,14 @@ fn resolve_slot_refs(value: &mut serde_json::Value, slots: &serde_json::Map<Stri
     }
 }
 
-pub(crate) fn deserialize_nonempty_vec<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+pub(crate) fn des_nonempty_vec<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
     where D: Deserializer<'de>, T: Deserialize<'de> {
     let values = Vec::deserialize(d)?;
     if values.is_empty() { Err(D::Error::invalid_length(0, &"a non-empty array")) }
     else { Ok(values) }
 }
 
-pub(crate) fn deserialize_strarray<'de, D: Deserializer<'de>>(d: D) ->
+pub(crate) fn des_strarray<'de, D: Deserializer<'de>>(d: D) ->
     Result<Vec<String>, D::Error> {
     let value = serde_json::Value::deserialize(d)?;
     if let Ok(v) = String::deserialize(&value) { Ok(vec![v]) } else {
@@ -165,6 +189,8 @@ impl<'de> Deserialize<'de> for EffectValueItem {
             1 => Self::Angle(EffectValue::<Value>::deserialize(value).map_err(D::Error::custom)?),
             2 => Self::EffectColor(EffectValue::<ColorValue>::
                 deserialize(value).map_err(D::Error::custom)?),
+            3 if value.pointer("/v/k").is_some_and(serde_json::Value::is_number) =>
+                Self::Unsupported(value),
             3 => Self::Point(EffectValue::<Animated2D>::
                 deserialize(value).map_err(D::Error::custom)?),
             4 => Self::Checkbox(EffectValue::<Value>::
@@ -347,6 +373,13 @@ impl VisualLayer {
         assert!(serde_json::from_str::<LayerStyleItem>(r#"{"ty":99}"#).is_err());
     }
 
+    #[test] fn point_effect_preserves_nonstandard_scalar_value() {
+        let json = r#"{"ty":3,"v":{"k":0}}"#;
+        let effect = serde_json::from_str::<EffectValueItem>(json).unwrap();
+        assert!(matches!(effect, EffectValueItem::Unsupported(_)));
+        assert_eq!(serde_json::to_string(&effect).unwrap(), json);
+    }
+
     #[test] fn asset_variants_follow_the_community_schema() {
         let image = serde_json::from_str::<AssetItem>(r#"{"id":"image","p":"image.png","w":10}"#)
             .unwrap();
@@ -389,10 +422,19 @@ impl VisualLayer {
         let stale_static = serde_json::from_str::<Value>(r#"{"a":1,"k":42}"#).unwrap();
         assert!(!stale_static.is_animated());
 
+        let singleton_static = serde_json::from_str::<Value>(r#"{"a":0,"k":[42]}"#).unwrap();
+        assert_eq!(singleton_static.try_get_value(0.), Ok(42.));
+        assert_eq!(serde_json::to_string(&singleton_static).unwrap(), r#"{"a":0,"k":42.0}"#);
+
         for property in [r#"{"a":0,"k":[{"t":0,"s":[42]},{"t":1,"s":[43]}]}"#,
                          r#"{"k":[{"t":0,"s":[42]},{"t":1,"s":[43]}]}"#, ] {
             assert!(serde_json::from_str::<Value>(property).unwrap().is_animated());
         }
+    }
+
+    #[test] fn text_grouping_accepts_integral_float_encoding() {
+        assert!(serde_json::from_str::<TextAlignmentOptions>(r#"{"g":1.0}"#).is_ok());
+        assert!(serde_json::from_str::<TextAlignmentOptions>(r#"{"g":1.5}"#).is_err());
     }
 
     #[test] fn animation_from_reader_resolves_slots_and_preserves_the_dictionary() {

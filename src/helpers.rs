@@ -162,7 +162,6 @@ pub(crate) mod defaults { #![allow(unused)]
 }
 
 pub use crate::schema_impl::{AnyAsset, AnyValue, UnresolvedSlot};
-pub(crate) use crate::schema_impl::{deserialize_nonempty_vec, deserialize_strarray};
 
 #[cfg(test)] mod test { use super::*;
     #[test] fn rgba_text_roundtrip_and_validation() {

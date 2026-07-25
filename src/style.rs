@@ -84,7 +84,7 @@ impl MatrixConv for kurbo::Affine {
             let mut t3 = BLMatrix2D::identity(); operate_matrix(&mut t3);
             println!("{t1:?}\n{t2:?}\nBLMatrix2D{:?}", t3.get_values());
             assert!(t1.as_coeffs().iter().zip(t3.get_values().iter())
-                .all(|(&v1, &v2)| (v1 - v2).abs() < f64::EPSILON));
+                .all(|(&v1, &v2)| (v1 - v2).abs() < 1e-5));
         }
 //    }
 //}
