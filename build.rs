@@ -24,8 +24,12 @@ fn main() {     // https://doc.rust-lang.org/stable/cargo/reference/build-script
             set RIVE_DEFS_DIR or checkout rive-cpp/dev/defs"));
     println!("cargo:rerun-if-changed={}", defs_dir.display());
 
-    let output = PathBuf::from(env::var_os("OUT_DIR")
-        .expect("Cargo did not set OUT_DIR")).join("rive_defs.rs");
+    /*let output = PathBuf::from(env::var_os("OUT_DIR")
+    //    .expect("Cargo did not set OUT_DIR")).join("rive_defs.rs");
+    let output = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap_or("".into()))
+        .join("target").join("rive_defs.rs"); // avoid redundant with OUT_DIR
+    println!("cargo:rustc-env=RIVE_DEFS_RS={}", output.display()); */
+    let output = PathBuf::from("target/rive_defs.rs");
     parse_rive_defs::generate(&defs_dir, &output)
         .unwrap_or_else(|error| panic!("failed to generate {}: {error}", output.display()));
 }

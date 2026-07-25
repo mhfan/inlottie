@@ -1,5 +1,5 @@
 
-use std::{collections::HashMap, error::Error as StdError, fmt,
+use std::{error::Error as StdError, fmt,
     io::{self, ErrorKind::UnexpectedEof, Read},
 };
 
@@ -68,7 +68,7 @@ impl From<io::Error> for DecodeError {
 ///
 /// https://github.com/rive-app/rive-runtime/blob/main/src/core/binary_reader.cpp
 ///
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VarUInt(pub u32); // u64/u128?
 
 impl VarUInt {
@@ -179,7 +179,7 @@ impl<R: Read> BinaryReader<R> {
     /// integer id/key. Following the properties is a bit array which is composed of the read
     /// property count / 4 bytes. Every property gets 2 bits to define which backing type
     /// deserializer can be used to read past it.
-    pub toc: HashMap<VarUInt, FieldType>,
+    pub toc: Vec<(VarUInt, FieldType)>,
 }
 
 impl Header {
@@ -197,7 +197,7 @@ impl Header {
             }
         }
 
-        let mut toc = HashMap::with_capacity(prop_keys.len());
+        let mut toc = Vec::with_capacity(prop_keys.len());
         let (mut current_uint, mut bit_position) = (None, 0);
 
         for key in &prop_keys {
@@ -208,14 +208,18 @@ impl Header {
 
             if let Some(uint_value) = current_uint {
                 let field_index = ((uint_value >> bit_position) & 0x03) as u8;
-                toc.insert(*key, FieldType::try_from(field_index)?);
+                toc.push((*key, FieldType::try_from(field_index)?));
                 bit_position += 2;
             }
-        }       Ok(Self { majorv, minorv, fileid, toc })
+        }
+        toc.sort_unstable_by_key(|&(key, _)| key);
+        Ok(Self { majorv, minorv, fileid, toc })
     }
 
     pub fn get_prop_type(&self, prop_key: VarUInt) -> Option<FieldType> {
-        core_prop_type(prop_key).or_else(|| self.toc.get(&prop_key).copied())
+        core_prop_type(prop_key).or_else(|| self.toc
+            .binary_search_by_key(&prop_key, |&(key, _)| key)
+            .ok().map(|index| self.toc[index].1))
     }
 }
 
@@ -427,7 +431,9 @@ impl RiveFile {
 // TODO: A complete Rive runtime still needs object/reference and scene-tree resolution,
 // asset and text loading, constraint/animation/state-machine evaluation, and rendering.
 
-include!(concat!(env!("OUT_DIR"), "/rive_defs.rs"));
+//include!(concat!(env!("OUT_DIR"), "/rive_defs.rs"));
+include!("../../target/rive_defs.rs");
+//include!(env!("RIVE_DEFS_RS"));
 
 #[cfg(test)] mod tests { use super::*;
     use std::io::Cursor;
@@ -480,6 +486,24 @@ include!(concat!(env!("OUT_DIR"), "/rive_defs.rs"));
         assert_eq!(header.get_prop_type(VarUInt(prop_ids[0])), Some(FieldType::Float));
         assert_eq!(header.get_prop_type(VarUInt(prop_ids[15])), Some(FieldType::Float));
         assert_eq!(header.get_prop_type(VarUInt(prop_ids[16])), Some(FieldType::String));
+    }
+
+    #[test] fn header_sorts_toc_for_lookup() {
+        let mut data = b"RIVE".to_vec();
+        data.extend([1, 0, 0]);
+        let prop_ids: Vec<_> = (1..)
+            .filter(|id| core_prop_type(VarUInt(*id)).is_none())
+            .take(3).collect();
+        for &id in prop_ids.iter().rev() { data.extend(varuint(id)) }
+        data.push(0);
+        data.extend((1_u32 << 2 | 2 << 4).to_le_bytes());
+
+        let mut reader = BinaryReader::new(Cursor::new(data));
+        reader.read_magic().unwrap();
+        let header = Header::read(&mut reader).unwrap();
+        assert_eq!(header.get_prop_type(VarUInt(prop_ids[2])), Some(FieldType::UIntBool));
+        assert_eq!(header.get_prop_type(VarUInt(prop_ids[1])), Some(FieldType::String));
+        assert_eq!(header.get_prop_type(VarUInt(prop_ids[0])), Some(FieldType::Float));
     }
 
     #[test] fn file_accepts_clean_eof_and_rejects_partial_object() {

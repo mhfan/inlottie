@@ -195,7 +195,7 @@ fn string_default(value: &str) -> Option<String> {
 }
 
 fn collect_properties<'a>(object: &'a ObjectInfo,
-    objects: &HashMap<&str, &'a ObjectInfo>, properties: &mut Vec<&'a PropertyInfo>) {
+    objects: &HashMap<String, &'a ObjectInfo>, properties: &mut Vec<&'a PropertyInfo>) {
     if let Some(base) = object.extends.as_deref()
         .and_then(|path| Path::new(path).file_stem())
         .and_then(|key| key.to_str())
@@ -207,8 +207,10 @@ fn collect_properties<'a>(object: &'a ObjectInfo,
 
 // Generate Rust object IDs, property IDs, typed accessors, and backing-type lookup.
 fn generate_rs_file(objects: &[ObjectInfo], output: &Path) -> Result<()> {
-    let objects_by_key: HashMap<_, _> =
-        objects.iter().map(|object| (object.type_key.as_str(), object)).collect();
+    let objects_by_key: HashMap<_, _> = objects.iter().flat_map(|object| [
+        (object.type_key.clone(), object),
+        (snake_case(&object.name), object),
+    ]).collect();
     let mut  name_counts = HashMap::new();
     for obj in objects {
         for prop in &obj.properties {
@@ -340,6 +342,28 @@ impl<'a> TryFrom<&'a Object> for TypedObject<'a> {{
         }})
     }}
 }}\n")?;
+
+    for (function, base) in [("core_is_component", "Component"),
+        ("core_is_transform_component", "TransformComponent"), ] {
+        let mut derived = Vec::new();
+        for object in objects {
+            let mut current = Some(object);
+            while let Some(candidate) = current {
+                if candidate.name == base { derived.push(object); break }
+                current = candidate.extends.as_deref()
+                    .and_then(|path| Path::new(path).file_stem())
+                    .and_then(|key| key.to_str())
+                    .and_then(|key| objects_by_key.get(key).copied());
+            }
+        }
+        writeln!(writer, "pub fn {function}(type_id: u32) -> bool {{
+    matches!(type_id,")?;
+        for (index, object) in derived.into_iter().enumerate() {
+            writeln!(writer, "        {}object_ids::{}",
+                if index == 0 { "" } else { "| " }, screaming_snake(&object.name))?;
+        }   writeln!(writer, "    )
+}}\n")?;
+    }
 
     writeln!(writer, "// Return the serialization type of a known core property.
 pub fn core_prop_type(id: VarUInt) -> Option<FieldType> {{
