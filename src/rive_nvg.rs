@@ -13,8 +13,11 @@ use femtovg::{renderer::SurfacelessRenderer as Renderer, FillRule, CompositeOper
 
 pub struct RiveNVG<T: Renderer + 'static>(&'static mut femtovg::Canvas<T>);
 
-impl<T: Renderer> RiveNVG<T> {
-    #[inline] pub fn new(canvas: &mut femtovg::Canvas<T>) -> Self {
+impl<T: Renderer> RiveNVG<T> {  /// # Safety
+    /// The returned adapter must not outlive `canvas`, and no other code may access the
+    /// canvas while the adapter is in use. `rive-rs::Renderer` currently requires `'static`,
+    /// so this invariant cannot be expressed in the type.
+    #[inline] pub unsafe fn new(canvas: &mut femtovg::Canvas<T>) -> Self {
         #[allow(clippy::missing_transmute_annotations)]
         Self(unsafe { std::mem::transmute(canvas) }) // force pretend to be 'static
     }
@@ -40,8 +43,9 @@ impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
     #[inline] fn set_clip  (&mut self, _path: &Self::Path) { }  // XXX: not capable
 
     #[inline] fn transform(&mut self, trfm: &[f32; 6]) {
-        let trfm = unsafe { &*(trfm.as_ptr() as *const TM2D) };
-        self.0.set_transform(trfm);
+        //let trfm = unsafe { &*(trfm.as_ptr() as *const TM2D) };
+        self.0.set_transform(&TM2D::new(
+            trfm[0], trfm[1], trfm[2], trfm[3], trfm[4], trfm[5]));
     }
 
     #[inline] fn draw_path(&mut self, path: &Self::Path, paint: &Self::Paint) {
@@ -60,8 +64,8 @@ impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
         //if bm != BlendMode::SrcOver { }   // XXX: not capable
         let canvas = &mut self.0;
 
-        let data = unsafe { std::slice::from_raw_parts(img.0, img.1 as _) };
-        let imgid = canvas.load_image_mem(data, femtovg::ImageFlags::FLIP_Y).unwrap();
+        //let data = unsafe { from_raw_parts(img.0, img.1 as _) };
+        let imgid = canvas.load_image_mem(&img.0, femtovg::ImageFlags::FLIP_Y).unwrap();
         let (w, h) = canvas.image_size(imgid).unwrap();
         let (w, h) = (w as _, h as _);  // XXX: need to test and check
 
@@ -75,16 +79,24 @@ impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
         //debug_assert!(vertices.0.len() % 8 == 0 && uvs.0.len() % 8 == 0 &&
         //              vertices.0.len() == uvs.0.len() && indices.0.len() % 6 == 0);
 
-        let vtx = unsafe { std::slice::from_raw_parts(
+        /* let vtx = unsafe { from_raw_parts(
             vertices.0.as_ptr() as *const (f32, f32), vertices.0.len() / 8) };
-        let uvs = unsafe { std::slice::from_raw_parts(
+        let uvs = unsafe { from_raw_parts(
             uvs.0.as_ptr() as *const (f32, f32), uvs.0.len() / 8) };
-        let indices = unsafe { std::slice::from_raw_parts(
-            indices.0.as_ptr() as *const u16, indices.0.len() / 2) };
+        let indices = unsafe { from_raw_parts(
+            indices.0.as_ptr() as *const u16, indices.0.len() / 2) }; */
+        let decode_points = |data: &[u8]| data.chunks_exact(8).map(|chunk| (
+            f32::from_ne_bytes(chunk[0..4].try_into().unwrap()),
+            f32::from_ne_bytes(chunk[4..8].try_into().unwrap()),
+        )).collect::<Vec<_>>();
+        let (vtx, uvs) = (decode_points(&vertices.0), decode_points(&uvs.0));
+        let indices = indices.0.chunks_exact(2).map(|chunk|
+            u16::from_ne_bytes(chunk.try_into().unwrap())).collect::<Vec<_>>();
+        if  indices.iter().any(|&idx| vtx.len() <= idx as usize ||
+                                      uvs.len() <= idx as usize) { return; }
 
         let canvas = &mut self.0;
-        let data = unsafe { std::slice::from_raw_parts(img.0, img.1 as _) };
-        let imgid = canvas.load_image_mem(data, femtovg::ImageFlags::FLIP_Y).unwrap();
+        let imgid = canvas.load_image_mem(&img.0, femtovg::ImageFlags::FLIP_Y).unwrap();
         let (w, h) = canvas.image_size(imgid).unwrap();
         let (w, h) = (w as _, h as _);
 
@@ -97,7 +109,7 @@ impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
             let mut path = VGPath::new();
             //let mut center = (0f32, 0f32);
 
-            let pt = vtx[2];    path.move_to(pt.0, pt.1); // start from last point
+            let pt = vtx[idx[2] as usize];    path.move_to(pt.0, pt.1); // start from last point
             let mesh = idx.iter().map(|idx| {
                 let idx = *idx as usize;
                 let (pt, tp) = (vtx[idx], uvs[idx]);
@@ -115,9 +127,8 @@ impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
             // canvas.translate(center)/scale(1.03)/translate(-center)?
             canvas.set_transform(&simplex_affine_mapping(&mesh));  // XXX:
             canvas.fill_path(&path, &paint);    //canvas.path_bbox(&path);
-            canvas.reset_transform();   canvas.set_transform(&last_trfm);
-            canvas.flush();     canvas.delete_image(imgid);
-        }   //canvas.restore();
+            canvas.reset_transform();   canvas.set_transform(&last_trfm);   canvas.flush();
+        }   canvas.delete_image(imgid); //canvas.restore();
     }
 }
 
@@ -146,7 +157,8 @@ impl renderer::Path for Path {
                 Verb::Close => self.close(),
             });
         } else {
-            let trfm = unsafe { &*(trfm.as_ptr() as *const TM2D) };
+            //let trfm = unsafe { &*(trfm.as_ptr() as *const TM2D) };
+            let trfm = TM2D::new(trfm[0], trfm[1], trfm[2], trfm[3], trfm[4], trfm[5]);
             from.0.verbs().for_each(|verb| match verb {
                 Verb::MoveTo(x, y) => {
                     let pt = trfm.transform_point(x, y);
@@ -233,10 +245,8 @@ impl renderer::Paint for Paint {    type Gradient = Gradient;
         self.inner.set_color(to_femtovg_color(color));
     }
     fn set_gradient(&mut self, grad: &Self::Gradient) {
-        let stops = unsafe {
-            std::slice::from_raw_parts(grad.stops.0, grad.stops.2 as _)
-        }.iter().zip(unsafe { std::slice::from_raw_parts(grad.stops.1, grad.stops.2 as _)
-        }).map(|(offset, color)| (*offset, to_femtovg_color(*color)));
+        let stops = grad.stops.iter()
+            .map(|&(offset, color)| (offset, to_femtovg_color(color)));
 
         let mut paint = match grad.base {
             GradientBase::Linear { sx, sy, ex, ey } =>
@@ -261,26 +271,27 @@ enum GradientBase {
     Radial { cx: f32, cy: f32, radius: f32/*, fx: f32, fy: f32, r1: f32*/ },
 }
 
-pub struct Gradient {   base: GradientBase,
-    stops: (*const f32, *const renderer::Color, u32),
+pub struct Gradient {
+    base: GradientBase,
+    stops: Vec<(f32, renderer::Color)>,
 }
 
 impl renderer::Gradient for Gradient {
     #[inline] fn new_linear(sx: f32, sy: f32, ex: f32, ey: f32,
         colors: &[renderer::Color], stops: &[f32]) -> Self { Self {
             base: GradientBase::Linear { sx, sy, ex, ey },
-            stops: (stops.as_ptr(), colors.as_ptr(), stops.len() as u32),
+            stops: stops.iter().copied().zip(colors.iter().copied()).collect(),
     } } //debug_assert!(stops.len() == colors.len());
 
     #[inline] fn new_radial(cx: f32, cy: f32, radius: f32,
         colors: &[renderer::Color], stops: &[f32]) -> Self { Self {
             base: GradientBase::Radial { cx, cy, radius },
-            stops: (stops.as_ptr(), colors.as_ptr(), stops.len() as u32),
+            stops: stops.iter().copied().zip(colors.iter().copied()).collect(),
     } }
 }
 
 pub struct Buffer(Vec<u8>);
-pub struct Image(*const u8, u32);
+pub struct Image(Vec<u8>);
 
 impl renderer::Buffer for Buffer {
     #[inline] fn new(_: BufferType, _: BufferFlags, len: usize) -> Self { Self(vec![0; len]) }
@@ -289,9 +300,11 @@ impl renderer::Buffer for Buffer {
 }
 
 impl renderer::Image for Image {
-    fn decode(data: &[u8]) -> Option<Self> { Some(Self(data.as_ptr(), data.len() as _)) }
+    fn decode(data: &[u8]) -> Option<Self> { Some(Self(data.to_vec()))
+            //Some(Self(data.as_ptr(), data.len() as _)
             //image::io::Reader::new(std::io::Cursor::new(data))
             //.with_guessed_format().ok()?.decode().ok()?.into_rgba8()
+    }
 }
 
 /// Finds the affine transform that maps triangle `from` to triangle `to`. The algorithm
@@ -344,6 +357,9 @@ impl VarUInt {
         while cnt < (std::mem::size_of::<VarUInt>() * 8) as u32 {
             let mut buf = [0u8];
             reader.read_exact(&mut buf)?;
+            if cnt == 28 && 0x0f < buf[0] {
+                return Err(Error::new(InvalidData, "VarUInt too large for u32"));
+            }
             val |= ((buf[0] & 0x7F) as u32) << cnt;
             if buf[0] < 0x80 { return Ok(Self(val)) }   cnt += 7;
         }   Err(Error::new(InvalidData, "VarUInt too large for u32"))
@@ -517,19 +533,9 @@ impl Object {
             if  prop_id.0 == 0 { break }
 
             let prop_value = match header.get_prop_type(prop_id) {
-                Some(field_type) => match field_type {
-                    FieldType::UIntBool => FieldValue::VarUInt(
-                        reader.read_varuint().unwrap_or(VarUInt::new(0))),
-                    FieldType::String => FieldValue::Bytes(
-                        reader.read_bytes  ().unwrap_or_default()),
-                    FieldType::Float => FieldValue::Float32(reader.read_f32().unwrap_or(0.)),
-                    FieldType::Color => FieldValue::Color  (reader.read_u32().unwrap_or(0)),
-                },
-                None => {
-                    eprintln!("Unknown property id: {:4} of object type {}",
-                        prop_id.0, type_id.0);  //let _ = reader.read_varuint();
-                    continue
-                }
+                Some(field_type) => FieldValue::read_with_type(reader, field_type)?,
+                None => return Err(Error::new(InvalidData, format!(
+                    "unknown property id {} of object type {}", prop_id.0, type_id.0))),
             };  props.push((prop_id, prop_value));
         }       Ok(Self { type_id, props })
     }
@@ -596,9 +602,7 @@ impl RiveFile {
                 Ok(object) => ocoll.push(object),
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::UnexpectedEof => break,
-                    _ => {  eprintln!("Failed to read object: {e}");
-                        if binary_reader.reader.stream_position().is_err() { break }
-                    }
+                    _ => return Err(Error::new(e.kind(), format!("failed to read object: {e}"))),
                 }
             }
         }       Ok(Self { header, ocoll })

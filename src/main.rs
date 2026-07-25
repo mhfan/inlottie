@@ -480,7 +480,7 @@ impl WinitApp {
 
             #[cfg(feature = "rive-rs")]
             AnimGraph::Rive((scene, viewport)) =>
-                if !scene.advance_and_maybe_draw(&mut RiveNVG::new(ctx2d),
+                if !scene.advance_and_maybe_draw(&mut unsafe { RiveNVG::new(ctx2d) },
                     _elapsed, viewport) { return }
 
             AnimGraph::SVG(tree) => {
