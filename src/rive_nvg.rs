@@ -327,5 +327,3 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
 
     TM2D::new(p.x, p.y, q.x, q.y, t.x, t.y)
 }
-
-#[path = "rive/schema.rs"] pub mod schema;

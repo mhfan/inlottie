@@ -1,11 +1,10 @@
 
 //use std::io::Result;
-#[cfg(feature = "rive-rs")]
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-#[cfg(feature = "rive-rs")] #[test] fn parse_rive_file() -> Result<()> {
+#[test] fn parse_rive_file() -> Result<()> {
     use std::{fs, path::Path, io::BufReader, collections::HashMap};
-    use inlottie::rive_nvg::schema::RiveFile;
+    use inlottie::rive::decode::RiveFile;
 
     let (assets_dir, mut files) = ("data", 0);
     //let assets_dir = "rive-rs/submodules/rive-cpp/tests/unit_tests/assets";
