@@ -29,7 +29,7 @@ fn main() -> anyhow::Result<()> {
     println!("Usage: {} [<path-to-file>]", std::env::args().next().unwrap());
 
     //let mut lottie = None;
-    //use inlottie::schema::Animation;
+    //use inlottie::core::schema::Animation;
 
     let mut usvg_opts = usvg::Options::default();
     usvg_opts.fontdb_mut().load_system_fonts();     let mut tree = None;

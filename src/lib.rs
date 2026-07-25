@@ -1,13 +1,6 @@
 
-pub mod helpers;
-pub mod schema;
-mod schema_impl;
-pub mod render;
-pub mod pathm;
-pub mod style;
-
-pub mod adapt_nvg;
-#[cfg(feature = "b2d")] pub mod adapt_b2d;
+pub mod core;
+pub mod backend;
 
 #[cfg(feature = "rive-rs")] pub mod rive_nvg;
 #[cfg(feature = "vello")] pub mod vello_svg;

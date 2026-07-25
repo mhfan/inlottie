@@ -1,11 +1,11 @@
 /****************************************************************
- * $ID: adapt_nvg.rs  	Thu 27 Nov 2025 13:01:22+0800           *
+ * $ID: femtovg.rs  	Thu 27 Nov 2025 13:01:22+0800           *
  *                                                              *
  * Maintainer: 范美辉 (MeiHui FAN) <mhfan@ustc.edu>              *
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::{helpers::{Vec2D, RGBA}, pathm::{PathBuilder, BezPath, PathFactory},
+use crate::core::{helpers::{Vec2D, RGBA}, pathm::{PathBuilder, BezPath, PathFactory},
     schema::{VisualLayer, MatteMode, MaskMode, FillRule, LineJoin, LineCap},
     style::{StyleConv, MatrixConv, TM2DwO, FSOpts},
     render::{RenderContext, TrackMatte}

@@ -1,7 +1,7 @@
 
 use std::fs::File;
 use std::error::Error as StdErr;
-use inlottie::schema::Animation;
+use inlottie::core::schema::Animation;
 use serde_json::Deserializer as json_des;
 use serde_path_to_error::deserialize as deserial_err;
 
@@ -23,7 +23,7 @@ use serde_path_to_error::deserialize as deserial_err;
         let path = format!("lottie-rs/fixtures/segments/{}.json", sfn);
         Ok(deserial_err(&mut json_des::from_reader(File::open(&path)?))
             .inspect_err(|_| eprintln!("Failed parsing {path}"))?)
-    }   use inlottie::schema::{FillStrokeGrad, TextRange, Transform};
+    }   use inlottie::core::schema::{FillStrokeGrad, TextRange, Transform};
 
     segparse::<Animation>("animated_position_legacy")?;
     segparse::<Transform>("transform_complex")?;

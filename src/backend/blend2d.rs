@@ -1,11 +1,11 @@
 /****************************************************************
- * $ID: adapt_b2d.rs  	Thu 20 Nov 2025 16:50:16+0800           *
+ * $ID: blend2d.rs  	Thu 20 Nov 2025 16:50:16+0800           *
  *                                                              *
  * Maintainer: 范美辉 (MeiHui FAN) <mhfan@ustc.edu>              *
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::{helpers::{Vec2D, RGBA}, pathm::{PathBuilder, BezPath},
+use crate::core::{helpers::{Vec2D, RGBA}, pathm::{PathBuilder, BezPath},
     schema::{FillRule, LineJoin, LineCap}, render::RenderContext,
     style::{StyleConv, MatrixConv, FSOpts},
 };

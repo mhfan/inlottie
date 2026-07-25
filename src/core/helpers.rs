@@ -138,7 +138,7 @@ impl Serialize for ColorList {
     }
 }
 
-use crate::schema::*;
+use crate::core::schema::*;
 
 pub(crate) mod defaults { #![allow(unused)]
     pub fn time_stretch() -> f32 { 1.0 }
@@ -161,7 +161,7 @@ pub(crate) mod defaults { #![allow(unused)]
     #[inline] pub fn is_default<T: Default + PartialEq>(v: &T) -> bool { *v == T::default() }
 }
 
-pub use crate::schema_impl::{AnyAsset, AnyValue, UnresolvedSlot};
+pub use crate::core::schema_impl::{AnyAsset, AnyValue, UnresolvedSlot};
 
 #[cfg(test)] mod test { use super::*;
     #[test] fn rgba_text_roundtrip_and_validation() {
@@ -205,7 +205,7 @@ pub mod math {  use super::*;
 
 ```
     use core::f32::consts::PI;
-    use inlottie::helpers::math::fast_atan2;
+    use inlottie::core::helpers::math::fast_atan2;
     assert_eq!(fast_atan2( 0.,  0.),   0.);
 
     assert_eq!(fast_atan2( 0.,  1.),   0.);
@@ -277,7 +277,7 @@ impl Vec2D {
 /** https://github.com/hannesmann/keyframe, https://github.com/gre/bezier-easing,
     https://github.com/hlhr202/bezier-easing-rs
 ```
-    use inlottie::helpers::math::CubicBezierEasing;
+    use inlottie::core::helpers::math::CubicBezierEasing;
     let easing = CubicBezierEasing::new((0., 0.), (1., 0.5));
     assert_eq!(easing.curve(0.5), 0.3125);
     assert_eq!(easing.get_y(0.5), 0.3125);

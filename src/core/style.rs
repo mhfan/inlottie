@@ -5,7 +5,7 @@
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::{helpers::{Vec2D, RGBA, IntBool, math},
+use crate::core::{helpers::{Vec2D, RGBA, IntBool, math},
     schema::{Transform, Translation, TransRotation, VisualLayer, LayerItem,
         FillStrokeGrad, ColorGrad, FillStroke, FillRule, GradientType,
         Repeater, Composite, LineJoin, LineCap, StrokeDashType}
@@ -66,7 +66,7 @@ impl MatrixConv for kurbo::Affine {
 
         assert_eq!(Affine::new(a) * Affine::new(b), Affine::new(ab));
         let mut t1 =     Affine::identity(); operate_matrix(&mut t1);
-        use inlottie::{style::MatrixConv, helpers::Vec2D};
+        use inlottie::core::{style::MatrixConv, helpers::Vec2D};
 
         let to_f32 = |x: f64| x as f32;     // Into::into
         let mut t = TM2D(a.map(to_f32));    t.premultiply(&TM2D(b.map(to_f32)));
@@ -321,7 +321,7 @@ impl FillStrokeGrad {
 }
 
 #[cfg(test)] mod tests {
-    use crate::schema::Animation;
+    use crate::core::schema::Animation;
 
     #[test] fn layer_matrix_includes_all_ancestors_and_tolerates_missing_parent() {
         let animation: Animation = serde_json::from_str(r#"{ "layers": [

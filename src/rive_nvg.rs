@@ -5,7 +5,7 @@
  * Copyright (c) 2024 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::helpers::Vec2D;
+use crate::core::helpers::Vec2D;
 use rive_rs::{path as rpath, Scene, Instantiate, File, Artboard, Handle,
     renderer::{self, PaintStyle, BlendMode, BufferType, BufferFlags}};
 use femtovg::{renderer::SurfacelessRenderer as Renderer, FillRule, CompositeOperation as CompOp,

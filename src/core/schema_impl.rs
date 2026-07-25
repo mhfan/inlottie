@@ -1,6 +1,6 @@
 use serde::{de::Error, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{helpers::{math, IntBool}, schema::*};
+use crate::core::{helpers::{math, IntBool}, schema::*};
 
 pub(crate) fn des_static_value<'de, D, T>(d: D) -> Result<T, D::Error>
 where D: Deserializer<'de>, T: Deserialize<'de> {

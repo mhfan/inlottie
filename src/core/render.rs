@@ -6,7 +6,7 @@
  ****************************************************************/
 
 use core::cell::RefCell;
-use crate::{helpers::{RGBA, IntBool, ACCURACY_TOLERANCE},
+use crate::core::{helpers::{RGBA, IntBool, ACCURACY_TOLERANCE},
     schema::{Animation, AssetItem, LayerItem, ShapeItem, VisualLayer,
         TrimPath, TrimMultiple, MatteMode, FillRule},
     style::{StyleConv, MatrixConv, TM2DwO, FSOpts}, pathm::{PathBuilder, PathFactory}
@@ -264,7 +264,7 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
 }
 
 #[cfg(test)] mod tests { use super::*;
-    use crate::{helpers::Vec2D, pathm::BezPath};
+    use crate::core::{helpers::Vec2D, pathm::BezPath};
 
     struct TestStyle;
     impl StyleConv for TestStyle {

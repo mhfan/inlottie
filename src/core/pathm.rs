@@ -6,7 +6,7 @@
  ****************************************************************/
 
 use core::f32::consts::PI;
-use crate::{helpers::{Vec2D, ACCURACY_TOLERANCE},
+use crate::core::{helpers::{Vec2D, ACCURACY_TOLERANCE},
     schema::{Rectangle, Polystar, Ellipse, FreePath, ShapeProperty, StarType}};
 
 impl From<Vec2D> for kurbo::Vec2 {
@@ -362,7 +362,7 @@ impl PathFactory for ShapeProperty {    // for mask
 }
 
 #[cfg(test)] mod tests { use super::*;
-    use crate::schema::{AnimatedProperty, Bezier};
+    use crate::core::schema::{AnimatedProperty, Bezier};
 
     #[test] fn rounded_rectangle_has_four_quarter_curves() {
         let rect: Rectangle = serde_json::from_str(

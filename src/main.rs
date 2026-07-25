@@ -141,7 +141,7 @@ struct WinitApp {
     window: Option<Window>,
 }
 
-#[cfg(feature =  "lottie")] use inlottie::schema::Animation;
+#[cfg(feature =  "lottie")] use inlottie::core::schema::Animation;
 #[cfg(feature = "rive-rs")] use inlottie::rive_nvg::RiveNVG;
 
 enum AnimGraph {
