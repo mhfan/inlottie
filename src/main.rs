@@ -132,7 +132,7 @@ struct WinitApp {
     perf: PerfGraph,
     graph: AnimGraph,
 
-    #[cfg(feature = "b2d")] blctx: Option<(BLContext, BLImage)>,
+    #[cfg(feature = "b2d")] blctx: Option<(BLContext, f32)>,
     #[cfg(feature = "b2d")] surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
 
     ctx2d: Option<Canvas<OpenGl>>,
@@ -212,52 +212,51 @@ impl WinitApp {
 
         // build BLImage over softbuffer frame, need to keep until present out to screen
         let mut blimg = BLImage::from_buffer(csize.0 as _, csize.1 as _,
-            BLFormat::BL_FORMAT_PRGB32, frame, wsize.0 as u32 * 4); */
-        let mut blimg = BLImage::new(csize.0 as _, csize.1 as _,
-            BLFormat::BL_FORMAT_PRGB32);
-        let mut blctx = BLContext::new(&mut blimg);
-
-        // blctx.translate(orig.into());
+            BLFormat::BL_FORMAT_PRGB32, frame, wsize.0 as u32 * 4);
+        let mut blctx = BLContext::from_image(blimg); */
+        let mut blctx = BLContext::new(csize.0 as _, csize.1 as _,
+            BLFormat::BL_FORMAT_PRGB32).expect("failed to create Blend2D context");
         blctx.scale((scale as _, scale as _));
-        self.blctx = Some((blctx, blimg));
+        self.blctx = Some((blctx, scale));
     }
 
     #[cfg(feature = "b2d")] fn redraw_b2d(&mut self) {
-        let Some((blctx, blimg)) = &mut self.blctx else { return };
-        let Some(surface) =
-            self.surface.as_mut() else { return };
+        let Some((blctx, scale)) = &mut self.blctx else { return };
+        let Some(surface) =  self.surface.as_mut() else { return };
         let wsize = surface.window().inner_size();
 
-        let imgd = blimg.get_data();
-        let loff = ((wsize.width  - imgd.width())  / 2) as usize;
-        let topl = ((wsize.height - imgd.height()) / 2) as usize;
+        let size = blctx.get_target_size();
+        let (width, height) = (size.width(), size.height());
+        let loff = (wsize.width .saturating_sub(width)  / 2) as usize;
+        let topl = (wsize.height.saturating_sub(height) / 2) as usize;
 
         self.prevt = Instant::now();
-        match &mut self.graph {
-            AnimGraph::SVG(tree) => {   //blctx.clear_all();
-                blctx.fill_all_rgba32((99, 99, 99, 255).into());
+        let result: Result<(), BLErr> = match &mut self.graph {
+            AnimGraph::SVG(tree) => (|| {
+                blctx.fill_all_rgba32((99, 99, 99, 255).into())?;
 
-                let scale = blctx.get_transform(1).get_scaling().0 as f32; // to screen viewport
-                let mouse = ((self.mouse_pos.0 - loff as f32) / scale,
-                                         (self.mouse_pos.1 - topl as f32) / scale);
-                b2d_svg::render_nodes(blctx, mouse, tree.root(), &usvg::Transform::identity());
-            }
+                let mouse = ((self.mouse_pos.0 - loff as f32) / *scale,
+                             (self.mouse_pos.1 - topl as f32) / *scale);
+                b2d_svg::render_nodes(blctx, mouse,
+                    tree.root(), &usvg::Transform::identity())
+            })(),
             AnimGraph::None => b2d_svg::blend2d_logo(blctx),
             _ => return,
-        }
-
+        };  result.expect("failed to render with Blend2D");
         self.perf.update(self.prevt.elapsed().as_secs_f32());
         self.perf.render_b2d(blctx, (3., 3.));
+        blctx.flush().expect("failed to flush Blend2D rendering");
 
+        let imgd = blctx.get_target_image();
         let mut buffer = surface.buffer_mut().unwrap();
         buffer.iter_mut().for_each(|pix| *pix = 0xff636363);    // XXX:
 
         //blimg.to_rgba_inplace(); // 0xAARRGGGBB -> 0xAABBGGRR
-        for (src, dst) in imgd.pixels().chunks_exact(imgd.stride()
+        let pixels = imgd.pixels().expect("Blend2D image has no pixel data");
+        for (src, dst) in pixels.chunks_exact(imgd.stride()
             as usize).zip(buffer.chunks_exact_mut(wsize.width as _).skip(topl)) {
             unsafe { std::slice::from_raw_parts(src.as_ptr() as *const u32, imgd.width() as _)
-            }.iter().zip(dst.iter_mut().skip(loff)).for_each(
-                |(src, dst)| *dst = *src)
+            }.iter().zip(dst.iter_mut().skip(loff)).for_each(|(src, dst)| *dst = *src)
                 //.swap_bytes().rotate_right(8) // 0xAARRGGGBB -> 0xAABBGGRR
         }   let _ = buffer.present();
     }
@@ -514,7 +513,7 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
     pub fn new() -> Self { Self {
             que: VecDeque::with_capacity(100), max: 0., sum: 0./*, time: Instant::now()*/,
             #[cfg(feature = "b2d")] font: BLFontFace::from_file(
-                "data/Roboto-Regular.ttf").map(|face|
+                "data/Roboto-Regular.ttf").and_then(|face|
                     BLFont::new(&face, 14.)).ok()
     } }
 
@@ -557,13 +556,15 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
 
         let last_trfm = blctx.get_transform(1);
         blctx.translate(pos.into());
-        blctx.fill_geometry_rgba32(&path, (0, 0, 0, 99).into());  // to clear the exact area?
+        blctx.fill_geometry_rgba32(&path, (0, 0, 0, 99).into())
+            .expect("failed to clear Blend2D performance graph");
         path.reset();   path.move_to((0., rh).into());
         for i in 0..self.que.len() {  // self.que[i].min(100.) / 100.
             path.line_to((rw * i as f32 / self.que.len() as f32,
                 rh - rh * self.que[i] / self.max).into());
         }   path.line_to((rw, rh).into());
-        blctx.fill_geometry_rgba32(&path, (255, 192, 0, 128).into());
+        blctx.fill_geometry_rgba32(&path, (255, 192, 0, 128).into())
+            .expect("failed to fill Blend2D performance graph");
 
         //paint.set_color(Color::rgba(240, 240, 240, 255));
         //paint.set_text_baseline(femtovg::Baseline::Top);
@@ -573,7 +574,8 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
         let fps = if self.que.is_empty() { 0. } else { self.sum / self.que.len() as f32 };
         if let Some(font) = &self.font {
             blctx.fill_utf8_text_d_rgba32((10., 15.).into(), font,  // XXX:
-                &format!("{fps:.2} FPS"), (240, 240, 240, 255).into());
+                &format!("{fps:.2} FPS"), (240, 240, 240, 255).into())
+                .expect("failed to draw Blend2D performance text");
         }   blctx.reset_transform(Some(&last_trfm));
     }
 
@@ -732,150 +734,4 @@ fn some_test_case<T: femtovg::renderer::SurfacelessRenderer>(ctx2d: &mut Canvas<
     ctx2d.fill_path(&path, &paint);     ctx2d.flush();  ctx2d.delete_image(imgid);
 }
 
-#[cfg(feature = "b2d")] mod b2d_svg {   use intvg::blend2d::*;
-
-pub fn blend2d_logo(ctx: &mut BLContext) {
-    //let mut img = BLImage::new(480, 480, BLFormat::BL_FORMAT_PRGB32); // 0xAARRGGBB
-    ctx.clear_all();     //let mut ctx = BLContext::new(&mut img);
-    let mut radial = BLGradient::new(&BLRadialGradientValues::new(
-        (180, 180).into(), (180, 180).into(), (180.0, 0.)));
-    radial.add_stop(0.0, 0xFFFFFFFF.into());
-    radial.add_stop(1.0, 0xFFFF6F3F.into());
-
-    ctx.fill_geometry_ext(&BLCircle::new((180, 180).into(), 160.0), &radial);
-
-    let mut linear = BLGradient::new(&BLLinearGradientValues::new(
-        (195, 195).into(), (470, 470).into()));
-    linear.add_stop(0.0, 0xFFFFFFFF.into());
-    linear.add_stop(1.0, 0xFF3F9FFF.into());
-
-    ctx.set_comp_op(BLCompOp::BL_COMP_OP_DIFFERENCE);
-    ctx.fill_geometry_ext(&BLRoundRect::new(&(195, 195, 270, 270).into(), 25.0), &linear);
-    ctx.set_comp_op(BLCompOp::BL_COMP_OP_SRC_OVER);   // restore to default
-
-    //let _ = img.write_to_file("target/logo_b2d.png");
-}
-
-pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
-    parent: &usvg::Group, trfm: &usvg::Transform) {
-    fn convert_paint(paint: &usvg::Paint, opacity: usvg::Opacity,
-        _trfm: &usvg::Transform) -> Option<Box<dyn B2DStyle>> {
-        fn convert_stops(grad: &mut BLGradient, stops: &[usvg::Stop], opacity: usvg::Opacity) {
-            stops.iter().for_each(|stop| {   let color = stop.color();
-                let color = (color.red, color.green, color.blue,
-                    (stop.opacity() * opacity).to_u8()).into();
-                grad.add_stop(stop.offset().get() as _, color);
-            });
-        }
-
-        Some(match paint { usvg::Paint::Pattern(_) => { // trfm should be applied here
-                eprintln!("Not support pattern painting"); return None }
-            // https://github.com/RazrFalcon/resvg/blob/master/crates/resvg/src/path.rs#L179
-            usvg::Paint::Color(color) => Box::new(BLSolidColor::init_rgba32(
-                    (color.red, color.green, color.blue, opacity.to_u8()).into())),
-
-            usvg::Paint::LinearGradient(grad) => {
-                let mut linear = BLGradient::new(&BLLinearGradientValues::new(
-                    (grad.x1(), grad.y1()).into(), (grad.x2(), grad.y2()).into()));
-                convert_stops(&mut linear, grad.stops(), opacity);     Box::new(linear)
-            }
-            usvg::Paint::RadialGradient(grad) => {
-                let mut radial = BLGradient::new(&BLRadialGradientValues::new(
-                    (grad.cx(), grad.cy()).into(), (grad.fx(), grad.fy()).into(),
-                    (grad.r().get() as _, 0.)));
-                    //(grad.cx() - grad.fx()).hypot(grad.cy() - grad.fy())
-                convert_stops(&mut radial, grad.stops(), opacity);     Box::new(radial)
-            }
-        })
-    }
-
-    for child in parent.children() { match child {
-        usvg::Node::Group(group) =>     // trfm is needed on rendering only
-            render_nodes(blctx, mouse, group, &trfm.pre_concat(group.transform())),
-
-        usvg::Node::Path(path) => if path.is_visible() {
-            let tpath = if trfm.is_identity() { None
-            } else { path.data().clone().transform(*trfm) };    // XXX:
-            let mut fpath = BLPath::new();
-
-            for seg in tpath.as_ref().unwrap_or(path.data()).segments() {
-                use usvg::tiny_skia_path::PathSegment::*;
-                match seg {     Close => fpath.close(),
-                    MoveTo(pt) => fpath.move_to((pt.x, pt.y).into()),
-                    LineTo(pt) => fpath.line_to((pt.x, pt.y).into()),
-
-                    QuadTo(cp, end) =>
-                        fpath.quad_to ((cp.x, cp.y).into(), (end.x, end.y).into()),
-                    CubicTo(c1, c2, end) =>
-                        fpath.cubic_to((c1.x, c1.y).into(),
-                                       (c2.x, c2.y).into(), (end.x, end.y).into()),
-                }
-            }
-
-            let fpaint = path.fill().and_then(|fill| {
-                blctx.set_fill_rule(match fill.rule() {
-                    usvg::FillRule::NonZero => BLFillRule::BL_FILL_RULE_NON_ZERO,
-                    usvg::FillRule::EvenOdd => BLFillRule::BL_FILL_RULE_EVEN_ODD,
-                }); convert_paint(fill.paint(), fill.opacity(), trfm)
-            });
-
-            let lpaint = path.stroke().and_then(|stroke| {
-                blctx.set_stroke_miter_limit(stroke.miterlimit().get() as _);
-                blctx.set_stroke_width(stroke.width().get() as _);
-
-                blctx.set_stroke_join(match stroke.linejoin() {
-                    usvg::LineJoin::MiterClip => BLStrokeJoin::BL_STROKE_JOIN_MITER_CLIP,
-                    usvg::LineJoin::Miter => BLStrokeJoin::BL_STROKE_JOIN_MITER_BEVEL,
-                    usvg::LineJoin::Round => BLStrokeJoin::BL_STROKE_JOIN_ROUND,
-                    usvg::LineJoin::Bevel => BLStrokeJoin::BL_STROKE_JOIN_BEVEL,
-                });
-                blctx.set_stroke_caps(match stroke.linecap () {
-                    usvg::LineCap::Butt   => BLStrokeCap::BL_STROKE_CAP_BUTT,
-                    usvg::LineCap::Round  => BLStrokeCap::BL_STROKE_CAP_ROUND,
-                    usvg::LineCap::Square => BLStrokeCap::BL_STROKE_CAP_SQUARE,
-                }); convert_paint(stroke.paint(), stroke.opacity(), trfm)
-            });
-
-            match path.paint_order() {
-                usvg::PaintOrder::FillAndStroke => {
-                    if let Some(paint) = fpaint {
-                        blctx.fill_geometry_ext(&fpath, paint.as_ref());
-                    }
-                    if let Some(paint) = lpaint {
-                        blctx.stroke_geometry_ext(&fpath, paint.as_ref());
-                    }
-                }
-                usvg::PaintOrder::StrokeAndFill => {
-                    if let Some(paint) = lpaint {
-                        blctx.stroke_geometry_ext(&fpath, paint.as_ref());
-                    }
-                    if let Some(paint) = fpaint {
-                        blctx.fill_geometry_ext(&fpath, paint.as_ref());
-                    }
-                }
-            }
-
-            if  matches!(fpath.hit_test(mouse.into(),
-                BLFillRule::BL_FILL_RULE_NON_ZERO), BLHitTest::BL_HIT_TEST_IN) {
-                blctx.set_stroke_width(2. / blctx.get_transform(1).get_scaling().0);
-                blctx.stroke_geometry_rgba32(&fpath, (32, 240, 32, 128).into());
-            }
-        }
-
-        usvg::Node::Image(img) => if img.is_visible() {
-            match img.kind() {
-                usvg::ImageKind::GIF(_) | usvg::ImageKind::WEBP(_) |
-                usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) =>
-                    eprintln!("Raster SVG images are not supported by the Blend2D viewer"),
-                // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
-                usvg::ImageKind::SVG(svg) => render_nodes(blctx, mouse, svg.root(), trfm),
-            }
-        }
-
-        usvg::Node::Text(text) => { let group = text.flattened();
-            render_nodes(blctx, mouse, group, &trfm.pre_concat(group.transform()));
-        }
-    } }
-}
-
-}
+#[cfg(feature = "b2d")] mod b2d_svg;

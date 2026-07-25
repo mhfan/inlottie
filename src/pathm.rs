@@ -9,11 +9,12 @@ use core::f32::consts::PI;
 use crate::{helpers::{Vec2D, ACCURACY_TOLERANCE},
     schema::{Rectangle, Polystar, Ellipse, FreePath, ShapeProperty, StarType}};
 
+// https://www.w3.org/TR/SVG2/text.html#TextLayoutPath
 // https://docs.rs/kurbo/latest/kurbo/offset/index.html
 // https://github.com/nical/lyon/blob/main/crates/algorithms/src/walk.rs
 // https://www.reddit.com/r/rust/comments/12do1dq/rendering_text_along_a_curve/
 // https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Element/textPath
-#[allow(unused)] fn walk_along_path() { }   // TODO:
+#[allow(unused)] fn draw_text_on_path() { }   // TODO:
 
 pub use kurbo::BezPath;
 impl From<Vec2D> for kurbo::Vec2 {
@@ -140,7 +141,7 @@ pub trait PathBuilder {     //type Point; type Path;
 
 pub trait PathFactory { fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB; }
 
-impl PathFactory for Rectangle {
+impl PathFactory for Rectangle { #[allow(unreachable_code)]
     fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
         let center = self. pos.get_value(fnth);
         let halves = self.size.get_value(fnth) / 2.;
@@ -167,36 +168,37 @@ impl PathFactory for Rectangle {
         let (clt, crb) = (elt + radius, erb - radius);
             path.move_to((erb.x, clt.y).into());
 
-        /* let tangent = radius * 0.5519;   // approximate with cubic Bezier curve
+        let tangent = radius * 0.552_284_8;
+        // 0.5519, approximate with cubic Bezier curve
 		let (tlt, trb) = (clt - tangent, crb + tangent);
 
         if self.base.is_ccw() {
-            path.cubic_to((erb.x, tlt.y).into(),
-                          (trb.x, elt.y).into(), (crb.x, elt.y).into());
+            path.cubic_to((erb.x, tlt.y).into(), (trb.x, elt.y).into(),
+                          (crb.x, elt.y).into());
             path. line_to((clt.x, elt.y).into());
-            path.cubic_to((tlt.x, elt.y).into(),
-                          (elt.x, tlt.y).into(), (elt.x, clt.y).into());
+            path.cubic_to((tlt.x, elt.y).into(), (elt.x, tlt.y).into(),
+                          (elt.x, clt.y).into());
             path. line_to((elt.x, crb.y).into());
-            path.cubic_to((elt.x, trb.y).into(),
-                          (tlt.x, erb.y).into(), (clt.x, erb.y).into());
+            path.cubic_to((elt.x, trb.y).into(), (tlt.x, erb.y).into(),
+                          (clt.x, erb.y).into());
             path. line_to((crb.x, erb.y).into());
-            path.cubic_to((trb.x, erb.y).into(),
-                          (erb.x, trb.y).into(), (erb.x, crb.y).into());
+            path.cubic_to((trb.x, erb.y).into(), (erb.x, trb.y).into(),
+                          (erb.x, crb.y).into());
             //path. line_to((erb.x, clt.y).into());
         } else {
             path. line_to((erb.x, crb.y).into());
-            path.cubic_to((erb.x, trb.y).into(),
-                          (trb.x, erb.y).into(), (crb.x, erb.y).into());
+            path.cubic_to((erb.x, trb.y).into(), (trb.x, erb.y).into(),
+                          (crb.x, erb.y).into());
             path. line_to((clt.x, erb.y).into());
-            path.cubic_to((tlt.x, erb.y).into(),
-                          (elt.x, trb.y).into(), (elt.x, crb.y).into());
+            path.cubic_to((tlt.x, erb.y).into(), (elt.x, trb.y).into(),
+                          (elt.x, crb.y).into());
             path. line_to((elt.x, clt.y).into());
-            path.cubic_to((elt.x, tlt.y).into(),
-                          (tlt.x, elt.y).into(), (clt.x, elt.y).into());
+            path.cubic_to((elt.x, tlt.y).into(), (tlt.x, elt.y).into(),
+                          (clt.x, elt.y).into());
             path. line_to((crb.x, elt.y).into());
-            path.cubic_to((trb.x, elt.y).into(),
-                          (erb.x, tlt.y).into(), (erb.x, clt.y).into());
-        }   path.close(); 	return path; */
+            path.cubic_to((trb.x, elt.y).into(), (erb.x, tlt.y).into(),
+                          (erb.x, clt.y).into());
+        }   path.close(); 	return path;
 
         let (radii, quarter) = ((radius, radius).into(), PI / 2.);
         if self.base.is_ccw() {
