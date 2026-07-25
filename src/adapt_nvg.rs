@@ -130,9 +130,13 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
                     LineCap::Square => FLC::Square,
                 });
 
-                if dash.len() < 3 { self.stroke_path(path, paint); } else {
-                    self.stroke_path(&path.make_dash(dash[0], &dash[1..]), paint);
-                }
+                if dash.len() < 3 {
+                    paint.set_line_dash(&[]);
+                    paint.set_line_dash_offset(0.);
+                } else {
+                    paint.set_line_dash(&dash[1..]);
+                    paint.set_line_dash_offset(dash[0]);
+                }   self.stroke_path(path, paint);
             }
         }
     }

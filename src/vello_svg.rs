@@ -77,17 +77,20 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node)>(scene: &mut Scene,
                     .and_then(|path| path.root().children().first()) {
                     Some(usvg::Node::Path(clip_path)) => {
                         let local_path = util::to_bez_path(clip_path);
+                        let clip_style = clip_path.fill().map_or(peniko::Fill::NonZero,
+                            |fill| util::to_fill_rule(fill.rule()));
                         if mix == peniko::Mix::Normal && alpha == 1. {
-                            scene.push_clip_layer(trfm, &local_path);
+                            scene.push_clip_layer(clip_style, trfm, &local_path);
                         } else {
-                            scene.push_layer(blend, alpha, trfm, &local_path);
+                            scene.push_layer(clip_style, blend, alpha, trfm, &local_path);
                         }   true
                     }
                     _ if mix != peniko::Mix::Normal || alpha < 1. => {
                         let bb = group.layer_bounding_box();
                         let rect = vello::kurbo::Rect::from_origin_size(
                             (bb.x(), bb.y()), (bb.width() as f64, bb.height() as f64));
-                        scene.push_layer(blend, alpha, trfm, &rect);   true
+                        scene.push_layer(peniko::Fill::NonZero,
+                            blend, alpha, trfm, &rect);   true
                     }
                     _ => false,
                 };  // support clip-path with a single path
@@ -103,10 +106,8 @@ fn render_group<F: FnMut(&mut Scene, &usvg::Node)>(scene: &mut Scene,
                     if let Some(fill) = path.fill() {
                         if let Some((brush, brush_trfm)) =
                             util::to_brush(fill.paint(), fill.opacity()) {
-                            scene.fill(match fill.rule() {
-                                usvg::FillRule::NonZero => peniko::Fill::NonZero,
-                                usvg::FillRule::EvenOdd => peniko::Fill::EvenOdd,
-                            },  trfm, &brush, Some(brush_trfm), &local_path);
+                            scene.fill(util::to_fill_rule(fill.rule()),
+                                trfm, &brush, Some(brush_trfm), &local_path);
                         } else { error_handler(scene, node); }
                     }
                 };
@@ -156,6 +157,13 @@ use vello::peniko::{self, Brush, Color, Fill, color::palette};
 
 #[inline] pub fn to_affine(ts: &usvg::Transform) -> Affine {
     Affine::new([ts.sx, ts.ky, ts.kx, ts.sy, ts.tx, ts.ty].map(f64::from))
+}
+
+#[inline] pub fn to_fill_rule(rule: usvg::FillRule) -> Fill {
+    match rule {
+        usvg::FillRule::NonZero => Fill::NonZero,
+        usvg::FillRule::EvenOdd => Fill::EvenOdd,
+    }
 }
 
 pub fn to_stroke(stroke: &usvg::Stroke) -> Stroke {

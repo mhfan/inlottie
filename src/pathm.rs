@@ -9,17 +9,9 @@ use core::f32::consts::PI;
 use crate::{helpers::{Vec2D, ACCURACY_TOLERANCE},
     schema::{Rectangle, Polystar, Ellipse, FreePath, ShapeProperty, StarType}};
 
-// https://www.w3.org/TR/SVG2/text.html#TextLayoutPath
-// https://docs.rs/kurbo/latest/kurbo/offset/index.html
-// https://github.com/nical/lyon/blob/main/crates/algorithms/src/walk.rs
-// https://www.reddit.com/r/rust/comments/12do1dq/rendering_text_along_a_curve/
-// https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Element/textPath
-#[allow(unused)] fn draw_text_on_path() { }   // TODO:
-
-pub use kurbo::BezPath;
 impl From<Vec2D> for kurbo::Vec2 {
     fn from(val: Vec2D) -> Self { Self::new(val.x as _, val.y as _) }
-}
+}   pub use   kurbo::BezPath;
 impl PathBuilder for BezPath {
     #[inline] fn new(capacity: u32) -> Self {
         if capacity == 0 { Self::new() } else { Self::with_capacity(capacity as _) }
@@ -136,7 +128,6 @@ pub trait PathBuilder {     //type Point; type Path;
         if 1. < end { append_range(0., end - 1.); }
         Self::from_kurbo(BezPath::from_path_segments(output.into_iter()))
     }
-
 }
 
 pub trait PathFactory { fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB; }

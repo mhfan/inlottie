@@ -179,8 +179,12 @@ fn main() -> anyhow::Result<()> {
                         let height = surface.config.height;
 
                         // Get the surface's texture
-                        let Ok(surface_texture) = surface.surface.get_current_texture() else {
-                            render_state.window.request_redraw();   return;
+                        let surface_texture = match surface.surface.get_current_texture() {
+                            wgpu::CurrentSurfaceTexture::Success(texture) |
+                            wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
+                            _ => {
+                                render_state.window.request_redraw();   return;
+                            }
                         };
 
                         // Get a handle to the device

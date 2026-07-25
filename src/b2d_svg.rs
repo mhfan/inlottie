@@ -4,6 +4,7 @@ use intvg::blend2d::*;
 pub fn blend2d_logo(ctx: &mut BLContext) -> Result<(), BLErr> {
     //let mut img = BLImage::new(480, 480, BLFormat::BL_FORMAT_PRGB32); // 0xAARRGGBB
     ctx.clear_all()?;
+
     let mut radial = BLGradient::new(&BLRadialGradientValues::new(
         (180, 180).into(), (180, 180).into(), (180.0, 0.)))?;
     radial.add_stop(0.0, 0xFFFFFFFF.into())?;
