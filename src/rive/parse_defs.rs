@@ -1,5 +1,5 @@
 /****************************************************************
- * $ID: rive_defs_parser.rs  	Sun 30 Nov 2025 10:20:37+0800   *
+ * $ID: parse_defs.rs  	        Sun 30 Nov 2025 10:20:37+0800   *
  *                                                              *
  * Maintainer: 范美辉 (MeiHui FAN) <mhfan@ustc.edu>              *
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
@@ -48,20 +48,16 @@ use std::{collections::HashMap, fs, path::Path, io::{Result, BufWriter, Write}};
     properties: Vec<PropertyInfo>,
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<()> {   // cargo r --bin parse_rive_defs
     let defs_dir = Path::new("rive-rs/submodules/rive-cpp/dev/defs");
     if !defs_dir.exists() {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound,
             format!("目录不存在: {}", defs_dir.display())))
-    }
-
-    println!("开始解析 rive-cpp 定义文件...");
-    println!("遍历目录: {}", defs_dir.display());
+    }   println!("遍历目录: {}", defs_dir.display());
 
     let mut objects = Vec::new();
-    let mut type_count = 0;
-    let mut property_count = 0;
     let mut unique_types = HashMap::new();
+    let (mut type_count, mut property_count) = (0, 0);
 
     visit_defs_dir(defs_dir, &mut |fpath| {
         if fpath.extension().is_none_or(|ext| ext != "json") { return Ok(()) }
@@ -100,14 +96,11 @@ fn main() -> Result<()> {
 
     objects.sort_by_key(|obj| obj.type_id);
 
-    println!("找到 {} 个对象类型，{} 个属性，{} 种唯一属性类型",
+    println!("总共发现 {} 个对象类型，{} 个属性，{} 种唯一属性类型:\n",
         type_count, property_count, unique_types.len());
-
-    println!("\n所有唯一的属性类型：");
     for type_name in unique_types.keys() { println!("- {}", type_name); }
 
-    generate_rs_file(&objects)?;
-    println!("\n已成功生成 rive_defs.rs 文件");   Ok(())
+    generate_rs_file(&objects)?;    Ok(())
 }
 
 // 生成.rs文件，包含类型ID和属性ID的映射
@@ -160,19 +153,14 @@ fn generate_rs_file(objects: &[ObjectInfo]) -> Result<()> {
         }
     }
 
-    println!("总共发现 {} 个属性，已生成 {} 个属性常量映射",
+    println!("\n总共发现 {} 个属性，生成 {} 个属性常量映射",
         properties.len(), generated_constants.len());
 
-    let file = fs::File::create("target/rive_defs.rs")?;
-    let mut writer = BufWriter::new(file);
+    let fpath = "src/rive/defs.rs";
+    let mut writer = BufWriter::new(fs::File::create(fpath)?);
 
-    writeln!(writer, "// 本文件包含 {} 个对象类型和 {} 个属性映射\n",
+    writeln!(writer, "// 自动生成的文件: 包含 {} 个对象类型和 {} 个属性映射 (Rive)\n",
         objects.len(), properties.len())?;
-    writeln!(writer, "/****************************************************************")?;
-    writeln!(writer, " * $ID: rive_defs.rs                                            ")?;
-    writeln!(writer, " *                                                              ")?;
-    writeln!(writer, " * 自动生成的文件 - 包含Rive对象类型和属性ID的映射                 ")?;
-    writeln!(writer, " ****************************************************************/\n")?;
 
     /* writeln!(writer, "// 对象类型ID常量\npub mod object_ids {{")?;
     for obj in objects {
@@ -206,7 +194,10 @@ pub fn create_core_toc() -> HashMap<VarUInt, FieldType> {{")?;
 
         writeln!(writer, "    toc.insert(VarUInt({}), {});", id, field_type)?;
     }   writeln!(writer, "\n    toc
-}}\n")?;         writer.flush()
+}}\n")?;
+
+    println!("已成功生成: {fpath}");
+    writer.flush()
 }
 
 fn visit_defs_dir<F>(dir: &Path, callback: &mut F) -> Result<()>
