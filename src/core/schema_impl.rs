@@ -1,5 +1,6 @@
-use serde::{de::Error, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 
+use std::borrow::Cow;
+use serde::{de::Error, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use crate::core::{helpers::{math, IntBool}, schema::*};
 
 pub(crate) fn des_static_value<'de, D, T>(d: D) -> Result<T, D::Error>
@@ -102,6 +103,21 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for AnimatedProperty<T> {
             return Err(D::Error::missing_field("k"));
         }
         // Some Bodymovin files contain stale `a` flags; the shape of `k` is authoritative.
+        if let Some(AnimatedValue::Animated(keyframes)) = &value.keyframes {
+            if keyframes[0].value.is_none() {
+                return Err(D::Error::custom("first keyframe must contain a value"));
+            }
+            if keyframes[..keyframes.len() - 1].iter().any(|keyframe|
+                keyframe.value.is_none()) {
+                return Err(D::Error::custom("only the final keyframe may omit its value"));
+            }
+            if keyframes.iter().any(|keyframe| !keyframe.start.is_finite()) {
+                return Err(D::Error::custom("keyframe times must be finite"));
+            }
+            if keyframes.windows(2).any(|pair| pair[1].start < pair[0].start) {
+                return Err(D::Error::custom("keyframe times must be ordered"));
+            }
+        }
         let source = match (value.sid, value.keyframes) {
             (Some(id), fallback) => PropertySource::Slot { id: id.into(), fallback },
             (None, Some(value)) => PropertySource::Inline(value),
@@ -134,6 +150,57 @@ impl<T: Serialize> Serialize for AnimatedProperty<T> {
             if let Some(len) = expr.len { map.serialize_entry("l", &len)?; }
         }   map.end()
     }
+}
+
+impl<'de> Deserialize<'de> for GradientColors {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)] struct Repr {
+            #[serde(rename = "p")] cnt: u32,
+            #[serde(rename = "k")] cl: AnimatedProperty<Vec<f32>>,
+        }
+
+        let value = Repr::deserialize(d)?;
+        let validate = |data: &[f32]| validate_gradient_data(data, value.cnt)
+            .map_err(D::Error::custom);
+        let validate_value = |animated: &AnimatedValue<Vec<f32>>| match animated {
+            AnimatedValue::Static(data) => validate(data),
+            AnimatedValue::Animated(keyframes) => keyframes.iter().try_for_each(|keyframe| {
+                match &keyframe.value {
+                    None => Ok(()),
+                    Some(ArrayScalar::Scalar(data)) => validate(data),
+                    Some(ArrayScalar::Array(data)) =>
+                        data.iter().try_for_each(|data| validate(data)),
+                }
+            }),
+        };
+        match &value.cl.source {
+            PropertySource::Inline(animated) => validate_value(animated)?,
+            PropertySource::Slot { fallback: Some(animated), .. } => validate_value(animated)?,
+            PropertySource::Slot { fallback: None, .. } => {}
+        }
+        Ok(Self { cnt: value.cnt, cl: value.cl })
+    }
+}
+
+fn validate_gradient_data(data: &[f32], count: u32) -> Result<(), String> {
+    let count = usize::try_from(count).map_err(|_| "gradient color count is too large")?;
+    if count == 0 { return Err("gradient must contain at least one color".into()) }
+    let color_len = count.checked_mul(4)
+        .ok_or_else(|| "gradient color count is too large".to_owned())?;
+    if data.len() < color_len || !(data.len() - color_len).is_multiple_of(2) {
+        return Err(format!("invalid gradient data length {} for {count} colors", data.len()));
+    }
+    if data.iter().any(|value| !value.is_finite()) {
+        return Err("gradient data must contain only finite numbers".into());
+    }
+    let valid_offsets = |data: &[f32], stride| data.chunks_exact(stride)
+        .map(|stop| stop[0]).try_fold(None, |previous, offset| {
+            if !(0. ..=1.).contains(&offset) || previous.is_some_and(|last| last > offset) {
+                Err("gradient offsets must be ordered values in 0..=1")
+            } else { Ok(Some(offset)) }
+        }).map(|_| ());
+    valid_offsets(&data[..color_len], 4).map_err(str::to_owned)?;
+    valid_offsets(&data[color_len..], 2).map_err(str::to_owned)
 }
 
 impl<'de> Deserialize<'de> for AssetItem {
@@ -259,6 +326,31 @@ impl<T> KeyframeBase<T> {
     }
 }
 
+impl ArrayScalar<f32> {
+    // Scalar handles broadcast to every component; short arrays extend their last value.
+    fn component(&self, index: usize) -> f32 { match self {
+        Self::Scalar(value) => *value,
+        Self::Array(values) => values.get(index).copied().unwrap_or_else(||
+            *values.last().expect("ArrayScalar arrays are non-empty")),
+    } }
+}
+
+impl EasingHandle {
+    fn is_scalar(&self) -> bool {
+        matches!(self.to.time,   ArrayScalar::Scalar(_)) &&
+        matches!(self.to.factor, ArrayScalar::Scalar(_)) &&
+        matches!(self.ti.time,   ArrayScalar::Scalar(_)) &&
+        matches!(self.ti.factor, ArrayScalar::Scalar(_))
+    }
+
+    fn factor(&self, time: f32, component: usize) -> f32 {
+        math::CubicBezierEasing::new(
+            (self.to.time.component(component), self.to.factor.component(component)),
+            (self.ti.time.component(component), self.ti.factor.component(component)),
+        ).get_y(time)
+    }
+}
+
 impl<T> AnimatedProperty<T> {
     pub fn from_value(val: T) -> Self {
         Self { source: PropertySource::Inline(AnimatedValue::Static(val)),
@@ -281,49 +373,60 @@ impl<T> AnimatedProperty<T> {
 }
 
 impl<T: Clone + math::Tween> AnimatedProperty<T> {
-    pub fn try_get_value(&self, fnth: f32) -> Result<T, UnresolvedSlot<'_>> {
+    pub(crate) fn try_get_value_cow(&self, fnth: f32) ->
+        Result<Cow<'_, T>, UnresolvedSlot<'_>> {
         let keyframes = match &self.source {
             PropertySource::Inline(value) |
             PropertySource::Slot { fallback: Some(value), .. } => value,
             PropertySource::Slot { id, fallback: None } => return Err(UnresolvedSlot(id)),
         };
         Ok(match keyframes {
-            AnimatedValue::Static(val) => val.clone(),
+            AnimatedValue::Static(val) => Cow::Borrowed(val),
             AnimatedValue::Animated(coll) => {
-                if fnth <= coll[0].start { return Ok(coll[0].as_scalar().clone()) }
+                let mut current = coll.partition_point(|keyframe| keyframe.start <= fnth)
+                    .saturating_sub(1);
+                if fnth < coll[0].start { current = 0; }
+                while coll[current].value.is_none() { current -= 1; }
 
-                let mut len = coll.len() - 1;
-                if coll[len].value.is_none() { if 0 < len { len -= 1; } else { unreachable!() } }
-                if coll[len].start <= fnth { return Ok(coll[len].as_scalar().clone()) }
-                while 0 < len { len -= 1; if coll[len].start <= fnth { break } }
+                let keyframe = &coll[current];
+                let Some(next) = coll.get(current + 1).filter(|next|
+                   !keyframe.hold.as_bool() && keyframe.start < fnth && next.value.is_some())
+                else { return Ok(Cow::Borrowed(keyframe.as_scalar())) };
 
-                fn get_scalar(val: &ArrayScalar<f32>) -> f32 { match val {
-                    ArrayScalar::Array(val) => val[0],
-                    ArrayScalar::Scalar(val) => *val,
-                } }
+                let duration = next.start - keyframe.start;
+                if  duration <= 0. { return Ok(Cow::Borrowed(next.as_scalar())) }
+                let time = ((fnth - keyframe.start) / duration).clamp(0., 1.);
+                let (first, second) = (keyframe.as_scalar(), next.as_scalar());
 
-                let kf = &coll[len];
-                if kf.hold.as_bool() { return Ok(kf.as_scalar().clone()) }
-                let mut time = (fnth - kf.start) / (coll[len + 1].start - kf.start);
-
-                if let Some((cp1, cp2)) = kf.easing.as_ref().map(|eh|
-                    ((get_scalar(&eh.to.time) as _, get_scalar(&eh.to.factor) as _),
-                     (get_scalar(&eh.ti.time) as _, get_scalar(&eh.ti.factor) as _))) {
-                    time = math::CubicBezierEasing::new(cp1, cp2).get_y(time);
-                }
-
-                let (kf_prev, kf_next) = (kf.as_scalar(), coll[len + 1].as_scalar());
-                if let Some(extra) = &kf.pextra {
-                    kf_prev.bezc(kf_next, time, extra)
-                } else { kf_prev.lerp(kf_next, time) }
+                Cow::Owned(if let Some(extra) = &keyframe.pextra {
+                    let factor = keyframe.easing.as_ref().map_or(time,
+                        |easing| easing.factor(time, 0));
+                    first.bezc(second, factor, extra)
+                } else {
+                    match keyframe.easing.as_deref() {
+                        Some(easing) if easing.is_scalar() =>
+                            first.lerp(second, easing.factor(time, 0)),
+                        Some(easing) => {
+                            let mut factor = |component| easing.factor(time, component);
+                            first.lerp_by(second, &mut factor)
+                        }
+                        None => first.lerp(second, time),
+                    }
+                })
             }
         })
     }
 
-    pub fn get_value(&self, fnth: f32) -> T {
-        self.try_get_value(fnth).unwrap_or_else(|slot|
+    pub fn try_get_value(&self, fnth: f32) -> Result<T, UnresolvedSlot<'_>> {
+        self.try_get_value_cow(fnth).map(Cow::into_owned)
+    }
+
+    pub(crate) fn get_value_cow(&self, fnth: f32) -> Cow<'_, T> {
+        self.try_get_value_cow(fnth).unwrap_or_else(|slot|
             panic!("slot `{}` must be resolved before evaluation", slot.0))
     }
+
+    pub fn get_value(&self, fnth: f32) -> T { self.get_value_cow(fnth).into_owned() }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -436,6 +539,72 @@ impl LayerInfo {
         assert!(serde_json::from_str::<Value>(r#"{"a":1,"k":[]}"#).is_err());
         assert!(serde_json::from_str::<Value>(
             r#"{"a":1,"k":[{"t":0,"s":[]}]}"#).is_err());
+        assert!(serde_json::from_str::<Value>(
+            r#"{"k":[{"t":0},{"t":1,"s":[1]}]}"#).is_err());
+        assert!(serde_json::from_str::<Value>(
+            r#"{"k":[{"t":0,"s":[0]},{"t":1},{"t":2,"s":[2]}]}"#).is_err());
+        assert!(serde_json::from_str::<Value>(
+            r#"{"k":[{"t":1,"s":[1]},{"t":0,"s":[0]}]}"#).is_err());
+    }
+
+    #[test] fn animated_properties_borrow_values_that_need_no_interpolation() {
+        let static_value: Value = serde_json::from_str(r#"{"k":4}"#).unwrap();
+        assert!(matches!(static_value.get_value_cow(0.), Cow::Borrowed(&4.)));
+
+        let animated: Value = serde_json::from_str(
+            r#"{"k":[{"t":0,"s":[2],"h":1},{"t":10,"s":[8]}]}"#).unwrap();
+        assert!(matches!(animated.get_value_cow(5.), Cow::Borrowed(&2.)));
+        assert!(matches!(animated.get_value_cow(10.), Cow::Borrowed(&8.)));
+        assert!(matches!(animated.get_value_cow(15.), Cow::Borrowed(&8.)));
+
+        let tweened: Value = serde_json::from_str(
+            r#"{"k":[{"t":0,"s":[2]},{"t":10,"s":[8]}]}"#).unwrap();
+        assert!(matches!(tweened.get_value_cow(5.), Cow::Owned(5.)));
+    }
+
+    #[test] fn animated_properties_apply_easing_per_component() {
+        let position: Animated2D = serde_json::from_str(concat!(
+            r#"{"k":[{"t":0,"s":[0,0],"#,
+            r#""o":{"x":[0,0],"y":[0,1]},"i":{"x":[1,1],"y":[0,1]}},"#,
+            r#"{"t":10,"s":[100,100]}]}"#,
+        )).unwrap();
+        let position = position.get_value(5.);
+        assert!((position.x - 12.5).abs() < 1e-4);
+        assert!((position.y - 87.5).abs() < 1e-4);
+
+        let values: MultiD = serde_json::from_str(concat!(
+            r#"{"k":[{"t":0,"s":[0,0,0],"#,
+            r#""o":{"x":0,"y":[0,1]},"i":{"x":1,"y":[0,1]}},"#,
+            r#"{"t":10,"s":[100,100,100]}]}"#,
+        )).unwrap();
+        let values = values.get_value(5.);
+        assert!((values[0] - 12.5).abs() < 1e-4);
+        assert!((values[1] - 87.5).abs() < 1e-4);
+        assert!((values[2] - 87.5).abs() < 1e-4);
+
+        let color: ColorValue = serde_json::from_str(concat!(
+            r#"{"k":[{"t":0,"s":[0,0,0],"#,
+            r#""o":{"x":0,"y":[0,0.5,1]},"i":{"x":1,"y":[0,0.5,1]}},"#,
+            r#"{"t":10,"s":[1,1,1]}]}"#,
+        )).unwrap();
+        let color = color.get_value(5.);
+        assert_eq!((color.r, color.g, color.b), (31, 127, 223));
+    }
+
+    #[test] fn animated_properties_handle_hold_duplicate_and_terminal_keyframes() {
+        let duplicate: Value = serde_json::from_str(concat!(
+            r#"{"k":[{"t":0,"s":[0]},{"t":10,"s":[100]},"#,
+            r#"{"t":10,"s":[200]},{"t":20}]}"#,
+        )).unwrap();
+        assert_eq!(duplicate.get_value(5.), 50.);
+        assert_eq!(duplicate.get_value(10.), 200.);
+        assert_eq!(duplicate.get_value(15.), 200.);
+        assert_eq!(duplicate.get_value(30.), 200.);
+
+        let hold: Value = serde_json::from_str(
+            r#"{"k":[{"t":0,"s":[10],"h":1},{"t":10,"s":[20]}]}"#).unwrap();
+        assert_eq!(hold.get_value(5.), 10.);
+        assert_eq!(hold.get_value(10.), 20.);
     }
 
     #[test] fn animated_properties_support_slots_and_normalize_the_animation_flag() {

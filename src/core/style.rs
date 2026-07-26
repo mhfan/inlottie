@@ -7,7 +7,7 @@
 
 use crate::core::{helpers::{Vec2D, RGBA, IntBool, math},
     schema::{Transform, Translation, TransRotation,
-        FillStrokeGrad, ColorGrad, FillStroke, FillRule, GradientType,
+        FillStrokeGrad, ColorGrad, FillStroke, FillRule, GradientType, GradientColors,
         Repeater, Composite, LineJoin, LineCap, StrokeDashType}
 };
 
@@ -178,15 +178,21 @@ impl Transform {
 
 impl Repeater {
     pub fn get_matrix<MC: MatrixConv>(&self, fnth: f32) -> Vec<TM2DwO<MC>> {
-        let mut opacity = self.tr.so.as_ref().map_or(1.,
-            |so| so.get_value(fnth) / 100.);
-        let  offset = self.offset.as_ref().map_or(0.,
-            |offset| offset.get_value(fnth));   // range: [-1, 2]?
-
-        let cnt = self.cnt.get_value(fnth) as u32;
-        let delta = if 1 < cnt { (self.tr.eo.as_ref().map_or(1., |eo|
-            eo.get_value(fnth) / 100.) - opacity) / (cnt - 1) as f32 } else { 0. };
+        let copies = self.cnt.get_value(fnth);
+        if !copies.is_finite() || copies <= 0. { return Vec::new() }
+        // lottie-web creates ceil(copies) full instances; a fractional final copy
+        // does not receive an additional coverage-opacity multiplier.
+        let cnt = copies.ceil().min(10000.) as u32;
         let mut coll = Vec::with_capacity(cnt as usize);
+
+        let start_opacity = self.tr.so.as_ref().map_or(1., |so| so.get_value(fnth) / 100.);
+        let opacity_delta = if 1 < cnt {
+            (self.tr.eo.as_ref().map_or(1., |eo| eo.get_value(fnth) / 100.)
+                - start_opacity) / (cnt - 1) as f32
+        } else { 0. };
+        let  offset = self.offset.as_ref().map_or(0.,
+            |offset| offset.get_value(fnth));
+        let  offset = if offset.is_finite() { offset } else { 0. };
 
         let trfm = &self.tr.trfm;
         let  anchor = trfm.anchor.as_ref().map_or(Vec2D { x: 0., y: 0. },
@@ -196,8 +202,7 @@ impl Repeater {
 
         let rot = match &trfm.extra {
             TransRotation::Normal2D { rotation } =>
-                rotation.as_ref().map(|rdeg|
-                    rdeg.get_value(fnth).to_radians()),
+                rotation.as_ref().map(|rdeg| rdeg.get_value(fnth).to_radians()),
             TransRotation::Split3D(_) => unimplemented!(), //debug_assert!(ddd),
         };
 
@@ -206,23 +211,42 @@ impl Repeater {
             Some(Translation::Split(sv)) => {   debug_assert!(sv.split);
                 Vec2D { x: sv.x.get_value(fnth), y: sv.y.get_value(fnth) }
             }   _ => Vec2D { x: 0., y: 0. },
-        };  // XXX: shouldn't need to deal with auto orient and skew_x?
+        };
+        let skew = trfm.skew.as_ref().map(|skew|
+            -skew.get_value(fnth).clamp(-85., 85.).to_radians());
+        let skew_axis = trfm.skew_axis.as_ref()
+            .map(|axis| axis.get_value(fnth).to_radians());
 
         for i in 0..cnt {
-            let offset = offset + if matches!(self.order,
-                Composite::Below) { i } else { cnt - 1 - i } as f32;
+            let copy = if matches!(self.order, Composite::Below) { i } else { cnt - 1 - i };
+            let amount = offset + copy as f32;
             let mut trfm = MC::identity();
 
             trfm.translate(-anchor);
             if let Some(scale) = scale {
-                trfm.scale((scale.x.powf(offset), scale.y.powf(offset)).into());
-            };  if let Some(rot) = rot { trfm.rotate(rot * offset); }
-            trfm.translate(pos * offset + anchor);
+                trfm.scale(Vec2D {
+                    x: repeater_scale(scale.x, amount),
+                    y: repeater_scale(scale.y, amount),
+                });
+            }
+            if let Some(skew) = skew {
+                if let Some(axis) = skew_axis { trfm.rotate(-axis); }
+                trfm.skew_x(skew * amount);
+                if let Some(axis) = skew_axis { trfm.rotate(axis); }
+            }
+            if let Some(rot) = rot { trfm.rotate(rot * amount); }
+            trfm.translate(pos * amount + anchor);
 
-            coll.push(TM2DwO(trfm, opacity));
-            opacity += delta;
+            coll.push(TM2DwO(trfm, start_opacity + opacity_delta * copy as f32));
         }   coll
     }
+}
+
+fn repeater_scale(scale: f32, amount: f32) -> f32 {
+    let whole = amount.trunc() as i32;
+    let fraction = amount.fract().abs();
+    let partial = 1. + (scale - 1.) * fraction;
+    if amount < 0. { scale.powi(whole) / partial } else { scale.powi(whole) * partial }
 }
 
 pub trait StyleConv {
@@ -236,6 +260,61 @@ pub enum FSOpts {   Fill(FillRule),     // XXX: use SmallVec for dash?
     Stroke { width: f32, limit: f32, join: LineJoin, cap: LineCap, dash: (f32, Vec<f32>) }
 }
 
+impl GradientColors {
+    fn resolve(&self, fnth: f32, opacity: f32) -> Vec<(f32, RGBA)> {
+        let data = self.cl.get_value_cow(fnth);
+        let color_count = self.cnt as usize;
+        let color_len = color_count * 4;
+        let alpha = &data[color_len..];
+        let alpha_count = alpha.len() / 2;
+        let (mut colors, mut alphas) = (0, 0);
+        let mut stops = Vec::with_capacity(color_count + alpha_count);
+
+        while colors < color_count || alphas < alpha_count {
+            let color_offset = (colors < color_count).then(||  data[colors * 4]);
+            let alpha_offset = (alphas < alpha_count).then(|| alpha[alphas * 2]);
+            let offset = match (color_offset, alpha_offset) {
+                (Some(color), Some(alpha)) => color.min(alpha),
+                (Some(color), None) => color,
+                (None, Some(alpha)) => alpha,
+                (None, None) => unreachable!(),
+            };
+            if color_offset == Some(offset) { colors += 1; }
+            if alpha_offset == Some(offset) { alphas += 1; }
+            if stops.last().is_none_or(|&(last, _)| last != offset) {
+                let (lo, hi, factor) = gradient_segment(&data[..color_len], 4, offset);
+                let lerp = |channel: usize| {
+                    let first =  data[lo * 4 + channel];
+                        first + (data[hi * 4 + channel] - first) * factor
+                };
+                let alpha = if alpha_count == 0 { 1. } else {
+                    let (lo, hi, factor) = gradient_segment(alpha, 2, offset);
+                    let first =  alpha[lo * 2 + 1];
+                        first + (alpha[hi * 2 + 1] - first) * factor
+                };
+                stops.push((offset, RGBA::new_f32(
+                    lerp(1), lerp(2), lerp(3), alpha * opacity)));
+            }
+        }   stops
+    }
+}
+
+fn gradient_segment(data: &[f32], stride: usize, offset: f32) -> (usize, usize, f32) {
+    let count = data.len() / stride;
+    let (mut lower, mut upper) = (0, count);
+    while lower < upper {
+        let middle = lower + (upper - lower) / 2;
+        if data[middle * stride] <= offset { lower = middle + 1 } else { upper = middle }
+    }
+    if upper == 0 { return (0, 0, 0.) }
+    if upper == count { return (count - 1, count - 1, 0.) }
+    let lower = upper - 1;
+    let span = data[upper * stride] - data[lower * stride];
+    (lower, upper, if span == 0. { 0. } else {
+        (offset - data[lower * stride]) / span
+    })
+}
+
 impl FillStrokeGrad {
     pub fn to_style<SC: StyleConv>(&self, fnth: f32) -> (SC, FSOpts) {
         let opacity = self.opacity.get_value(fnth) / 100.;
@@ -246,10 +325,7 @@ impl FillStrokeGrad {
             }
             ColorGrad::Gradient(grad) => {
                 let (sp, ep) = (grad.sp.get_value(fnth), grad.ep.get_value(fnth));
-                let mut stops = grad.stops.cl.get_value(fnth).0;
-                debug_assert!(stops.len() as u32 == grad.stops.cnt);
-                stops.iter_mut().for_each(|(_, rgba)|
-                    rgba.a = (opacity * rgba.a as f32 + 0.5) as _);
+                let stops = grad.stops.resolve(fnth, opacity);
 
                 if matches!(grad.r#type, GradientType::Radial) {
                     let (dx, dy) = (ep.x - sp.x, ep.y - sp.y);
@@ -313,7 +389,7 @@ impl FillStrokeGrad {
 }
 
 #[cfg(test)] mod tests {
-    use crate::core::schema::ShapeItem;
+    use crate::core::schema::{GradientColors, Repeater, ShapeItem};
 
     fn stroke_dash(entries: &str) -> (f32, Vec<f32>) {
         let json = format!(r#"{{
@@ -322,6 +398,50 @@ impl FillStrokeGrad {
         }}"#);
         let ShapeItem::Stroke(stroke) = serde_json::from_str(&json).unwrap() else { panic!() };
         stroke.get_dash(0.)
+    }
+
+    fn repeater(copies: f32, order: u8, offset: f32, transform: &str) -> Box<Repeater> {
+        let json = format!(r#"{{
+            "ty":"rp","c":{{"k":{copies}}},"m":{order},"o":{{"k":{offset}}},
+            "tr":{{{transform}}}
+        }}"#);
+        let ShapeItem::Repeater(repeater) = serde_json::from_str(&json).unwrap()
+            else { panic!() };
+        repeater
+    }
+
+    #[test] fn repeater_ceil_copies_and_interpolates_opacity_by_copy_index() {
+        let below = repeater(2.5, 1, 0.,
+            r#""so":{"k":20},"eo":{"k":80}"#);
+        let matrices = below.get_matrix::<kurbo::Affine>(0.);
+        assert_eq!(matrices.len(), 3);
+        assert_eq!(matrices.iter().map(|matrix| matrix.1).collect::<Vec<_>>(),
+            [0.2, 0.5, 0.8]);
+
+        let above = repeater(2.5, 2, 0.,
+            r#""so":{"k":20},"eo":{"k":80}"#);
+        assert_eq!(above.get_matrix::<kurbo::Affine>(0.).iter()
+            .map(|matrix| matrix.1).collect::<Vec<_>>(), [0.8, 0.5, 0.2]);
+    }
+
+    #[test] fn repeater_handles_fractional_negative_offset_and_split_position() {
+        let repeater = repeater(2., 1, -0.5, concat!(
+            r#""s":{"k":[200,200]}"#,
+            r#","p":{"s":true,"x":{"k":4},"y":{"k":6}}"#,
+            r#","sk":{"k":10},"sa":{"k":30}"#,
+        ));
+        let matrix = &repeater.get_matrix::<kurbo::Affine>(0.)[0].0;
+        let coeffs = matrix.as_coeffs();
+        assert!(coeffs.iter().all(|value| value.is_finite()));
+        assert_ne!(coeffs[1], 0.);
+        assert!(coeffs[4] < 0. && coeffs[5] < 0.);
+    }
+
+    #[test] fn repeater_bounds_abnormal_copy_counts() {
+        assert!(repeater(-1., 1, 0., "")
+            .get_matrix::<kurbo::Affine>(0.).is_empty());
+        assert_eq!(repeater(10_001., 1, 0., "")
+            .get_matrix::<kurbo::Affine>(0.).len(), 10_000);
     }
 
     #[test] fn dash_expands_odd_patterns_and_keeps_trailing_offset() {
@@ -340,5 +460,59 @@ impl FillStrokeGrad {
         )).1.is_empty());
         assert!(stroke_dash(r#"{"n":"d","v":{"k":-1}}"#).1.is_empty());
         assert!(stroke_dash(r#"{"n":"d","v":{"k":0}}"#).1.is_empty());
+    }
+
+    #[test] fn gradient_merges_independent_color_and_opacity_offsets() {
+        let gradient: GradientColors = serde_json::from_str(concat!(
+            r#"{"p":2,"k":{"k":["#,
+            r#"0,1,0,0,1,0,0,1,"#,
+            r#"0.25,0,0.75,1]}}"#,
+        )).unwrap();
+        let stops = gradient.resolve(0., 1.);
+
+        assert_eq!(stops.iter().map(|stop| stop.0).collect::<Vec<_>>(),
+            [0., 0.25, 0.75, 1.]);
+        assert_eq!((stops[0].1.r, stops[0].1.b, stops[0].1.a), (255, 0, 0));
+        assert_eq!((stops[1].1.r, stops[1].1.b, stops[1].1.a), (191, 64, 0));
+        assert_eq!((stops[2].1.r, stops[2].1.b, stops[2].1.a), (64, 191, 255));
+        assert_eq!((stops[3].1.r, stops[3].1.b, stops[3].1.a), (0, 255, 255));
+    }
+
+    #[test] fn gradient_rejects_malformed_data() {
+        assert!(serde_json::from_str::<GradientColors>(
+            r#"{"p":2,"k":{"k":[0,1,0,0,1,0,0,1,0]}}"#).is_err());
+        assert!(serde_json::from_str::<GradientColors>(
+            r#"{"p":2,"k":{"k":[0,1,0,0,-0.1,0,0,1]}}"#).is_err());
+    }
+
+    #[test] fn gradient_supports_rgb_only_and_animated_stops() {
+        let plain: GradientColors = serde_json::from_str(
+            r#"{"p":2,"k":{"k":[0,1,0,0,1,0,0,1]}}"#).unwrap();
+        assert!(plain.resolve(0., 1.).iter().all(|stop| stop.1.a == 255));
+
+        let one_alpha: GradientColors = serde_json::from_str(
+            r#"{"p":2,"k":{"k":[0,1,0,0,1,0,0,1,0.5,0.25]}}"#).unwrap();
+        assert!(one_alpha.resolve(0., 1.).iter().all(|stop| stop.1.a == 64));
+
+        let animated: GradientColors = serde_json::from_str(concat!(
+            r#"{"p":2,"k":{"k":["#,
+            r#"{"t":0,"s":[0,1,0,0,1,0,0,1]},"#,
+            r#"{"t":10,"s":[0,0,1,0,1,1,1,0]}"#,
+            r#"]}}"#,
+        )).unwrap();
+        let stops = animated.resolve(5., 1.);
+        assert_eq!((stops[0].1.r, stops[0].1.g, stops[0].1.b), (128, 128, 0));
+
+        let encoded = serde_json::to_string(&animated).unwrap();
+        let decoded: GradientColors = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.cl.get_value(5.), animated.cl.get_value(5.));
+
+        let eased: GradientColors = serde_json::from_str(concat!(
+            r#"{"p":2,"k":{"k":[{"t":0,"s":[0,1,0,0,1,0,0,1],"#,
+            r#""o":{"x":0,"y":[0,1]},"i":{"x":1,"y":[0,1]}},"#,
+            r#"{"t":10,"s":[0,0,1,0,1,1,1,0]}]}}"#,
+        )).unwrap();
+        let color = eased.resolve(5., 1.)[0].1;
+        assert_eq!((color.r, color.g, color.b), (32, 223, 0));
     }
 }

@@ -99,10 +99,28 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
         self.set_transform(trfm);
     }
 
-    fn fill_stroke(&mut self, path: &Self::VGPath,
+    fn fill_stroke(&mut self, path: &Self::VGPath, relative: Option<&Self::TM2D>,
         style: &core::cell::RefCell<(Self::VGStyle, FSOpts)>) {
         use femtovg::{FillRule as FFR, LineCap as FLC, LineJoin as FLJ};
 
+        let transformed = relative.map(|transform| {
+            let mut result = femtovg::Path::new();
+            path.verbs().for_each(|verb| { use femtovg::Verb::*;
+                let point = |x, y| transform.transform_point(x, y);
+                match verb {
+                    MoveTo(x, y) => { let p = point(x, y); result.move_to(p.0, p.1); }
+                    LineTo(x, y) => { let p = point(x, y); result.line_to(p.0, p.1); }
+                    BezierTo(x1, y1, x2, y2, x, y) => {
+                        let (p1, p2, p) = (point(x1, y1), point(x2, y2), point(x, y));
+                        result.bezier_to(p1.0, p1.1, p2.0, p2.1, p.0, p.1);
+                    }
+                    Solid => result.solidity(femtovg::Solidity::Solid),
+                    Hole  => result.solidity(femtovg::Solidity::Hole),
+                    Close => result.close(),
+                }
+            }); result
+        });
+        let path = transformed.as_ref().unwrap_or(path);
         let mut style = style.borrow_mut();
         let (paint, options) = &mut *style;
         match options {

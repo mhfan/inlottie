@@ -339,14 +339,14 @@ impl PathFactory for Ellipse {
 
 impl PathFactory for FreePath {
     fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
-        let curv = self.shape.get_value(fnth);
+        let curv = self.shape.get_value_cow(fnth);
         bezier_path(&curv, self.base.is_ccw())
     }
 }
 
 impl PathFactory for ShapeProperty {    // for mask
     fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
-        let curv = self.get_value(fnth);
+        let curv = self.get_value_cow(fnth);
         bezier_path(&curv, false)
     }
 }

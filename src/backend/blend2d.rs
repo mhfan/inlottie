@@ -47,8 +47,15 @@ impl RenderContext for BLContext {
     }
 
     fn fill_stroke(&mut self, path: &Self::VGPath,
+        relative: Option<&Self::TM2D>,
         style: &core::cell::RefCell<(Self::VGStyle, FSOpts)>) {
-
+        let transformed = relative.map(|transform| {
+            let mut result = BLPath::new();
+            result.add_transformed_path(path, transform)
+                .expect("failed to transform Blend2D path");
+            result
+        });
+        let path = transformed.as_ref().unwrap_or(path);
         let style = style.borrow();
         match &style.1 {
             FSOpts::Fill(rule) => {

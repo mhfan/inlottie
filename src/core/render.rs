@@ -6,7 +6,7 @@
  ****************************************************************/
 
 use core::cell::RefCell;
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 use crate::core::{helpers::{RGBA, IntBool},
     schema::{Animation, AssetItem, LayerItem, ShapeItem, VisualLayer,
         TrimPath, TrimMultiple, MatteMode, FillRule},
@@ -222,7 +222,7 @@ impl<MC: MatrixConv + Clone> LottieRuntime<MC> {
                         &animation.assets[child.asset] else { unreachable!() };
                     let Some(local) = pcl.vl.base.local_frame(fnth) else { continue };
                     let child_fnth = pcl.tm.as_ref().map_or(local,
-                        |tm| tm.get_value(local) * pcomp.fr);
+                        |tm| tm.get_value(local) * animation.fr);
                     let ltm = ltm.clone().compose(ptm);
 
                     rctx.prepare_matte(&pcl.vl, &mut matte);
@@ -239,8 +239,8 @@ impl<MC: MatrixConv + Clone> LottieRuntime<MC> {
 
                 rctx.prepare_matte(&scl.vl, &mut matte);
                 rctx.render_shapes(&ltm, &[DrawItem::Shape(path),
-                    DrawItem::Style(RefCell::new((RC::VGStyle::solid_color(scl.sc),
-                        FSOpts::Fill(FillRule::NonZero))))]);
+                    DrawItem::Style(Rc::new(RefCell::new((RC::VGStyle::solid_color(scl.sc),
+                        FSOpts::Fill(FillRule::NonZero)))))]);
                 rctx.compose_matte(&scl.vl, &mut matte, &ltm, fnth);
             }
             LayerItem::Image(_) | LayerItem::Text(_)  | LayerItem::Data(_)  |
@@ -269,19 +269,31 @@ pub trait RenderContext {
     fn save_state(&mut self);
     fn restore_state(&mut self);
     fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>);
-    fn fill_stroke(&mut self, path: &Self::VGPath, style: &RefCell<(Self::VGStyle, FSOpts)>);
+    fn fill_stroke(&mut self, path: &Self::VGPath,
+        relative: Option<&Self::TM2D>, style: &RefCell<(Self::VGStyle, FSOpts)>);
 
-    fn traverse_shapes(&mut self, ptm: &TM2DwO<Self::TM2D>,
+    fn traverse_shapes(&mut self, stm: &TM2DwO<Self::TM2D>,
+        relative: Option<&TM2DwO<Self::TM2D>>,
         draws: &[DrawItem<Self::VGPath, Self::VGStyle, Self::TM2D>],
         style: &RefCell<(Self::VGStyle, FSOpts)>) {
-
-        // XXX: in which case shape/path and style need to apply different transforms?
-        self.apply_transform(&ptm.0, Some(ptm.1));
+        self.apply_transform(&stm.0, Some(stm.1 * relative.map_or(1., |tm| tm.1)));
         draws.iter().rev().for_each(|draw| match draw {
-            DrawItem::Shape(path) => self.fill_stroke(path, style),
+            DrawItem::Shape(path) => self.fill_stroke(path, relative.map(|tm| &tm.0), style),
             DrawItem::Group(grp, rep) => rep.iter().rev().for_each(|gtm| {
-                self.traverse_shapes(&gtm.clone().compose(ptm), grp, style);
-                self.apply_transform(&ptm.0, Some(ptm.1));
+                let child = Some(match relative {
+                    Some(relative) => gtm.clone().compose(relative),
+                    None => gtm.clone(),
+                });
+                self.traverse_shapes(stm, child.as_ref(), grp, style);
+                self.apply_transform(&stm.0, Some(stm.1 * relative.map_or(1., |tm| tm.1)));
+            }),
+            DrawItem::Copies(copies) => copies.iter().rev().for_each(|(grp, gtm)| {
+                let child = Some(match relative {
+                    Some(relative) => gtm.clone().compose(relative),
+                    None => gtm.clone(),
+                });
+                self.traverse_shapes(stm, child.as_ref(), grp, style);
+                self.apply_transform(&stm.0, Some(stm.1 * relative.map_or(1., |tm| tm.1)));
             }),
             _ => (), // skip/ignore Style
         });
@@ -298,8 +310,10 @@ pub trait RenderContext {
         draws: &[DrawItem<Self::VGPath, Self::VGStyle, Self::TM2D>]) {
         draws.iter().enumerate().rev().for_each(|(idx, item)| match item {
             DrawItem::Style(style) =>
-                self.traverse_shapes(ptm, &draws[0..idx], style),
+                self.traverse_shapes(ptm, None, &draws[0..idx], style),
             DrawItem::Group(grp, rep) => rep.iter().rev().for_each(|gtm|
+                    self.render_shapes_inner(&gtm.clone().compose(ptm), grp)),
+            DrawItem::Copies(copies) => copies.iter().rev().for_each(|(grp, gtm)|
                     self.render_shapes_inner(&gtm.clone().compose(ptm), grp)),
             _ => (), // skip/ignore Shape
         });
@@ -312,7 +326,7 @@ pub struct TrackMatte<T> {
 
 /// calculate transform matrix, convert shapes to paths, modify/change the paths,
 /// and convert style(fill/stroke/gradient) to draw items, recursively
-pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
+pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone>(
     shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
     (Vec<DrawItem<VGPath, VGPaint, TM2D>>, TM2DwO<TM2D>) {
     let mut draws = Vec::with_capacity(shapes.len());
@@ -330,13 +344,13 @@ pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>
 
         // styles affect on all preceding paths ever before
         ShapeItem::Fill(fill)   if !fill.elem.hd =>
-            draws.push(DrawItem::Style(fill.to_style(fnth).into())),
+            draws.push(DrawItem::Style(Rc::new(fill.to_style(fnth).into()))),
         ShapeItem::Stroke(line) if !line.elem.hd =>
-            draws.push(DrawItem::Style(line.to_style(fnth).into())),
+            draws.push(DrawItem::Style(Rc::new(line.to_style(fnth).into()))),
         ShapeItem::GradientFill(grad)   if !grad.elem.hd =>
-            draws.push(DrawItem::Style(grad.to_style(fnth).into())),
+            draws.push(DrawItem::Style(Rc::new(grad.to_style(fnth).into()))),
         ShapeItem::GradientStroke(grad) if !grad.elem.hd =>
-            draws.push(DrawItem::Style(grad.to_style(fnth).into())),
+            draws.push(DrawItem::Style(Rc::new(grad.to_style(fnth).into()))),
         ShapeItem::NoStyle(_) => eprintln!("Nothing to do here?"),
 
         ShapeItem::Group(group) if !group.elem.hd => {
@@ -365,8 +379,9 @@ pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>
 //  https://lottie.github.io/lottie-spec/latest/specs/shapes/#graphic-element
 pub enum DrawItem<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv> {
     Shape(VGPath),                          // DrawItem is a.k.a Graphic Element
-    Style(RefCell<(VGPaint, FSOpts)>),      // RefCell interior mutation for femtovg
+    Style(Rc<RefCell<(VGPaint, FSOpts)>>),  // shared only by expanded repeater copies
     Group(Vec<Self>, Vec<TM2DwO<TM2D>>),    // support batch Groups for Repeater
+    Copies(Vec<(Vec<Self>, TM2DwO<TM2D>)>), // per-copy paths after sequential trim
 }
 
 fn for_each_path_mut<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
@@ -374,12 +389,57 @@ fn for_each_path_mut<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
     closure: &mut impl FnMut(&mut VGPath)) {
     draws.iter_mut().rev().for_each(|draw| match draw {
         DrawItem::Group(group, _) => for_each_path_mut(group, closure),
+        DrawItem::Copies(copies) => copies.iter_mut().rev()
+            .for_each(|(group, _)| for_each_path_mut(group, closure)),
         DrawItem::Shape(path) => closure(path),
         DrawItem::Style(_) => (), // skip/ignore Style
     });
 }   // XXX: how to treat repeated shapes?
 
-fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
+fn duplicate_draws<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone>(
+    draws: &[DrawItem<VGPath, VGPaint, TM2D>],
+    paths: &mut HashMap<usize, crate::core::pathm::BezPath>)
+    -> Vec<DrawItem<VGPath, VGPaint, TM2D>> {
+    draws.iter().map(|draw| match draw {
+        DrawItem::Shape(path) => {
+            let key = path as *const VGPath as usize;
+            let path = paths.entry(key).or_insert_with(|| path.to_kurbo()).clone();
+            DrawItem::Shape(VGPath::from_kurbo(path))
+        }
+        DrawItem::Style(style) => DrawItem::Style(Rc::clone(style)),
+        DrawItem::Group(group, transforms) =>
+            DrawItem::Group(duplicate_draws(group, paths), transforms.clone()),
+        DrawItem::Copies(copies) => DrawItem::Copies(copies.iter().map(|(group, transform)|
+            (duplicate_draws(group, paths), transform.clone())).collect()),
+    }).collect()
+}
+
+fn expand_repeats<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone>(
+    draws: &mut [DrawItem<VGPath, VGPaint, TM2D>]) {
+    for draw in draws { match draw {
+        DrawItem::Group(group, transforms) => {
+            expand_repeats(group);
+            if transforms.len() == 1 { continue }
+
+            let mut source = core::mem::take(group);
+            let transforms = core::mem::take(transforms);
+            let last = transforms.len().saturating_sub(1);
+            let mut paths = HashMap::new();
+            let copies = transforms.into_iter().enumerate().map(|(index, transform)| {
+                let group = if index == last {
+                    core::mem::take(&mut source)
+                } else { duplicate_draws(&source, &mut paths) };
+                (group, transform)
+            }).collect();
+            *draw = DrawItem::Copies(copies);
+        }
+        DrawItem::Copies(copies) => copies.iter_mut()
+            .for_each(|(group, _)| expand_repeats(group)),
+        DrawItem::Shape(_) | DrawItem::Style(_) => (),
+    }}
+}
+
+fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone>(
     mdfr: &TrimPath, draws: &mut [DrawItem<VGPath, VGPaint, TM2D>], fnth: f32) {
     let (start, trim) = normalize_trim(
         mdfr.start .get_value(fnth) as f64 / 100.,
@@ -395,6 +455,7 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
     if mdfr.multiple.is_some_and(|ml| matches!(ml, TrimMultiple::Simultaneously)) {
         for_each_path_mut(draws, &mut |path| *path = path.trim_path(start, trim));
     } else {
+        expand_repeats(draws);
         let (mut idx, mut total) = (0usize, 0.);
         let mut paths = Vec::new();
 
@@ -464,7 +525,10 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
     }
 
     #[derive(Default)] struct TestContext {
-        clear: Option<RGBA>, clear_count: u32,
+        clear: Option<RGBA>, clear_count: u32, draw_count: u32,
+        current: kurbo::Affine, transforms: Vec<kurbo::Affine>,
+        fills: Vec<(kurbo::Affine, Option<kurbo::Affine>)>,
+        opacity: f32, stack: Vec<f32>, drawn: Vec<f32>,
     }
     impl RenderContext for TestContext {
         type VGPath = BezPath;
@@ -476,36 +540,49 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
         fn clear_rect_with(&mut self, _: u32, _: u32, _: u32, _: u32, color: RGBA) {
             self.clear = Some(color); self.clear_count += 1;
         }
-        fn save_state(&mut self) {}
-        fn restore_state(&mut self) {}
-        fn apply_transform(&mut self, _: &Self::TM2D, _: Option<f32>) {}
-        fn fill_stroke(&mut self, _: &Self::VGPath, _: &RefCell<(Self::VGStyle, FSOpts)>) {}
+        fn save_state(&mut self) { self.stack.push(self.opacity) }
+        fn restore_state(&mut self) { self.opacity = self.stack.pop().unwrap() }
+        fn apply_transform(&mut self, transform: &Self::TM2D, opacity: Option<f32>) {
+            self.current = *transform; self.transforms.push(*transform);
+            if let Some(opacity) = opacity { self.opacity = opacity }
+        }
+        fn fill_stroke(&mut self, _: &Self::VGPath, relative: Option<&Self::TM2D>,
+            _: &RefCell<(Self::VGStyle, FSOpts)>) {
+            self.draw_count += 1; self.drawn.push(self.opacity);
+            self.fills.push((self.current, relative.copied()));
+        }
     }
 
-    #[test] fn layer_world_matrix_includes_ancestors_and_tolerates_missing_parent() {
-        let animation: Animation = serde_json::from_str(r#"{ "layers": [
-            {"ty":3,"ind":1,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[10,0]}}},
-            {"ty":3,"ind":2,"parent":1,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[0,20]}}},
-            {"ty":3,"ind":3,"parent":2,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[3,4]}}},
-            {"ty":3,"ind":4,"parent":99,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[5,6]}}}
-        ] }"#).unwrap();
-
-        let matrices = layer_world_matrices::<kurbo::Affine>(
-            &animation.layers, 0., |_| true);
-        assert_eq!(matrices[2].as_ref().unwrap().0.as_coeffs(),
-            [1., 0., 0., 1., 13., 24.]);
-        assert_eq!(matrices[3].as_ref().unwrap().0.as_coeffs(),
-            [1., 0., 0., 1., 5., 6.]);
+    fn line(length: f64, y: f64) -> BezPath {
+        let mut path = BezPath::new();
+        path.move_to((0., y)); path.line_to((length, y)); path
     }
 
-    #[test] fn parent_layers_contribute_transform_but_not_opacity() {
+    fn trim(start: f32, end: f32, offset: f32, multiple: u8) -> TrimPath {
+        serde_json::from_str(&format!(r#"{{
+            "s":{{"k":{start}}},"e":{{"k":{end}}},
+            "o":{{"k":{offset}}},"m":{multiple}
+        }}"#)).unwrap()
+    }
+
+    fn path_length(path: &BezPath) -> f64 {
+        path.segments().map(|segment| segment.arclen(0.1)).sum()
+    }
+
+    fn fill_style() -> DrawItem<BezPath, TestStyle, kurbo::Affine> {
+        DrawItem::Style(Rc::new(RefCell::new(
+            (TestStyle, FSOpts::Fill(FillRule::NonZero)))))
+    }
+
+    #[test] fn layer_world_matrix_composes_parents_without_inheriting_opacity() {
         let animation: Animation = serde_json::from_str(r#"{ "layers": [
             {"ty":3,"ind":1,"hd":true,"st":0,"ip":0,"op":10,
                 "ks":{"p":{"k":[10,0]},"o":{"k":25}}},
             {"ty":3,"ind":2,"parent":1,"st":0,"ip":0,"op":10,
                 "ks":{"p":{"k":[0,20]},"o":{"k":50}}},
             {"ty":3,"ind":3,"parent":2,"st":0,"ip":0,"op":10,
-                "ks":{"p":{"k":[3,4]},"o":{"k":80}}}
+                "ks":{"p":{"k":[3,4]},"o":{"k":80}}},
+            {"ty":3,"ind":4,"parent":99,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[5,6]}}}
         ] }"#).unwrap();
 
         let matrices = layer_world_matrices::<kurbo::Affine>(
@@ -513,6 +590,8 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
         let child = matrices[2].as_ref().unwrap();
         assert_eq!(child.0.as_coeffs(), [1., 0., 0., 1., 13., 24.]);
         assert_eq!(child.1, 0.8);
+        assert_eq!(matrices[3].as_ref().unwrap().0.as_coeffs(),
+            [1., 0., 0., 1., 5., 6.]);
     }
 
     #[test] fn layer_world_matrix_skips_parent_cycles_and_their_descendants() {
@@ -624,6 +703,32 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
             (child.composition.worlds.as_ptr(), child.composition.stack.as_ptr()));
     }
 
+    #[test] fn precomp_time_remap_uses_root_fps_after_layer_time_mapping() {
+        let json = br##"{
+            "fr":24,"ip":20,"op":40,
+            "assets":[{"id":"nested","fr":99,"layers":[{
+                "ty":4,"st":0,"ip":0,"op":100,
+                "ks":{"p":{"k":[{"t":0,"s":[0,0]},{"t":24,"s":[100,0]}]}},
+                "shapes":[
+                    {"ty":"rc","s":{"k":[1,1]},"p":{"k":[0,0]},"r":{"k":0}},
+                    {"ty":"fl","c":{"k":[1,0,0]},"o":{"k":100}}
+                ]
+            }]}],
+            "layers":[{"ty":0,"refId":"nested","w":1,"h":1,
+                "st":4,"sr":2,"ip":0,"op":40,"ks":{},
+                "tm":{"k":[{"t":0,"s":[0]},{"t":12,"s":[1]}]}}]
+        }"##;
+        let mut runtime = LottieRuntime::<kurbo::Affine>::from_reader(&json[..]).unwrap();
+        let mut context = TestContext::default();
+
+        assert!(runtime.render_next_frame(&mut context, 1. / 24., None));
+        assert!(context.transforms.iter().any(|transform|
+            (transform.as_coeffs()[4] - 50.).abs() < 1e-4),
+            "{:?}", context.transforms.iter().map(|tm| tm.as_coeffs()).collect::<Vec<_>>());
+        let AssetItem::Precomp(precomp) = &runtime.animation.assets[0] else { panic!() };
+        assert!(!serde_json::to_value(precomp).unwrap().as_object().unwrap().contains_key("fr"));
+    }
+
     #[test] fn lottie_runtime_skips_recursive_precomp_references() {
         let runtime = LottieRuntime::<kurbo::Affine>::from_reader(&br#"{
             "assets":[
@@ -660,43 +765,34 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
     }
 
     #[test] fn recursive_render_restores_opacity_between_siblings() {
-        #[derive(Default)] struct StateContext {
-            opacity: f32, stack: Vec<f32>, drawn: Vec<f32>,
-        }
-        impl RenderContext for StateContext {
-            type VGPath = BezPath;
-            type VGStyle = TestStyle;
-            type TM2D = kurbo::Affine;
-            type ImageID = ();
-
-            fn get_size(&self) -> (u32, u32) { (1, 1) }
-            fn clear_rect_with(&mut self, _: u32, _: u32, _: u32, _: u32, _: RGBA) {}
-            fn save_state(&mut self) { self.stack.push(self.opacity) }
-            fn restore_state(&mut self) { self.opacity = self.stack.pop().unwrap() }
-            fn apply_transform(&mut self, _: &Self::TM2D, opacity: Option<f32>) {
-                if let Some(opacity) = opacity { self.opacity = opacity }
-            }
-            fn fill_stroke(&mut self, _: &Self::VGPath,
-                _: &RefCell<(Self::VGStyle, FSOpts)>) {
-                self.drawn.push(self.opacity);
-            }
-        }
-
         let path = || DrawItem::Shape(BezPath::new());
-        let draws = vec![
-            path(),
+        let draws = vec![path(),
             DrawItem::Group(vec![path()],
                 vec![TM2DwO(kurbo::Affine::IDENTITY, 0.4)]),
-            DrawItem::Style(RefCell::new(
-                (TestStyle, FSOpts::Fill(FillRule::NonZero)))),
+            fill_style(),
         ];
-        let mut context = StateContext { opacity: 1., ..Default::default() };
+        let mut context = TestContext { opacity: 1., ..Default::default() };
 
-        context.render_shapes(
-            &TM2DwO(kurbo::Affine::IDENTITY, 0.5), &draws);
+        context.render_shapes(&TM2DwO(kurbo::Affine::IDENTITY, 0.5), &draws);
         assert_eq!(context.drawn, [0.2, 0.5]);
         assert_eq!(context.opacity, 1.);
         assert!(context.stack.is_empty());
+    }
+
+    #[test] fn outer_styles_keep_their_scope_transform_across_nested_groups() {
+        let path = || DrawItem::Shape(BezPath::new());
+        let group_matrix = kurbo::Affine::translate((20., 0.));
+        let group = TM2DwO(group_matrix, 1.);
+        let draws = [path(), DrawItem::Group(vec![path()], vec![group]),
+            fill_style()];
+        let scope = TM2DwO(kurbo::Affine::translate((10., 0.)), 1.);
+        let mut context = TestContext::default();
+
+        context.render_shapes(&scope, &draws);
+        assert_eq!(context.fills.len(), 2);
+        assert_eq!(context.fills[0].0, scope.0);
+        assert_eq!(context.fills[0].1, Some(group_matrix));
+        assert_eq!(context.fills[1], (scope.0, None));
     }
 
     #[test] fn trim_range_normalizes_direction_and_negative_offset() {
@@ -710,14 +806,9 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
     }
 
     #[test] fn sequential_trim_keeps_both_wrapped_parts_of_one_shape() {
-        let trim: TrimPath = serde_json::from_str(r#"{
-            "nm":"","ln":"","cl":"",
-            "s":{"a":0,"k":0},"e":{"a":0,"k":50},"o":{"a":0,"k":270},"m":2
-        }"#).unwrap();
-        let mut path = BezPath::new();
-        path.move_to((0., 0.)); path.line_to((100., 0.));
+        let trim = trim(0., 50., 270., 2);
         let mut draws: Vec<DrawItem<BezPath, TestStyle, kurbo::Affine>> =
-            vec![DrawItem::Shape(path)];
+            vec![DrawItem::Shape(line(100., 0.))];
 
         trim_shapes(&trim, &mut draws, 0.);
         let DrawItem::Shape(path) = &draws[0] else { panic!() };
@@ -729,14 +820,7 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
     }
 
     #[test] fn sequential_trim_follows_reverse_render_order() {
-        let trim: TrimPath = serde_json::from_str(r#"{
-            "nm":"","ln":"","cl":"",
-            "s":{"a":0,"k":0},"e":{"a":0,"k":25},"o":{"a":0,"k":0},"m":2
-        }"#).unwrap();
-        let line = |length, y| {
-            let mut path = BezPath::new();
-            path.move_to((0., y)); path.line_to((length, y)); path
-        };
+        let trim = trim(0., 25., 0., 2);
         let mut draws: Vec<DrawItem<BezPath, TestStyle, kurbo::Affine>> = vec![
             DrawItem::Shape(line(100., 0.)),
             DrawItem::Shape(line( 50., 1.)),
@@ -751,14 +835,7 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
     }
 
     #[test] fn sequential_trim_follows_nested_group_render_order() {
-        let trim: TrimPath = serde_json::from_str(r#"{
-            "nm":"","ln":"","cl":"",
-            "s":{"a":0,"k":0},"e":{"a":0,"k":25},"o":{"a":0,"k":0},"m":2
-        }"#).unwrap();
-        let line = |length, y| {
-            let mut path = BezPath::new();
-            path.move_to((0., y)); path.line_to((length, y)); path
-        };
+        let trim = trim(0., 25., 0., 2);
         let group = vec![
             DrawItem::Shape(line(30., 1.)),
             DrawItem::Shape(line(20., 2.)),
@@ -777,14 +854,7 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
     }
 
     #[test] fn simultaneous_trim_applies_the_range_to_each_path() {
-        let trim: TrimPath = serde_json::from_str(r#"{
-            "nm":"","ln":"","cl":"",
-            "s":{"a":0,"k":25},"e":{"a":0,"k":75},"o":{"a":0,"k":0},"m":1
-        }"#).unwrap();
-        let line = |length, y| {
-            let mut path = BezPath::new();
-            path.move_to((0., y)); path.line_to((length, y)); path
-        };
+        let trim = trim(25., 75., 0., 1);
         let mut draws: Vec<DrawItem<BezPath, TestStyle, kurbo::Affine>> = vec![
             DrawItem::Shape(line(100., 0.)),
             DrawItem::Shape(line(40., 1.)),
@@ -794,5 +864,50 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
         let [DrawItem::Shape(first), DrawItem::Shape(second)] = &draws[..] else { panic!() };
         assert_eq!(first.segments().next().unwrap().arclen(0.1), 50.);
         assert_eq!(second.segments().next().unwrap().arclen(0.1), 20.);
+    }
+
+    #[test] fn sequential_trim_treats_repeater_copies_as_rendered_paths() {
+        let trim = trim(0., 25., 0., 2);
+
+        let mut after: Vec<DrawItem<BezPath, TestStyle, kurbo::Affine>> = vec![
+            DrawItem::Group(vec![DrawItem::Shape(line(100., 0.))],
+                vec![TM2DwO::default(); 4]),
+        ];
+        trim_shapes(&trim, &mut after, 0.);
+        let DrawItem::Copies(copies) = &after[0] else { panic!() };
+        assert_eq!(copies.len(), 4);
+        for (index, (group, _)) in copies.iter().enumerate() {
+            let [DrawItem::Shape(path)] = &group[..] else { panic!() };
+            assert_eq!(path_length(path), if index == 3 { 100. } else { 0. });
+        }
+        after.push(fill_style());
+        let mut context = TestContext::default();
+        context.render_shapes(&TM2DwO::default(), &after);
+        assert_eq!(context.draw_count, 4);
+
+        let mut before: Vec<DrawItem<BezPath, TestStyle, kurbo::Affine>> =
+            vec![DrawItem::Shape(line(100., 0.))];
+        trim_shapes(&trim, &mut before, 0.);
+        let DrawItem::Shape(path) = before.remove(0) else { panic!() };
+        let batch: DrawItem<BezPath, TestStyle, kurbo::Affine> =
+            DrawItem::Group(vec![DrawItem::Shape(path)], vec![TM2DwO::default(); 4]);
+        let DrawItem::Group(group, transforms) = batch else { panic!() };
+        let [DrawItem::Shape(path)] = &group[..] else { panic!() };
+        assert_eq!(transforms.len(), 4);
+        assert_eq!(path_length(path), 25.);
+    }
+
+    #[test] fn sequential_trim_measures_group_paths_before_group_transform() {
+        let trim = trim(0., 25., 0., 2);
+        let mut draws: Vec<DrawItem<BezPath, TestStyle, kurbo::Affine>> = vec![
+            DrawItem::Shape(line(100., 0.)),
+            DrawItem::Group(vec![DrawItem::Shape(line(100., 0.))],
+                vec![TM2DwO(kurbo::Affine::scale(10.), 1.)]),
+        ];
+
+        trim_shapes(&trim, &mut draws, 0.);
+        let DrawItem::Group(group, _) = &draws[1] else { panic!() };
+        let [DrawItem::Shape(path)] = &group[..] else { panic!() };
+        assert_eq!(path.segments().next().unwrap().arclen(0.1), 50.);
     }
 }

@@ -1,7 +1,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_repr::{Serialize_repr, Deserialize_repr}; // for the underlying repr of a C-like enum
-use crate::core::helpers::{IntBool, RGBA, Vec2D, ColorList, AnyAsset, defaults,
+use crate::core::helpers::{IntBool, RGBA, Vec2D, AnyAsset, defaults,
     str_to_rgba, str_from_rgba,
 };
 use crate::core::schema_impl::{des_nonempty_vec, des_strarray, des_static_value};
@@ -474,9 +474,9 @@ pub struct FreePath {  #[serde(flatten)]        pub  base: ShapeBase,
     interleaving offsets and color components in weird ways. There are two possible layouts:
     Without alpha, the colors are a sequence of 'offset, r, g, b'; With alpha,
     same as above but at the end of the list there is a sequence of 'offset, alpha'. */
-#[derive(Deserialize, Serialize)] pub struct GradientColors {
+#[derive(Serialize)] pub struct GradientColors {
     /** Number of colors in `k` */ #[serde(rename = "p")] pub cnt: u32,
-    #[serde(rename = "k")] pub cl: AnimatedProperty<ColorList>, // MultiD
+    #[serde(rename = "k")] pub cl: AnimatedProperty<Vec<f32>>, // MultiD
 }
 
 #[derive(Deserialize, Serialize)] pub struct FillStrokeGrad {
@@ -883,7 +883,6 @@ type Sound = FileAsset; // External sound, from the LottieFiles/Bodymovin asset 
 #[derive(Deserialize, Serialize)] pub struct Precomp {
     #[serde(flatten)] pub base: AssetBase,
     pub layers: Vec<LayerItem>,
-    #[serde(default = "defaults::animation_fr")] pub fr: f32,
     #[serde(default, rename = "xt")] /** Extra composition */ pub extra: IntBool,
 }
 

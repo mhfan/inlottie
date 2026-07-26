@@ -96,48 +96,6 @@ impl Serialize for Vec2D {
         Result<S::Ok, S::Error> { [self.x, self.y].serialize(serializer) }
 }
 
-#[derive(Clone)] pub struct ColorList(pub Vec<(f32, RGBA)>); // (offset, color) for Gradient
-
-impl  core::ops::Deref for ColorList {  type Target = [(f32, RGBA)];
-    fn deref(&self) -> &Self::Target { &self.0 }
-}
-
-impl<'de> Deserialize<'de> for ColorList {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let data = Vec::<f32>::deserialize(deserializer)?;
-        let len = data.len();   let cnt = len / 6;  // XXX:
-
-        let cnt = if len.is_multiple_of(6) && !(len.is_multiple_of(4) && (0..cnt)
-            .any(|i| data[i * 4] != data[cnt * 4 + i * 2])) { cnt } else { len / 4 };
-
-        Ok(Self(if len == cnt * 4 { // RGB color
-            data.chunks(4).map(|chunk| (chunk[0],
-                RGBA::new_f32(chunk[1], chunk[2], chunk[3], 1.))).collect()
-        } else  if len == cnt * (4 + 2) {   let cnt = cnt * 4;  // RGBA color
-            data[0..cnt].chunks(4).zip(data[cnt..].chunks(2))
-                .map(|(chunk, opacity)| (chunk[0], // == opacity[0]
-                RGBA::new_f32(chunk[1], chunk[2], chunk[3], opacity[1]))).collect()
-        } else {    // issue_1732.json
-            eprintln!("Inconsistent ColorList: {cnt} * 4 != {}", data.len());
-            data.chunks_exact(4).map(|chunk| (chunk[0],
-                RGBA::new_f32(chunk[1], chunk[2], chunk[3], 1.))).collect()
-        }))
-    }
-}
-
-impl Serialize for ColorList {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut data = self.0.iter().flat_map(|&(offset, color)|
-            [offset, color.r as f32 / 255., color.g as f32 / 255.,
-                     color.b as f32 / 255.]).collect::<Vec<_>>();
-
-        if  self.0.iter().any(|&(_, color)| color.a < 255) {
-            data.extend(self.0.iter().flat_map(|&(offset, color)|
-                [offset, color.a as f32 / 255.]));
-        }   data.serialize(serializer)
-    }
-}
-
 use crate::core::schema::*;
 
 pub(crate) mod defaults { #![allow(unused)]
@@ -184,6 +142,17 @@ pub use crate::core::schema_impl::{AnyAsset, AnyValue, UnresolvedSlot};
         let to = RGBA::new_u8(0, 100, 50, 0);
         let color = math::Tween::lerp(&from, &to, 0.5);
         assert_eq!((color.r, color.g, color.b, color.a), (127, 150, 75, 25));
+    }
+
+    #[test] fn spatial_bezier_uses_arc_length_position() {
+        let (from, to) = (Vec2D { x: 0., y: 0. }, Vec2D { x: 100., y: 0. });
+        let extra = PositionExtra {
+            to: Vec2D { x: 0., y: 100. },
+            ti: Vec2D { x: 0., y: 100. },
+        };
+        let mid = math::Tween::bezc(&from, &to, 0.5, &extra);
+        assert!((mid.x - 50.).abs() < 1e-3);
+        assert!((mid.y - 75.).abs() < 1e-3);
     }
 }
 
@@ -375,7 +344,10 @@ impl From<[f32; 4]> for CubicBezierEasing {
     fn from(cp: [f32; 4]) -> Self { Self::new((cp[0], cp[1]), (cp[2], cp[3])) }
 }
 
-pub trait Tween { fn lerp(&self, other: &Self, t: f32) -> Self; // Linear intERPolation
+pub trait Tween: Sized { fn lerp(&self, other: &Self, t: f32) -> Self; // Linear intERPolation
+    fn lerp_by(&self, other: &Self, factor: &mut impl FnMut(usize) -> f32) -> Self {
+        self.lerp(other, factor(0))
+    }
     fn bezc(&self, _: &Self, _: f32, _: &PositionExtra) -> Self
         where Self: Sized { unreachable!() }    // Cubic Bezier interpolation
 }
@@ -389,6 +361,11 @@ impl Tween for Vec2D {
     fn lerp(&self, other: &Self, t: f32) -> Self {
         Self {  x: self.x + (other.x - self.x) * t,
                 y: self.y + (other.y - self.y) * t, }
+    }
+
+    fn lerp_by(&self, other: &Self, factor: &mut impl FnMut(usize) -> f32) -> Self {
+        Self { x: self.x + (other.x - self.x) * factor(0),
+               y: self.y + (other.y - self.y) * factor(1) }
     }
 
     fn bezc(&self, other: &Self, t: f32, extra: &PositionExtra) -> Self {
@@ -412,14 +389,8 @@ impl Tween for Vec2D {
         let curve = CubicBez::new::<Point>((*self).into(), (*self + extra.to).into(),
             (*other + extra.ti).into(), (*other).into());
 
-        let (mut tmin, mut tmax) = (0., 1.);
         let tlen = curve.arclen(ACCURACY_TOLERANCE) * t as f64;
-        while ACCURACY_TOLERANCE < tmax - tmin {
-            let tmid = (tmin + tmax) / 2.;
-            if curve.subsegment(0.0..tmid).arclen(ACCURACY_TOLERANCE) < tlen {
-                tmin = tmid; } else { tmax = tmid; }
-        }   let pt = curve.eval((tmin + tmax) / 2.);
-        //let pt = curve.eval(curve.inv_arclen(tlen, ACCURACY_TOLERANCE));
+        let pt = curve.eval(curve.inv_arclen(tlen, ACCURACY_TOLERANCE));
 
         Self { x: pt.x as _, y: pt.y as _ } //(pt.x as _, pt.y as _).into()
     }
@@ -433,6 +404,15 @@ impl Tween for RGBA {
                 b: channel(self.b, other.b),
                 a: channel(self.a, other.a),
         }
+    }
+
+    fn lerp_by(&self, other: &Self, factor: &mut impl FnMut(usize) -> f32) -> Self {
+        let channel = |from: u8, to: u8, t|
+            (from as f32 + (to as f32 - from as f32) * t) as u8;
+        Self { r: channel(self.r, other.r, factor(0)),
+               g: channel(self.g, other.g, factor(1)),
+               b: channel(self.b, other.b, factor(2)),
+               a: channel(self.a, other.a, factor(3)) }
     }
 }
 
@@ -455,17 +435,15 @@ impl Tween for Bezier {
     }
 } */
 
-impl Tween for ColorList {
-    fn lerp(&self, other: &Self, t: f32) -> Self {
-        Self(self.0.iter().zip(other.0.iter()).map(|(first, second)|
-            (first.0 + (second.0 - first.0) * t, first.1.lerp(&second.1, t))).collect())
-    }
-}
-
 impl Tween for Vec<f32> {   // aka MultiD
     fn lerp(&self, other: &Self, t: f32) -> Self {
         self.iter().zip(other.iter()).map(|val| //val.0.lerp(val.1, t)
             *val.0 + (*val.1 - *val.0) * t).collect()
+    }
+
+    fn lerp_by(&self, other: &Self, factor: &mut impl FnMut(usize) -> f32) -> Self {
+        self.iter().zip(other).enumerate().map(|(index, (first, second))|
+            first + (second - first) * factor(index)).collect()
     }
 }
 
