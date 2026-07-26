@@ -14,9 +14,6 @@ use crate::core::schema_impl::{des_nonempty_vec, des_strarray, des_static_value}
 ///
 /// https://github.com/LottieFiles/lottie-docs/commits/main/docs/schema
 #[derive(Deserialize, Serialize)] pub struct Animation {
-    #[serde(skip)] pub elapsed: f32,    // for rendering
-    #[serde(skip)] pub fnth: f32,
-
     #[serde(default = "defaults::animation_fr")] /** Framerate in FPS */ pub fr: f32,
     /// Whether the animation has 3D layers.
     /// Lottie doesn't actually support 3D stuff so this should always be `0`.

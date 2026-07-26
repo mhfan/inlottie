@@ -67,7 +67,8 @@ impl ApplicationHandler for WinitApp {
                 #[cfg(feature =  "lottie")]
                 Key::Character("n") | Key::Character("N") if self.paused => {
                     let AnimGraph::Lottie(lottie) = &self.graph else { return };
-                    self.prevt = Instant::now() - Duration::from_millis((1000. / lottie.fr) as _);
+                    self.prevt = Instant::now() - Duration::from_millis(
+                        (1000. / lottie.animation().fr) as _);
                     self.request_redraw();  use std::time::Duration;  // XXX:
                 }   _ => (),
             }
@@ -141,11 +142,11 @@ struct WinitApp {
     window: Option<Window>,
 }
 
-#[cfg(feature =  "lottie")] use inlottie::core::{helpers::RGBA, schema::Animation};
+#[cfg(feature =  "lottie")] use inlottie::core::{helpers::RGBA, render::LottieRuntime};
 #[cfg(feature = "rive-rs")] use inlottie::rive_nvg::RiveNVG;
 
 enum AnimGraph {
-    #[cfg(feature =  "lottie")] Lottie(Box<Animation>),
+    #[cfg(feature =  "lottie")] Lottie(Box<LottieRuntime<femtovg::Transform2D>>),
     #[cfg(feature = "rive-rs")]
     Rive((Box<dyn rive_rs::Scene<RiveNVG<OpenGl>>>, rive_rs::Viewport)),
     #[allow(clippy::upper_case_acronyms)] SVG(Box<usvg::Tree>),
@@ -423,8 +424,9 @@ impl WinitApp {
         //path.rfind('.').map_or("", |i| &path[1 + i..])
         //if fs::metadata(&path).is_ok() {} //if path.exists() {}
         self.graph = match path.extension().and_then(|ext| ext.to_str()) {
-            #[cfg(feature =  "lottie")] Some("json") =>
-                AnimGraph::Lottie(Box::new(Animation::from_reader(fs::File::open(path)?)?)),
+            #[cfg(feature =  "lottie")] Some("json") => {
+                AnimGraph::Lottie(Box::new(LottieRuntime::from_reader(fs::File::open(path)?)?))
+            }
 
             #[cfg(feature = "rive-rs")] Some("riv")  =>
                 AnimGraph::Rive((RiveNVG::new_scene(
@@ -450,8 +452,10 @@ impl WinitApp {
         } else { (ctx2d.width() as _, ctx2d.height() as _) };
 
         let csize = match &mut self.graph {
-            #[cfg(feature =  "lottie")]
-            AnimGraph::Lottie(lottie) => (lottie.w as _, lottie.h as _),
+            #[cfg(feature =  "lottie")] AnimGraph::Lottie(lottie) => {
+                let animation = lottie.animation();
+                (animation.w as _, animation.h as _)
+            }
 
             #[cfg(feature = "rive-rs")] AnimGraph::Rive((_, viewport)) => {
                 viewport.resize(wsize.0 as _, wsize.1 as _);
@@ -477,7 +481,7 @@ impl WinitApp {
             #[cfg(feature =  "lottie")] AnimGraph::Lottie(lottie) =>
                 if !(lottie.render_next_frame(ctx2d, _elapsed.as_secs_f32(),
                     Some(RGBA::new_f32(0.4, 0.4, 0.4, 1.)))) { return }
-                // TODO: draw frame time (lottie.fnth) on screen?
+                // TODO: draw frame time (lottie.frame()) on screen?
 
             #[cfg(feature = "rive-rs")]
             AnimGraph::Rive((scene, viewport)) =>
