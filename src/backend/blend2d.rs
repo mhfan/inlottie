@@ -26,17 +26,24 @@ impl RenderContext for BLContext {
     }
 
     fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA) {
-        self.fill_rect_i_rgba32(&(x, y, w, h).into(), color.into())
-            .expect("failed to clear Blend2D rectangle");
-        //self.clear_rect_d(&(x, y, w, h).into()); //self.clear_all();
+        if color.a < u8::MAX {
+            self.clear_rect_d(&(x as f64, y as f64, w as f64, h as f64).into())
+                .expect("failed to clear Blend2D rectangle");
+        }
+        if color.a != 0 {
+            self.fill_rect_i_rgba32(&(x, y, w, h).into(), color.into())
+                .expect("failed to fill Blend2D background");
+        }
     }
-    fn reset_transform(&mut self, trfm: Option<&Self::TM2D>) {
-        self.reset_transform(trfm);     //self.set_global_alpha(1.);
-    }   // XXX: BLContext.set_fill/stroke_alpha()
-    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) -> Self::TM2D {
-        let last_trfm = self.get_transform(1);
+    fn save_state(&mut self) {
+        self.save().expect("failed to save Blend2D state");
+    }
+    fn restore_state(&mut self) {
+        self.restore().expect("failed to restore Blend2D state");
+    }
+    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) {
         if let Some(opacity) = opacity { self.set_global_alpha(opacity as _) }
-        self.reset_transform(Some(trfm));     last_trfm
+        self.reset_transform(Some(trfm));
     }
 
     fn fill_stroke(&mut self, path: &Self::VGPath,
@@ -70,14 +77,13 @@ impl RenderContext for BLContext {
                     LineCap::Square => BL_STROKE_CAP_SQUARE,
                 });
 
-                if 2 < dash.len() {
-                    self.set_stroke_dash(dash[0] as _,
-                        &dash.iter().skip(1).map(|&x| x as _).collect::<Vec<_>>())
-                        .expect("failed to set Blend2D stroke dash");
-                    //self.stroke_geometry(&path.make_dash(dash[0], &dash[1..]));
-                } else {
+                if dash.1.is_empty() {
                     self.set_stroke_dash(0., &[])
                         .expect("failed to clear Blend2D stroke dash");
+                } else {
+                    self.set_stroke_dash(dash.0 as _,
+                        &dash.1.iter().map(|&x| x as _).collect::<Vec<_>>())
+                        .expect("failed to set Blend2D stroke dash");
                 }
 
                 self.set_stroke_style(style.0.as_b2d_style());

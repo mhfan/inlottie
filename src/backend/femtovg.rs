@@ -92,14 +92,11 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
     fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA) {
         self.clear_rect(x, y, w, h, color.into());
     }
-    fn reset_transform(&mut self, trfm: Option<&Self::TM2D>) {
-        self.reset_transform();     //self.set_global_alpha(1.);
-        if let Some(trfm) = trfm { self.set_transform(trfm) }
-    }
-    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) -> Self::TM2D {
-        let last_trfm = self.transform();
+    fn save_state(&mut self) { self.save() }
+    fn restore_state(&mut self) { self.restore() }
+    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) {
         if let Some(opacity) = opacity { self.set_global_alpha(opacity) }
-        self.set_transform(trfm);   last_trfm
+        self.set_transform(trfm);
     }
 
     fn fill_stroke(&mut self, path: &Self::VGPath,
@@ -116,8 +113,7 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
                 }); self.fill_path(path, paint);
             }
 
-            FSOpts::Stroke { width, limit,
-                join, cap, dash } => {
+            FSOpts::Stroke { width, limit, join, cap, dash } => {
                 paint.set_line_width (*width);
                 paint.set_miter_limit(*limit);
 
@@ -130,12 +126,12 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
                     LineCap::Square => FLC::Square,
                 });
 
-                if dash.len() < 3 {
+                if dash.1.is_empty() {
                     paint.set_line_dash(&[]);
                     paint.set_line_dash_offset(0.);
                 } else {
-                    paint.set_line_dash(&dash[1..]);
-                    paint.set_line_dash_offset(dash[0]);
+                    paint.set_line_dash(&dash.1);
+                    paint.set_line_dash_offset(dash.0);
                 }   self.stroke_path(path, paint);
             }
         }
@@ -209,9 +205,10 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
                     w.saturating_sub((lx as u32).saturating_mul(2)),
                     h.saturating_sub((ty as u32).saturating_mul(2)), CLEAR_COLOR);
 
-                let last_trfm = self.apply_transform(&ltm.0, Some(ltm.1));
+                self.save_state();
+                self.apply_transform(&ltm.0, Some(ltm.1));
                 self.fill_path(&path, &mpaint);
-                self.reset_transform();    self.set_transform(&last_trfm);  // XXX:
+                self.restore_state();
 
                 let cop = match mask.mode {
                     MaskMode::Add       => Some(CompOp::DestinationIn),

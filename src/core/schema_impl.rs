@@ -13,7 +13,7 @@ where D: Deserializer<'de>, T: Deserialize<'de> {
     })
 }
 
-impl FontList { #[inline] pub fn is_empty(&self) -> bool { self.list.is_empty() } }
+impl FontList { pub fn is_empty(&self) -> bool { self.list.is_empty() } }
 impl<'de> Deserialize<'de> for TextGrouping {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = f64::deserialize(d)?;
@@ -239,19 +239,19 @@ impl<'de> Deserialize<'de> for AnyAsset {
 
 #[derive(Clone, Serialize)] pub struct AnyValue(serde_json::Value);
 impl<'de> Deserialize<'de> for AnyValue {
-    #[inline] fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(d)?;
         eprintln!("Unexpected value: {value}");     Ok(Self(value))
     }
 }
 
 impl<T> KeyframeBase<T> {
-    #[inline] pub fn as_array(&self) -> &[T] {
+    pub fn as_array(&self) -> &[T] {
         if let Some(ArrayScalar::Array(val)) = &self.value { val } else {
             unreachable!("Expected array, encountered scalar or none") }
     }
 
-    #[inline] pub fn as_scalar(&self) -> &T {
+    pub fn as_scalar(&self) -> &T {
         match &self.value { None => unreachable!(),
             Some(ArrayScalar::Scalar(val)) => val,
             Some(ArrayScalar::Array(val)) => &val[0],
@@ -260,19 +260,19 @@ impl<T> KeyframeBase<T> {
 }
 
 impl<T> AnimatedProperty<T> {
-    #[inline] pub fn from_value(val: T) -> Self {
+    pub fn from_value(val: T) -> Self {
         Self { source: PropertySource::Inline(AnimatedValue::Static(val)),
             #[cfg(feature = "expression")] expr: None,
         }
     }
 
-    #[inline] pub fn is_animated(&self) -> bool {
+    pub fn is_animated(&self) -> bool {
         matches!(&self.source,
             PropertySource::Inline(AnimatedValue::Animated(_)) |
             PropertySource::Slot { fallback: Some(AnimatedValue::Animated(_)), .. })
     }
 
-    #[inline] pub fn slot_id(&self) -> Option<&str> {
+    pub fn slot_id(&self) -> Option<&str> {
         match &self.source {
             PropertySource::Slot { id, .. } => Some(id),
             PropertySource::Inline(_) => None,
@@ -297,7 +297,7 @@ impl<T: Clone + math::Tween> AnimatedProperty<T> {
                 if coll[len].start <= fnth { return Ok(coll[len].as_scalar().clone()) }
                 while 0 < len { len -= 1; if coll[len].start <= fnth { break } }
 
-                #[inline] fn get_scalar(val: &ArrayScalar<f32>) -> f32 { match val {
+                fn get_scalar(val: &ArrayScalar<f32>) -> f32 { match val {
                     ArrayScalar::Array(val) => val[0],
                     ArrayScalar::Scalar(val) => *val,
                 } }
@@ -320,7 +320,7 @@ impl<T: Clone + math::Tween> AnimatedProperty<T> {
         })
     }
 
-    #[inline] pub fn get_value(&self, fnth: f32) -> T {
+    pub fn get_value(&self, fnth: f32) -> T {
         self.try_get_value(fnth).unwrap_or_else(|slot|
             panic!("slot `{}` must be resolved before evaluation", slot.0))
     }
@@ -337,13 +337,13 @@ impl std::fmt::Display for UnresolvedSlot<'_> {
 impl std::error::Error for UnresolvedSlot<'_> {}
 
 impl ShapeBase {
-    #[inline] pub fn is_ccw(&self) -> bool {
+    pub fn is_ccw(&self) -> bool {
         self.dir.is_some_and(|d| matches!(d, ShapeDirection::Reversed))
     }
 }
 
 impl LayerItem {
-    #[inline] pub fn visual_layer(&self) -> Option<&VisualLayer> {
+    pub fn visual_layer(&self) -> Option<&VisualLayer> {
         Some(match self {
             Self::PrecompLayer(layer) => &layer.vl,
             Self::SolidColor(layer) => &layer.vl,
@@ -358,14 +358,44 @@ impl LayerItem {
 }
 
 impl VisualLayer {
-    #[inline] pub fn should_hide(&self, fnth: f32) -> bool {
-        self.base.hd || fnth < self.base.ip || self.base.op <= fnth || fnth < self.base.st
+    pub fn should_hide(&self, fnth: f32) -> bool {
+        self.base.hd || fnth < self.base.ip || self.base.op <= fnth
+    }
+}
+
+impl LayerInfo {
+    pub fn local_frame(&self, global: f32) -> Option<f32> {
+        let local = global / self.sr - self.st;
+        (self.sr != 0. && self.sr.is_finite() && local.is_finite()).then_some(local)
     }
 }
 
 #[cfg(test)] mod tests { use super::*;
     use serde::ser::SerializeSeq;
     use serde_test::{assert_tokens, Token};
+
+    #[test] fn layer_local_frame_applies_stretch_before_start_time() {
+        let layer: LayerItem = serde_json::from_str(
+            r#"{"ty":3,"st":10,"sr":2,"ip":0,"op":100,"ks":{}}"#).unwrap();
+        let layer = layer.visual_layer().unwrap();
+
+        assert_eq!(layer.base.local_frame(30.), Some(5.));
+        assert!(!layer.should_hide(5.));
+
+        let reversed: LayerItem = serde_json::from_str(
+            r#"{"ty":3,"st":3,"sr":-2,"ip":0,"op":100,"ks":{}}"#).unwrap();
+        assert_eq!(reversed.visual_layer().unwrap().base.local_frame(20.), Some(-13.));
+    }
+
+    #[test] fn layer_local_frame_rejects_invalid_time_stretch() {
+        for sr in [0., f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut layer: LayerItem = serde_json::from_str(
+                r#"{"ty":3,"st":0,"ip":0,"op":100,"ks":{}}"#).unwrap();
+            let LayerItem::Null(layer) = &mut layer else { panic!() };
+            layer.base.sr = sr;
+            assert_eq!(layer.base.local_frame(10.), None);
+        }
+    }
 
     #[test] fn enum_deserialization_rejects_unknown_types() {
         assert!(serde_json::from_str::<LayerItem>(r#"{"ty":99}"#).is_err());

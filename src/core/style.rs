@@ -106,6 +106,9 @@ impl<MC: MatrixConv> TM2DwO<MC> {
     #[inline] pub fn compose(mut self, other: &Self) -> Self {
         self.0.premul(&other.0);    self.1 *= other.1;  self
     }
+    #[inline] pub fn compose_matrix(mut self, other: &MC) -> Self {
+        self.0.premul(other);  self
+    }
 }
 
 impl Transform {
@@ -173,16 +176,18 @@ impl Transform {
 }
 
 impl VisualLayer {
-    pub fn get_matrix<MC: MatrixConv>(&self, layers: &[LayerItem], fnth: f32) -> TM2DwO<MC> {
-        let mut ctm = self.ks.to_matrix(fnth, self.ao);
+    pub fn get_matrix<MC: MatrixConv>(&self,
+        layers: &[LayerItem], global: f32) -> Option<TM2DwO<MC>> {
+        let mut ctm = self.ks.to_matrix(self.base.local_frame(global)?, self.ao);
         let (mut parent, mut seen) = (self.base.parent, std::collections::HashSet::new());
         while let Some(pid) = parent {
             if !seen.insert(pid) { break }
             let Some(vl) = layers.iter().find_map(|layer| layer.visual_layer()
                 .filter(|vl| vl.base.ind == Some(pid))) else { break };
-            ctm = ctm.compose(&vl.ks.to_matrix(fnth, vl.ao));
+            ctm = ctm.compose_matrix(
+                &vl.ks.to_matrix(vl.base.local_frame(global)?, vl.ao).0);
             parent = vl.base.parent;
-        }   ctm
+        }   Some(ctm)
     }
 }
 
@@ -243,8 +248,8 @@ pub trait StyleConv {
 }
 
 pub enum FSOpts {   Fill(FillRule),
-    /// dash\[0\] is offset indeed; XXX: use SmallVec for dash?
-    Stroke { width: f32, limit: f32, join: LineJoin, cap: LineCap, dash: Vec<f32>, }
+    Stroke { width: f32, limit: f32, join: LineJoin, cap: LineCap,
+        dash: (f32, Vec<f32>), }
 }
 
 impl FillStrokeGrad {
@@ -293,35 +298,38 @@ impl FillStrokeGrad {
         (style, fso)
     }
 
-    fn get_dash(&self, fnth: f32) -> Vec<f32> {
-        let (mut dpat, mut sum) = (vec![], 0.);
-        if let FillStroke::Stroke(stroke) = &self.base {
-            let len = stroke.dash.len();
-            if  len < 2 { return dpat }
+    fn get_dash(&self, fnth: f32) -> (f32, Vec<f32>) {
+        let FillStroke::Stroke(stroke) = &self.base else { return (0., Vec::new()) };
+        let mut pattern = Vec::with_capacity(stroke.dash.len());
+        let (mut offset, mut sum) = (0., 0.);
 
-            dpat.reserve(len);   dpat.push(0.);
-            for sd in &stroke.dash {
-                let value = sd.value.get_value(fnth);
-                match sd.r#type {   // Offset should be at end of the array?
-                    StrokeDashType::Offset => dpat[0] = value,
-                    StrokeDashType::Length | StrokeDashType::Gap => {
-                        if value < 0. { return Vec::new() }
-                        dpat.push(value);   sum += value;
-
-                        debug_assert!(dpat.len() % 2 ==
-                            if matches!(sd.r#type, StrokeDashType::Gap) { 1 } else { 0 });
-                    }   // Length and Gap should be alternating and positive
+        for (index, dash) in stroke.dash.iter().enumerate() {
+            let value = dash.value.get_value(fnth);
+            match dash.r#type {
+                StrokeDashType::Offset if index + 1 == stroke.dash.len() => offset = value,
+                StrokeDashType::Offset => return (0., Vec::new()),
+                kind => {
+                    let expected = if pattern.len() % 2 == 0 {
+                             StrokeDashType::Length
+                    } else { StrokeDashType::Gap };
+                    if !matches!((kind, expected),
+                        (StrokeDashType::Length, StrokeDashType::Length) |
+                        (StrokeDashType::Gap, StrokeDashType::Gap)) || value < 0. {
+                        return (0., Vec::new())
+                    }
+                    pattern.push(value); sum += value;
                 }
             }
         }
+        if pattern.is_empty() || sum == 0. { return (0., Vec::new()) }
+        if pattern.len() % 2 == 1 { pattern.extend_from_within(..); }
 
-        if sum < f32::EPSILON { dpat.clear(); }   dpat
-        //if dpat.len() % 2 == 0 { dpat.extend_from_slice(&dpat[1..].clone()); } // XXX:
+        (offset, pattern)
     }
 }
 
 #[cfg(test)] mod tests {
-    use crate::core::schema::Animation;
+    use crate::core::schema::{Animation, ShapeItem};
 
     #[test] fn layer_matrix_includes_all_ancestors_and_tolerates_missing_parent() {
         let animation: Animation = serde_json::from_str(r#"{ "layers": [
@@ -332,11 +340,56 @@ impl FillStrokeGrad {
         ] }"#).unwrap();
 
         let child = animation.layers[2].visual_layer().unwrap();
-        assert_eq!(child.get_matrix::<kurbo::Affine>(&animation.layers, 0.).0.as_coeffs(),
+        assert_eq!(child.get_matrix::<kurbo::Affine>(&animation.layers, 0.)
+            .unwrap().0.as_coeffs(),
             [1., 0., 0., 1., 13., 24.]);
 
         let orphan = animation.layers[3].visual_layer().unwrap();
-        assert_eq!(orphan.get_matrix::<kurbo::Affine>(&animation.layers, 0.).0.as_coeffs(),
+        assert_eq!(orphan.get_matrix::<kurbo::Affine>(&animation.layers, 0.)
+            .unwrap().0.as_coeffs(),
             [1., 0., 0., 1., 5., 6.]);
+    }
+
+    #[test] fn parent_layers_contribute_transform_but_not_opacity() {
+        let animation: Animation = serde_json::from_str(r#"{ "layers": [
+            {"ty":3,"ind":1,"hd":true,"st":0,"ip":0,"op":10,
+                "ks":{"p":{"k":[10,0]},"o":{"k":25}}},
+            {"ty":3,"ind":2,"parent":1,"st":0,"ip":0,"op":10,
+                "ks":{"p":{"k":[0,20]},"o":{"k":50}}},
+            {"ty":3,"ind":3,"parent":2,"st":0,"ip":0,"op":10,
+                "ks":{"p":{"k":[3,4]},"o":{"k":80}}}
+        ] }"#).unwrap();
+
+        let child = animation.layers[2].visual_layer().unwrap();
+        let matrix = child.get_matrix::<kurbo::Affine>(&animation.layers, 0.).unwrap();
+        assert_eq!(matrix.0.as_coeffs(), [1., 0., 0., 1., 13., 24.]);
+        assert_eq!(matrix.1, 0.8);
+    }
+
+    fn stroke_dash(entries: &str) -> (f32, Vec<f32>) {
+        let json = format!(r#"{{
+            "ty":"st","o":{{"k":100}},"c":{{"k":[1,0,0]}},"w":{{"k":1}},
+            "lc":1,"lj":1,"ml":4,"d":[{entries}]
+        }}"#);
+        let ShapeItem::Stroke(stroke) = serde_json::from_str(&json).unwrap() else { panic!() };
+        stroke.get_dash(0.)
+    }
+
+    #[test] fn dash_expands_odd_patterns_and_keeps_trailing_offset() {
+        assert_eq!(stroke_dash(r#"{"n":"d","v":{"k":4}}"#), (0., vec![4., 4.]));
+        assert_eq!(stroke_dash(concat!(
+            r#"{"n":"d","v":{"k":4}},{"n":"g","v":{"k":8}},"#,
+            r#"{"n":"d","v":{"k":16}},{"n":"o","v":{"k":-3}}"#,
+        )), (-3., vec![4., 8., 16., 4., 8., 16.]));
+    }
+
+    #[test] fn dash_rejects_invalid_sequences_and_lengths() {
+        assert!(stroke_dash(r#"{"n":"g","v":{"k":4}}"#).1.is_empty());
+        assert!(stroke_dash(concat!(
+            r#"{"n":"d","v":{"k":4}},{"n":"o","v":{"k":1}},"#,
+            r#"{"n":"g","v":{"k":8}}"#,
+        )).1.is_empty());
+        assert!(stroke_dash(r#"{"n":"d","v":{"k":-1}}"#).1.is_empty());
+        assert!(stroke_dash(r#"{"n":"d","v":{"k":0}}"#).1.is_empty());
     }
 }

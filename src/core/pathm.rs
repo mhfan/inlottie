@@ -90,10 +90,11 @@ pub trait PathBuilder {     //type Point; type Path;
         }); pb
     }
 
-    #[inline] fn make_dash(&self, offset: f32, pattern: &[f32]) -> Self where Self: Sized {
+    /* kurbo::dash requires &[f64], so this allocates only to convert the pattern.
+    fn make_dash(&self, offset: f32, pattern: &[f32]) -> Self where Self: Sized {
         Self::from_kurbo(kurbo::dash(self.to_kurbo().iter(), offset as _,
             &pattern.iter().map(|&v| v as f64).collect::<Vec<_>>()).collect())
-    }
+    } */
 
     // https://lottie.github.io/lottie-spec/latest/specs/shapes/#trim-path
     fn trim_path(&self, start: f64, trim: f64) -> Self where Self: Sized {
@@ -131,7 +132,7 @@ impl MeasuredPath {
             return self.path.clone()
         }
         if self.length == 0. { return BezPath::new() }
-        let mut output = vec![];
+        let mut output = Vec::with_capacity(self.segments.len() * ranges.len());
 
         for &(from, to) in ranges {
             let (from, to, mut offset) = (
@@ -252,42 +253,49 @@ impl PathFactory for Rectangle { #[allow(unreachable_code)]
 
 impl PathFactory for Polystar {
     fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
-        let center = self.pos.get_value(fnth);
-        let (or, nvp) = (self.or.get_value(fnth), self.pt.get_value(fnth));
-        let orr = self.os.get_value(fnth) * PI / 2. / 100. / nvp;  // XXX:
-
-        let ir  = self.ir.as_ref().map_or(0.,   // self.sy == StarType::Star
-            |ir| ir.get_value(fnth));
-        let irr = self.is.as_ref().map_or(0.,
-            |is| is.get_value(fnth) * PI / 2. / 100. / nvp);
-
+        let points = self.pt.get_value(fnth).round();
+        if !points.is_finite() || points < 1. || points > u16::MAX as f32 {
+            return PB::new(0)
+        }
         let is_star = matches!(self.sy, StarType::Star);
+        let center = self.pos.get_value(fnth);
+
+        let vertex_count = points as u32 * if is_star { 2 } else { 1 };
+        let (outer_radius, inner_radius) = (self.or.get_value(fnth),
+            self.ir.as_ref().map_or(0., |ir| ir.get_value(fnth)));
+        let roundness = PI / 2. / 100. / points;
+        let (outer_roundness, inner_roundness) = (
+            self.os.get_value(fnth) * roundness,
+            self.is.as_ref().map_or(0., |is| is.get_value(fnth) * roundness));
+
         let mut angle = -PI / 2. + self.rotation.get_value(fnth).to_radians();
         let angle_step = if is_star { PI } else { PI * 2. } /
-            if self.base.is_ccw() { -nvp } else { nvp };
-        let nvp = nvp as u32;
+            if self.base.is_ccw() { -points } else { points };
+        let direction = angle_step.signum();
+        let mut path = PB::new(2 + vertex_count);
 
-		let rp = Vec2D::from_polar(angle) * or;
-		let pt = center + rp; 	//let rp = rp * orr;
-        let mut path = PB::new(2 + if is_star { nvp * 2 } else { nvp });
-        path.move_to(pt);
-
-        let rd = Vec2D::from((rp.y, -rp.x));
-        let mut lot = pt - rd * orr;
-
-        let mut add_bezier_to = |radius, rr| {
-            angle += angle_step;
-
-			let rp = Vec2D::from_polar(angle) * radius;
-			let pt = center + rp; 	//let rp = rp * rr;
-
-            let nrd = rd * rr;
-            path.cubic_to(lot, pt + nrd, pt);   lot = pt - nrd
+        let mut append_vertex = |radius, roundness, (first, last_out)| {
+            let radial = Vec2D::from_polar(angle) * radius;
+            let point = center + radial;
+            let tangent = Vec2D::from((-radial.y, radial.x)) * roundness * direction;
+            if first { path.move_to(point); } else {
+                path.cubic_to(last_out, point - tangent, point);
+            }   angle += angle_step;
+            (false, point + tangent)
         };
 
-        for _ in 0..nvp {
-            if is_star { add_bezier_to(ir, irr); } add_bezier_to(or, orr);
-        }   path.close();   path
+        let mut state = append_vertex(outer_radius, outer_roundness, (true, (0., 0.).into()));
+        for index in 1..vertex_count {
+            let inner = is_star && index % 2 == 1;
+            state = append_vertex(
+                if inner { inner_radius } else { outer_radius },
+                if inner { inner_roundness } else { outer_roundness }, state);
+        }
+        let radial = Vec2D::from_polar(angle) * outer_radius;
+        let point = center + radial;
+        let tangent = Vec2D::from((-radial.y, radial.x)) * outer_roundness * direction;
+        path.cubic_to(state.1, point - tangent, point);
+        path.close();   path
     }
 }
 
@@ -329,58 +337,46 @@ impl PathFactory for Ellipse {
 
 impl PathFactory for FreePath {
     fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
-        if !self.base.is_ccw() { return self.shape.to_path(fnth); }
         let curv = self.shape.get_value(fnth);
-        if  curv.vp.is_empty() || curv.vp.len() != curv.it.len() ||
-            curv.it.len() != curv.ot.len() { return PB::new(0) }
-
-        let n = curv.vp.len();
-        let pt = *curv.vp.last().unwrap();
-        let mut path = PB::new(2 + n as u32);   path.move_to(pt);
-
-        for ((&cvp, &cit), (&lvp, &lot)) in
-            curv.vp.iter().zip(curv.it.iter()).rev().skip(1).zip(
-            curv.vp.iter().zip(curv.ot.iter()).rev()) {
-            path.cubic_to(lvp + lot, cvp + cit, cvp);
-        }
-        /* let mut i = n - 1;
-        while 0 < i { let (j, pt) = (i - 1, curv.vp[i]);
-            path.cubic_to(curv.vp[j] + curv.ot[j], pt + curv.it[i], pt);    i -= 1; } */
-
-        if  curv.closed {  let j = n - 1;
-            path.cubic_to(curv.vp[0] + curv.ot[0], pt + curv.it[j], pt);
-            path.close();
-        }   path
+        bezier_path(&curv, self.base.is_ccw())
     }
 }
 
 impl PathFactory for ShapeProperty {    // for mask
     fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB {
         let curv = self.get_value(fnth);
-        if  curv.vp.is_empty() || curv.vp.len() != curv.it.len() ||
-            curv.it.len() != curv.ot.len() { return PB::new(0) }
-
-        let n = curv.vp.len();
-        let pt = *curv.vp.first().unwrap(); //curv.vp[0];
-        let mut path = PB::new(2 + n as u32);   path.move_to(pt);
-
-        /* let _ = curv.vp.iter().zip(curv.it.iter()).cycle().skip(1).take( //.rev()
-                curv.vp.len() - if curv.closed { 0 } else { 1 }).zip(
-                curv.vp.iter().zip(curv.ot.iter())); */
-
-        for ((&cvp, &cit), (&lvp, &lot)) in
-            curv.vp.iter().zip(curv.it.iter()).skip(1).zip(
-            curv.vp.iter().zip(curv.ot.iter())) {
-            path.cubic_to(lvp + lot, cvp + cit, cvp);
-        }
-        /* for i in 1..n { let (j, pt) = (i - 1, &curv.vp[i]);
-            path.cubic_to(curv.vp[j] + curv.ot[j], pt + curv.it[i], pt); } */
-
-        if  curv.closed {  let j = n - 1;
-            path.cubic_to(curv.vp[j] + curv.ot[j], pt + curv.it[0], pt);
-            path.close();
-        }   path
+        bezier_path(&curv, false)
     }
+}
+
+fn bezier_path<PB: PathBuilder>(curve: &crate::core::schema::Bezier, reversed: bool) -> PB {
+    let n = curve.vp.len();
+    if n == 0 || n != curve.it.len() || n != curve.ot.len() {
+        return PB::new(0)
+    }
+
+    let first = if reversed { n - 1 } else { 0 };
+    let mut path = PB::new(2 + n as u32);
+    path.move_to(curve.vp[first]);
+    let mut append = |from: usize, to: usize| {
+        let (out, incoming) = if reversed {
+            (curve.it[from], curve.ot[to])
+        } else {
+            (curve.ot[from], curve.it[to])
+        };
+        path.cubic_to(curve.vp[from] + out,
+            curve.vp[to] + incoming, curve.vp[to]);
+    };
+
+    if reversed {
+        for to in (0..n - 1).rev() { append(to + 1, to); }
+        if curve.closed { append(0, n - 1); }
+    } else {
+        for to in 1..n  { append(to - 1, to); }
+        if curve.closed { append(n - 1, 0); }
+    }
+    if curve.closed { path.close(); }
+    path
 }
 
 #[cfg(test)] mod tests { use super::*;
@@ -407,6 +403,61 @@ impl PathFactory for ShapeProperty {    // for mask
         let shape = AnimatedProperty::from_value(Bezier {
             closed: true, vp: Vec::new(), it: Vec::new(), ot: Vec::new(),
         }); assert!(shape.to_path::<BezPath>(0.).is_empty());
+    }
+
+    #[test] fn reversed_free_path_swaps_tangent_roles_and_closes() {
+        let shape: FreePath = serde_json::from_str(r#"{
+            "ty":"sh","d":3,"ks":{"k":{
+                "c":true,
+                "v":[[0,0],[10,0],[20,0]],
+                "i":[[1,2],[3,4],[5,6]],
+                "o":[[7,8],[9,10],[11,12]]
+            }}
+        }"#).unwrap();
+        use kurbo::{PathEl::*, Point};
+        assert_eq!(shape.to_path::<BezPath>(0.).elements(), &[
+            MoveTo(Point::new(20., 0.)),
+            CurveTo(Point::new(25., 6.), Point::new(19., 10.), Point::new(10., 0.)),
+            CurveTo(Point::new(13., 4.), Point::new(7., 8.), Point::new(0., 0.)),
+            CurveTo(Point::new(1., 2.), Point::new(31., 12.), Point::new(20., 0.)),
+            ClosePath,
+        ]);
+    }
+
+    #[test] fn polystar_rounds_point_count_and_rotates_each_tangent() {
+        let star: Polystar = serde_json::from_str(r#"{
+            "ty":"sr","sy":2,"p":{"k":[0,0]},"pt":{"k":3.6},
+            "or":{"k":10},"os":{"k":100},"r":{"k":0}
+        }"#).unwrap();
+        let path = star.to_path::<BezPath>(0.);
+        assert_eq!(path.elements().iter()
+            .filter(|element| matches!(element, kurbo::PathEl::CurveTo(..))).count(), 4);
+
+        let kurbo::PathEl::CurveTo(ctrl1, ctrl2, end) = path.elements()[1] else { panic!() };
+        let tangent = 10. * PI as f64 / 8.;
+        assert!((ctrl1.x - tangent).abs() < 1e-6 && (ctrl1.y + 10.).abs() < 1e-6);
+        assert!((ctrl2.x - 10.).abs() < 1e-6 && (ctrl2.y + tangent).abs() < 1e-6);
+        assert!((end.x - 10.).abs() < 1e-6 && end.y.abs() < 1e-6);
+    }
+
+    #[test] fn polystar_honors_reversed_direction_and_rejects_invalid_counts() {
+        let reversed: Polystar = serde_json::from_str(r#"{
+            "ty":"sr","d":3,"sy":2,"p":{"k":[0,0]},"pt":{"k":4},
+            "or":{"k":10},"os":{"k":100},"r":{"k":0}
+        }"#).unwrap();
+        let path = reversed.to_path::<BezPath>(0.);
+        let kurbo::PathEl::CurveTo(ctrl1, _, end) = path.elements()[1] else { panic!() };
+        assert!(ctrl1.x < 0. && end.x < 0.);
+
+        let mut invalid: Polystar = serde_json::from_str(r#"{
+            "ty":"sr","sy":2,"p":{"k":[0,0]},"pt":{"k":0},
+            "or":{"k":10},"os":{"k":0},"r":{"k":0}
+        }"#).unwrap();
+        assert!(invalid.to_path::<BezPath>(0.).is_empty());
+        invalid.pt = AnimatedProperty::from_value(f32::NAN);
+        assert!(invalid.to_path::<BezPath>(0.).is_empty());
+        invalid.pt = AnimatedProperty::from_value(u16::MAX as f32 + 1.);
+        assert!(invalid.to_path::<BezPath>(0.).is_empty());
     }
 
     #[test] fn trim_path_wraps_across_the_path_end() {

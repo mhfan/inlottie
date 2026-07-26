@@ -141,7 +141,7 @@ struct WinitApp {
     window: Option<Window>,
 }
 
-#[cfg(feature =  "lottie")] use inlottie::core::schema::Animation;
+#[cfg(feature =  "lottie")] use inlottie::core::{helpers::RGBA, schema::Animation};
 #[cfg(feature = "rive-rs")] use inlottie::rive_nvg::RiveNVG;
 
 enum AnimGraph {
@@ -475,7 +475,8 @@ impl WinitApp {
 
         match &mut self.graph {
             #[cfg(feature =  "lottie")] AnimGraph::Lottie(lottie) =>
-                if !(lottie.render_next_frame(ctx2d, _elapsed.as_secs_f32())) { return }
+                if !(lottie.render_next_frame(ctx2d, _elapsed.as_secs_f32(),
+                    Some(RGBA::new_f32(0.4, 0.4, 0.4, 1.)))) { return }
                 // TODO: draw frame time (lottie.fnth) on screen?
 
             #[cfg(feature = "rive-rs")]
