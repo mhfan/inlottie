@@ -90,7 +90,7 @@ impl Runtime {
         }   self.draw_groups.retain(|group| !group.components.is_empty());
     }
 
-    pub(super) fn apply_draw_rules(&mut self) -> Result<()> {
+    pub(super) fn apply_draw_rules(&mut self, obj_comps: &[Option<u32>]) -> Result<()> {
         // Convert before/after draw targets into graph edges, then emit a stable DFS order.
         let mut rules_by_owner = vec![None; self.components.len()];
         for (index, component) in self.components.iter().enumerate() {
@@ -101,13 +101,20 @@ impl Runtime {
                 }
             }
         }
-        let group_rules: Vec<_> = self.draw_groups.iter().map(|group| {
-            let mut component = Some(group.opacity_component);
-            while let Some(index) = component {
-                if let Some(rules) = rules_by_owner[index as usize] { return Some(rules) }
+        let mut groups_by_rule = vec![Vec::new(); self.components.len()];
+        for (group, value) in self.draw_groups.iter().enumerate() {
+            let mut component = Some(value.opacity_component);
+            while  let Some(index) = component {
+                if let Some(rules) = rules_by_owner[index as usize] {
+                    groups_by_rule[rules as usize].push(group);     break
+                }
                 component = self.components[index as usize].parent;
-            }   None
-        }).collect();
+            }
+        }
+        let mut groups_by_obj = vec![None; self.file.ocoll.len()];
+        for (group, value) in self.draw_groups.iter().enumerate() {
+            groups_by_obj[value.obj_idx as usize] = Some(group);
+        }
 
         let mut before = vec![Vec::new(); self.draw_groups.len()];
         let mut after  = vec![Vec::new(); self.draw_groups.len()];
@@ -116,19 +123,18 @@ impl Runtime {
             let rule = &self.file.ocoll[self.components[rule_index as usize].obj_idx as usize];
             let target_id = uint(rule, property_ids::DRAWTARGETID)?;
             let Some(target_obj) = self.artboard_obj.checked_add(target_id) else { continue };
-            let Some(target_component) = self.components.iter()
-                .find(|component| component.obj_idx == target_obj) else { continue };
+            let Some(target_component) = obj_comps.get(target_obj as usize)
+                .copied().flatten() else { continue };
+            let target_component = &self.components[target_component as usize];
             let target = &self.file.ocoll[target_component.obj_idx as usize];
             if target.type_id.0 != object_ids::DRAW_TARGET { continue }
 
             let drawable_id = uint(target, property_ids::DRAWABLEID)?;
             let Some(drawable_obj) = self.artboard_obj
                 .checked_add(drawable_id) else { continue };
-            let Some(target_group) = self.draw_groups.iter()
-                .position(|group| group.obj_idx == drawable_obj) else { continue };
-            let moved: Vec<_> = group_rules.iter().enumerate()
-                .filter(|(_, rules)| **rules == Some(rule_index))
-                .map(|(index, _)| index).collect();
+            let Some(target_group) = groups_by_obj.get(drawable_obj as usize)
+                .copied().flatten() else { continue };
+            let moved = &groups_by_rule[rule_index as usize];
             if moved.is_empty() || moved.contains(&target_group) { continue }
 
             let placement = if uint(target, property_ids::PLACEMENTVALUE)? == 0 {
@@ -136,7 +142,7 @@ impl Runtime {
             } else {
                 &mut  after[target_group]
             };
-            for &index in &moved {
+            for &index in moved {
                 if !attached[index] {
                     attached[index] = true;
                     placement.push(index);

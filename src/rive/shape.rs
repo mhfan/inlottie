@@ -6,7 +6,7 @@ use std::{mem, sync::Arc};
 use super::{ColorTarget, ComponentGeom, ComponentPaint, ComponentTarget, EffectTarget,
     Result, Runtime,
     RuntimeError, StrokeCap, StrokeJoin, TrimMode, Brush, Component, DashSegment, FillRule,
-    Geometry, GradientStop, Paint, PathEffect,
+    Geometry, GradientStop, Paint, PathEffect, TrackValue,
     boolean, core_color_default, float, object_ids, property_ids, uint,
 };
 use crate::rive::path::build_path;
@@ -189,110 +189,87 @@ fn fill_rule(value: u32) -> FillRule { match value {
     1 => FillRule::EvenOdd, 2 => FillRule::Clockwise, _ => FillRule::NonZero,
 } }
 
-pub(super) fn set_paint_value(components: &mut [Component],
-    component: u32, prop_id: u32, value: f32) -> bool {
-    if prop_id != property_ids::THICKNESS { return false }
-    let Some(ComponentPaint { value: Paint::Stroke { width, .. }, .. }) =
-        components[component as usize].paint_mut() else { return false };
-    *width = value;   true
+pub(super) fn set_paint(components: &mut [Component],
+    component: u32, prop_id: u32, value: TrackValue) -> bool {
+    let Some(paint) = components[component as usize].paint_mut() else { return false };
+    match (&mut paint.value, prop_id, value) {
+        (Paint::Stroke { width, .. }, property_ids::THICKNESS,
+            TrackValue::Scalar(value)) => *width = value,
+        (Paint::Stroke { trfm_scale, .. }, property_ids::TRANSFORMAFFECTSSTROKE,
+            TrackValue::Bool(value)) => *trfm_scale = value,
+        (Paint::Fill { rule, .. }, property_ids::FILL_FILLRULE,
+            TrackValue::Uint(value)) => *rule = fill_rule(value),
+        (Paint::Stroke { cap, .. }, property_ids::CAP,
+            TrackValue::Uint(value)) => *cap = stroke_cap(value),
+        (Paint::Stroke { join, .. }, property_ids::JOIN,
+            TrackValue::Uint(value)) => *join = stroke_join(value),
+        _ => return false,
+    }   true
 }
 
-pub(super) fn set_effect_value(components: &mut [Component],
-    target: EffectTarget, prop_id: u32, value: f32) -> bool {
+pub(super) fn set_effect(components: &mut [Component],
+    target: EffectTarget, prop_id: u32, value: TrackValue) -> bool {
     let Some((effects, effect)) = effect_slot(components, target) else { return false };
-    let changed = match (effects.get(effect), target, prop_id) {
+    let changed = match (effects.get(effect), target, prop_id, value) {
         (Some(PathEffect::Trim { start, .. }), EffectTarget::Effect { .. },
-            property_ids::TRIMPATH_START) => *start != value,
+            property_ids::TRIMPATH_START, TrackValue::Scalar(value)) =>
+            Some(*start != value),
         (Some(PathEffect::Trim { end, .. }), EffectTarget::Effect { .. },
-            property_ids::TRIMPATH_END) => *end != value,
+            property_ids::TRIMPATH_END, TrackValue::Scalar(value)) =>
+            Some(*end != value),
         (Some(PathEffect::Trim { offset, .. }), EffectTarget::Effect { .. },
-            property_ids::TRIMPATH_OFFSET) => *offset != value,
+            property_ids::TRIMPATH_OFFSET, TrackValue::Scalar(value)) =>
+            Some(*offset != value),
         (Some(PathEffect::Dash { offset, .. }), EffectTarget::Effect { .. },
-            property_ids::DASHPATH_OFFSET) => *offset != value,
+            property_ids::DASHPATH_OFFSET, TrackValue::Scalar(value)) =>
+            Some(*offset != value),
         (Some(PathEffect::Dash { segments, .. }),
-            EffectTarget::DashSegment { segment, .. }, property_ids::DASH_LENGTH) =>
-            segments.get(segment as usize).is_some_and(|segment| segment.len != value),
-        _ => false,
+            EffectTarget::DashSegment { segment, .. }, property_ids::DASH_LENGTH,
+            TrackValue::Scalar(value)) => segments.get(segment as usize)
+                .map(|segment| segment.len != value),
+        (Some(PathEffect::Dash { relative, .. }), EffectTarget::Effect { .. },
+            property_ids::OFFSETISPERCENTAGE, TrackValue::Bool(value)) =>
+            Some(*relative != value),
+        (Some(PathEffect::Dash { segments, .. }),
+            EffectTarget::DashSegment { segment, .. }, property_ids::LENGTHISPERCENTAGE,
+            TrackValue::Bool(value)) => segments.get(segment as usize)
+                .map(|segment| segment.relative != value),
+        (Some(PathEffect::Trim { mode, .. }), EffectTarget::Effect { .. },
+            property_ids::TRIMPATH_MODEVALUE, TrackValue::Uint(value)) =>
+            Some(*mode != trim_mode(value)),
+        _ => None,
     };
+    let Some(changed) = changed else { return false };
     if !changed { return true }
-    match (Arc::make_mut(effects).get_mut(effect), target, prop_id) {
+    match (Arc::make_mut(effects).get_mut(effect), target, prop_id, value) {
         (Some(PathEffect::Trim { start, .. }), EffectTarget::Effect { .. },
-            property_ids::TRIMPATH_START) => *start = value,
+            property_ids::TRIMPATH_START, TrackValue::Scalar(value)) => *start = value,
         (Some(PathEffect::Trim { end, .. }), EffectTarget::Effect { .. },
-            property_ids::TRIMPATH_END) => *end = value,
+            property_ids::TRIMPATH_END, TrackValue::Scalar(value)) => *end = value,
         (Some(PathEffect::Trim { offset, .. }), EffectTarget::Effect { .. },
-            property_ids::TRIMPATH_OFFSET) => *offset = value,
+            property_ids::TRIMPATH_OFFSET, TrackValue::Scalar(value)) => *offset = value,
         (Some(PathEffect::Dash { offset, .. }), EffectTarget::Effect { .. },
-            property_ids::DASHPATH_OFFSET) => *offset = value,
+            property_ids::DASHPATH_OFFSET, TrackValue::Scalar(value)) => *offset = value,
         (Some(PathEffect::Dash { segments, .. }),
             EffectTarget::DashSegment { segment, .. },
-            property_ids::DASH_LENGTH) => {
+            property_ids::DASH_LENGTH, TrackValue::Scalar(value)) => {
             if let Some(segment) = Arc::make_mut(segments).get_mut(segment as usize) {
                 segment.len = value;
             }
-        }   _ => {}
-    }   true
-}
-
-pub(super) fn set_effect_bool(components: &mut [Component],
-    target: EffectTarget, prop_id: u32, value: bool) -> bool {
-    let Some((effects, effect)) = effect_slot(components, target) else { return false };
-    let changed = match (effects.get(effect), target, prop_id) {
+        }
         (Some(PathEffect::Dash { relative, .. }), EffectTarget::Effect { .. },
-            property_ids::OFFSETISPERCENTAGE) => *relative != value,
+            property_ids::OFFSETISPERCENTAGE, TrackValue::Bool(value)) => *relative = value,
         (Some(PathEffect::Dash { segments, .. }),
-            EffectTarget::DashSegment { segment, .. }, property_ids::LENGTHISPERCENTAGE) =>
-            segments.get(segment as usize).is_some_and(|segment| segment.relative != value),
-        _ => return false,
-    };
-    if !changed { return true }
-    match (Arc::make_mut(effects).get_mut(effect), target, prop_id) {
-        (Some(PathEffect::Dash { relative, .. }), EffectTarget::Effect { .. },
-            property_ids::OFFSETISPERCENTAGE) => *relative = value,
-        (Some(PathEffect::Dash { segments, .. }),
-            EffectTarget::DashSegment { segment, .. }, property_ids::LENGTHISPERCENTAGE) => {
+            EffectTarget::DashSegment { segment, .. }, property_ids::LENGTHISPERCENTAGE,
+            TrackValue::Bool(value)) => {
             if let Some(segment) = Arc::make_mut(segments).get_mut(segment as usize) {
                 segment.relative = value;
             }
-        }   _ => {}
-    }   true
-}
-
-pub(super) fn set_paint_bool(components: &mut [Component],
-    component: u32, prop_id: u32, value: bool) -> bool {
-    if prop_id != property_ids::TRANSFORMAFFECTSSTROKE { return false }
-    let Some(ComponentPaint { value: Paint::Stroke { trfm_scale, .. }, .. }) =
-        components[component as usize].paint_mut() else { return false };
-    *trfm_scale = value;   true
-}
-
-pub(super) fn set_paint_uint(components: &mut [Component],
-    component: u32, prop_id: u32, value: u32) -> bool {
-    if let Some(paint) = components[component as usize].paint_mut() {
-        match (&mut paint.value, prop_id) {
-            (Paint::Fill { rule, .. }, property_ids::FILL_FILLRULE) =>
-                *rule = fill_rule(value),
-            (Paint::Stroke { cap, .. }, property_ids::CAP) =>
-                *cap = stroke_cap(value),
-            (Paint::Stroke { join, .. }, property_ids::JOIN) =>
-                *join = stroke_join(value),
-            _ => return false,
-        }   return true
-    }   false
-}
-
-pub(super) fn set_effect_uint(components: &mut [Component],
-    target: EffectTarget, prop_id: u32, value: u32) -> bool {
-    if prop_id != property_ids::TRIMPATH_MODEVALUE { return false }
-    let EffectTarget::Effect { .. } = target else { return false };
-    let Some((effects, effect)) = effect_slot(components, target) else { return false };
-    let mode = if value == 1 { TrimMode::Sequential } else { TrimMode::Synchronized };
-    let Some(PathEffect::Trim { mode: current, .. }) =
-        effects.get(effect) else { return false };
-    if *current != mode {
-        let Some(PathEffect::Trim { mode: current, .. }) =
-            std::sync::Arc::make_mut(effects).get_mut(effect) else { return false };
-        *current = mode;
+        }
+        (Some(PathEffect::Trim { mode, .. }), EffectTarget::Effect { .. },
+            property_ids::TRIMPATH_MODEVALUE, TrackValue::Uint(value)) =>
+            *mode = trim_mode(value),
+        _ => return false,
     }   true
 }
 
@@ -315,3 +292,7 @@ fn stroke_cap(value: u32) -> StrokeCap { match value {
 fn stroke_join(value: u32) -> StrokeJoin { match value {
     1 => StrokeJoin::Round, 2 => StrokeJoin::Bevel, _ => StrokeJoin::Miter,
 } }
+
+fn trim_mode(value: u32) -> TrimMode {
+    if value == 1 { TrimMode::Sequential } else { TrimMode::Synchronized }
+}

@@ -3,8 +3,7 @@
 
 use std::{error::Error as StdError, fmt, f32};
 
-use super::{animation::{LinearAnimation, TrackValue,
-        build_animations, evaluate_track},
+use super::{animation::{LinearAnimation, TrackValue, build_animations},
     display_list::{Affine2, Brush, DashSegment, DisplayList, FillRule,
         Geometry, GradientStop, Paint, PathEffect, Point, Shape,
         DrawItem, StrokeCap, StrokeJoin, TrimMode
@@ -17,8 +16,7 @@ use super::{animation::{LinearAnimation, TrackValue,
 
 #[path = "draw.rs"] mod draw;
 #[path = "shape.rs"] mod shape;
-use shape::{set_effect_bool, set_effect_uint, set_effect_value,
-    set_paint_bool, set_paint_uint, set_paint_value};
+#[path = "track.rs"] pub(super) mod track;
 
 pub type Result<T> = std::result::Result<T, RuntimeError>;
 
@@ -77,31 +75,23 @@ impl ComponentGeom {
         Self::Points { cached: geometry, .. } => geometry,
     } }
 
-    fn set_float(&mut self, prop_id: u32, value: f32) -> bool {
-        let Self::Parametric { params, dirty, .. } = self else { return false };
-        let Some(changed) = params.set_float(prop_id, value) else { return false };
-        *dirty |= changed;   true
-    }
-
-    fn set_bool(&mut self, prop_id: u32, value: bool) -> bool {
+    fn set(&mut self, prop_id: u32, value: TrackValue) -> bool {
+        let changed = match (&mut *self, value) {
+            (Self::Parametric { params, .. }, TrackValue::Scalar(value)) =>
+                params.set_float(prop_id, value),
+            (Self::Parametric { params, .. }, TrackValue::Bool(value)) =>
+                params.set_bool(prop_id, value),
+            (Self::Parametric { params, .. }, TrackValue::Uint(value)) =>
+                params.set_uint(prop_id, value),
+            (Self::Points { closed, .. }, TrackValue::Bool(value))
+                if prop_id == property_ids::POINTSCOMMONPATH_ISCLOSED =>
+                Some(replace_changed(closed, value)),
+            _ => None,
+        };
+        let Some(changed) = changed else { return false };
         match self {
-            Self::Parametric { params, dirty, .. } => {
-                let Some(changed) = params.set_bool(prop_id, value) else { return false };
-                *dirty |= changed;
-            }
-            Self::Points { closed, dirty, .. }
-                if prop_id == property_ids::POINTSCOMMONPATH_ISCLOSED => {
-                    *dirty |= *closed != value;
-                    *closed = value;
-                }
-            _ => return false,
+            Self::Parametric { dirty, .. } | Self::Points { dirty, .. } => *dirty |= changed,
         }   true
-    }
-
-    fn set_uint(&mut self, prop_id: u32, value: u32) -> bool {
-        let Self::Parametric { params, dirty, .. } = self else { return false };
-        let Some(changed) = params.set_uint(prop_id, value) else { return false };
-        *dirty |= changed;   true
     }
 
     fn set_vertex(&mut self, slot: u32, vertex: Vertex) {
@@ -254,23 +244,6 @@ impl Component {
     Vertex { path: u32, slot: u32 },
 }
 
-#[derive(Debug, Clone, Copy)] pub(super) enum TrackTarget {
-    Transform { component: u32, prop_id: u32 },
-    Geometry { component: u32, prop_id: u32 },
-    Vertex { component: u32, path: u32, slot: u32, prop_id: u32 },
-    Gradient { component: u32, prop_id: u32 },
-    GradientStopPos { component: u32, stop: u32 },
-    GradientStopColor { component: u32, stop: u32 },
-    SolidColor { component: u32 },
-    Paint { component: u32, prop_id: u32 },
-    Effect { target: EffectTarget, prop_id: u32 },
-    Visibility { component: u32 },
-}
-
-#[derive(Debug, Clone, Copy)] pub(super) struct TrackBinding {
-    target: TrackTarget, default: TrackValue,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)] pub struct AnimationInfo<'a> {
     pub name: &'a [u8], pub duration: u32, pub fps: u32,
     pub speed: f32, pub loop_mode: u32,
@@ -387,7 +360,7 @@ impl Runtime {
         let mut runtime = Self { file, artboard_obj: context_start as u32, components,
             update_order: Vec::new(), gradients: Vec::new(),
             draw_groups: Vec::new(),
-            animations, active_animation: None, elapsed: 0.0
+            animations: Vec::new(), active_animation: None, elapsed: 0.0
         };
         // Construction order matters: world transforms feed gradients, then shape content feeds
         // draw grouping and finally draw rules reorder those completed groups.
@@ -397,9 +370,9 @@ impl Runtime {
         runtime.gradients = runtime.components.iter().enumerate()
             .filter_map(|(index, component)|
                 component.gradient().is_some().then_some(index as u32)).collect();
-        runtime.bind_animations(&targets);
+        runtime.animations = runtime.bind_animations(animations, &targets);
         runtime.build_draw_groups();
-        runtime.apply_draw_rules()?;
+        runtime.apply_draw_rules(&obj_comps)?;
         Ok(runtime)
     }
 
@@ -433,95 +406,6 @@ impl Runtime {
         if delta_seconds <= 0.0 || self.active_animation.is_none() { return false }
         self.elapsed += delta_seconds.max(0.0);
         self.apply_animation();     true
-    }
-
-    fn bind_animations(&mut self, bindings: &[ComponentTarget]) {
-        for animation in &mut self.animations {
-            for track in &mut animation.tracks {
-                let component = track.component;
-                let object = &self.file.ocoll[
-                    self.components[component as usize].obj_idx as usize];
-                let default = match track.value_type() {
-                    TrackValue::Scalar(_) => TrackValue::Scalar(
-                        float(object, track.prop_id)
-                            .unwrap_or_else(|_| core_float_default(track.prop_id))),
-                    TrackValue::Color(_) => TrackValue::Color(
-                        object.color(track.prop_id).ok().flatten()
-                            .unwrap_or_else(|| core_color_default(track.prop_id))),
-                    TrackValue::Bool(_) => TrackValue::Bool(
-                        object.boolean(track.prop_id).ok().flatten()
-                            .unwrap_or_else(|| core_boolean_default(track.prop_id))),
-                    TrackValue::Uint(_) => TrackValue::Uint(
-                        object.varuint(track.prop_id).ok().flatten()
-                            .unwrap_or_else(|| core_varuint_default(track.prop_id))),
-                };
-                let target = resolve_track_target(&self.components, bindings,
-                    component, track.prop_id, track.value_type(),
-                    core_is_transform_component(object.type_id.0));
-                let Some(target) = target else { continue };
-                track.binding = Some(TrackBinding { target, default });
-                match target {
-                    TrackTarget::Transform { .. } => {}
-                    TrackTarget::Geometry { component, .. } =>
-                        push_unique(&mut animation.geometries, component),
-                    TrackTarget::Vertex { path, .. } =>
-                        push_unique(&mut animation.geometries, path),
-                    TrackTarget::Gradient { component, .. } |
-                    TrackTarget::GradientStopPos { component, .. } |
-                    TrackTarget::GradientStopColor { component, .. } =>
-                        push_unique(&mut animation.gradients, component),
-                    _ => {}
-                }
-            }
-            animation.tracks.retain(|track| track.binding.is_some());
-        }
-    }
-
-    fn apply_animation(&mut self) {
-        let Some(animation) = self.active_animation
-            .and_then(|index| self.animations.get(index as usize)) else { return };
-        let duration = animation.duration as f32;
-        let mut frame = self.elapsed * animation.fps as f32 * animation.speed;
-        if 0.0 < duration { match animation.loop_mode {
-            1 => frame = frame.rem_euclid(duration),
-            2 => {
-                frame = frame.rem_euclid(duration * 2.0);
-                if duration < frame { frame = duration * 2.0 - frame }
-            }
-            _ => frame = frame.min(duration),
-        }}
-        let mut transform_dirty = false;
-        for track in &animation.tracks {
-            if let (Some(binding), Some(value)) =
-                (track.binding, evaluate_track(track, frame)) {
-                transform_dirty |= apply_track(&mut self.components, binding.target, value);
-            }
-        }
-        let (geometries, gradients) = (&animation.geometries, &animation.gradients);
-        refresh_geometry(&mut self.components, geometries);
-        if transform_dirty {
-            update_world_state(&mut self.components, &self.update_order);
-        }
-        let gradients = if transform_dirty { &self.gradients } else { gradients };
-        sync_gradients(&mut self.components, gradients);
-    }
-
-    fn reset_animation(&mut self, animation: u32) {
-        let animation = &self.animations[animation as usize];
-        let mut transform_dirty = false;
-        for track in &animation.tracks {
-            if let Some(binding) = track.binding {
-                transform_dirty |= apply_track(
-                    &mut self.components, binding.target, binding.default);
-            }
-        }
-        let (geometries, gradients) = (&animation.geometries, &animation.gradients);
-        refresh_geometry(&mut self.components, geometries);
-        if transform_dirty {
-            update_world_state(&mut self.components, &self.update_order);
-        }
-        let gradients = if transform_dirty { &self.gradients } else { gradients };
-        sync_gradients(&mut self.components, gradients);
     }
 
     fn validate_hierarchy(&mut self) -> Result<()> {
@@ -567,187 +451,6 @@ fn update_world_state(components: &mut [Component], order: &[u32]) {
 fn replace_changed<T: PartialEq>(target: &mut T, value: T) -> bool {
     let changed = *target != value;
     *target = value;   changed
-}
-
-fn push_unique(values: &mut Vec<u32>, value: u32) {
-    if !values.contains(&value) { values.push(value) }
-}
-
-fn transform_prop(prop_id: u32) -> bool {
-    matches!(prop_id, property_ids::NODE_X | property_ids::NODE_Y |
-        property_ids::TRANSFORMCOMPONENT_ROTATION |
-        property_ids::TRANSFORMCOMPONENT_SCALEX |
-        property_ids::TRANSFORMCOMPONENT_SCALEY |
-        property_ids::WORLDTRANSFORMCOMPONENT_OPACITY)
-}
-
-fn resolve_track_target(components: &[Component], bindings: &[ComponentTarget],
-    component: u32, prop_id: u32, value: TrackValue,
-    transformable: bool) -> Option<TrackTarget> {
-    let state = &components[component as usize];
-    if transformable && matches!(value, TrackValue::Scalar(_)) && transform_prop(prop_id) {
-        return Some(TrackTarget::Transform { component, prop_id })
-    }
-    match (bindings[component as usize], value) {
-        (ComponentTarget::Color(ColorTarget::Solid(paint)), TrackValue::Color(_)) =>
-            return Some(TrackTarget::SolidColor { component: paint }),
-        (ComponentTarget::Color(ColorTarget::Stop { gradient, stop }),
-            TrackValue::Color(_)) =>
-            return Some(TrackTarget::GradientStopColor { component: gradient, stop }),
-        (ComponentTarget::Color(ColorTarget::Stop { gradient, stop }),
-            TrackValue::Scalar(_)) if prop_id == property_ids::POSITION =>
-            return Some(TrackTarget::GradientStopPos { component: gradient, stop }),
-        (ComponentTarget::Effect(target), _) =>
-            return Some(TrackTarget::Effect { target, prop_id }),
-        (ComponentTarget::Vertex { path, slot }, TrackValue::Scalar(_)) =>
-            return Some(TrackTarget::Vertex { component, path, slot, prop_id }),
-        _ => {}
-    }
-    match value {
-        TrackValue::Scalar(_) if state.gradient().is_some() =>
-            Some(TrackTarget::Gradient { component, prop_id }),
-        TrackValue::Scalar(_) | TrackValue::Bool(_) | TrackValue::Uint(_)
-            if state.geom().is_some() => Some(TrackTarget::Geometry { component, prop_id }),
-        TrackValue::Bool(_) if prop_id == property_ids::SHAPEPAINT_ISVISIBLE &&
-            state.paint().is_some() => Some(TrackTarget::Visibility { component }),
-        TrackValue::Scalar(_) | TrackValue::Bool(_) | TrackValue::Uint(_)
-            if state.paint().is_some() => Some(TrackTarget::Paint { component, prop_id }),
-        _ => None,
-    }
-}
-
-fn apply_track(components: &mut [Component], target: TrackTarget, value: TrackValue) -> bool {
-    match (target, value) {
-        (TrackTarget::Transform { component, prop_id }, TrackValue::Scalar(value)) => {
-            return components[component as usize].transform.set(prop_id, value);
-        }
-        (TrackTarget::Geometry { component, prop_id }, TrackValue::Scalar(value)) => {
-            if let Some(geom) = components[component as usize].geom_mut() {
-                geom.set_float(prop_id, value);
-            }
-        }
-        (TrackTarget::Geometry { component, prop_id }, TrackValue::Bool(value)) => {
-            if let Some(geom) = components[component as usize].geom_mut() {
-                geom.set_bool(prop_id, value);
-            }
-        }
-        (TrackTarget::Geometry { component, prop_id }, TrackValue::Uint(value)) => {
-            if let Some(geom) = components[component as usize].geom_mut() {
-                geom.set_uint(prop_id, value);
-            }
-        }
-        (TrackTarget::Vertex { component, path, slot, prop_id },
-            TrackValue::Scalar(value)) => {
-            let Some(params) = components[component as usize].vertex_mut()
-                else { return false };
-            if params.set(prop_id, value) == Some(true) {
-                let vertex = params.vertex();
-                if let Some(geom) = components[path as usize].geom_mut() {
-                    geom.set_vertex(slot, vertex);
-                }
-            }
-        }
-        (TrackTarget::Gradient { component, prop_id }, TrackValue::Scalar(value)) => {
-            if let Some(gradient) = components[component as usize].gradient_mut() {
-                gradient.set(prop_id, value);
-            }
-        }
-        (TrackTarget::GradientStopPos { component: gradient, stop },
-            TrackValue::Scalar(value)) => {
-            if let Some(gradient) = components[gradient as usize].gradient_mut() {
-                gradient.set_stop_pos(stop, value);
-            }
-        }
-        (TrackTarget::GradientStopColor { component: gradient, stop },
-            TrackValue::Color(value)) => {
-            if let Some(gradient) = components[gradient as usize].gradient_mut() {
-                gradient.set_stop_color(stop, value);
-            }
-        }
-        (TrackTarget::SolidColor { component: paint }, TrackValue::Color(value)) => {
-            let Some(Paint::Fill { brush, .. } | Paint::Stroke { brush, .. }) =
-                components[paint as usize].paint_mut()
-                    .map(|paint| &mut paint.value) else { return false };
-            if let Brush::Solid(color) = brush { *color = value }
-        }
-        (TrackTarget::Paint { component, prop_id }, TrackValue::Scalar(value)) => {
-            set_paint_value(components, component, prop_id, value);
-        }
-        (TrackTarget::Paint { component, prop_id }, TrackValue::Bool(value)) => {
-            set_paint_bool(components, component, prop_id, value);
-        }
-        (TrackTarget::Paint { component, prop_id }, TrackValue::Uint(value)) => {
-            set_paint_uint(components, component, prop_id, value);
-        }
-        (TrackTarget::Effect { target, prop_id }, TrackValue::Scalar(value)) => {
-            set_effect_value(components, target, prop_id, value);
-        }
-        (TrackTarget::Effect { target, prop_id }, TrackValue::Bool(value)) => {
-            set_effect_bool(components, target, prop_id, value);
-        }
-        (TrackTarget::Effect { target, prop_id }, TrackValue::Uint(value)) => {
-            set_effect_uint(components, target, prop_id, value);
-        }
-        (TrackTarget::Visibility { component }, TrackValue::Bool(value)) => {
-            if let Some(paint) = components[component as usize].paint_mut() {
-                paint.visible = value;
-            }
-        }
-        _ => {}
-    }   false
-}
-
-fn refresh_geometry(components: &mut [Component], targets: &[u32]) {
-    for &index in targets {
-        if let Some(geom) = components[index as usize].geom_mut() { geom.refresh() }
-    }
-}
-
-fn sync_gradients(components: &mut [Component], targets: &[u32]) {
-    for &index in targets { sync_gradient(components, index as usize); }
-}
-
-fn sync_gradient(components: &mut [Component], index: usize) {
-        let Some(gradient) = components[index].gradient_mut() else { return };
-        let Some(paint) = gradient.paint else { return };
-        let stops = gradient.stops_dirty.then(|| {
-            gradient.stops_dirty = false;
-            gradient.sorted_stops()
-        });
-        let (start, end, opacity, radial) =
-            (gradient.start, gradient.end, gradient.opacity, gradient.radial);
-        let transform = components[index].world;
-        let Some(ComponentPaint { value, .. }) =
-            components[paint as usize].paint_mut() else { return };
-        match value {
-            Paint::Fill { brush: Brush::LinearGradient {
-                start: brush_start, end: brush_end, trfm, opacity: brush_opacity,
-                stops: brush_stops }, .. } |
-            Paint::Stroke { brush: Brush::LinearGradient {
-                start: brush_start, end: brush_end, trfm, opacity: brush_opacity,
-                stops: brush_stops }, .. } if !radial => {
-                if (*brush_start, *brush_end, *trfm, *brush_opacity) !=
-                    (start, end, transform, opacity) {
-                    (*brush_start, *brush_end, *trfm, *brush_opacity) =
-                        (start, end, transform, opacity);
-                }
-                if let Some(stops) = stops { *brush_stops = stops }
-            }
-            Paint::Fill { brush: Brush::RadialGradient {
-                center, radius, trfm, opacity: brush_opacity,
-                stops: brush_stops }, .. } |
-            Paint::Stroke { brush: Brush::RadialGradient {
-                center, radius, trfm, opacity: brush_opacity,
-                stops: brush_stops }, .. } if radial => {
-                let next_radius = (end.x - start.x).hypot(end.y - start.y);
-                if (*center, *radius, *trfm, *brush_opacity) !=
-                    (start, next_radius, transform, opacity) {
-                    (*center, *radius, *trfm, *brush_opacity) =
-                        (start, next_radius, transform, opacity);
-                }
-                if let Some(stops) = stops { *brush_stops = stops }
-            }   _ => {}
-        }
 }
 
 pub(super) fn float(object: &Object, prop_id: u32) -> decode::Result<f32> {

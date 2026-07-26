@@ -2,7 +2,7 @@
 //! Linear-animation discovery and keyframe evaluation.
 
 use super::{decode::{Object, RiveFile, core_color_default, object_ids, property_ids},
-    runtime::{Result, RuntimeError, TrackBinding, float, uint},
+    runtime::{Result, RuntimeError, float, track::TrackBinding, uint},
 };
 
 #[derive(Debug, Clone, Copy)] enum Interpolation {
@@ -17,33 +17,44 @@ use super::{decode::{Object, RiveFile, core_color_default, object_ids, property_
     frame: u32, value: TrackValue, interp: Interpolation,
 }
 
-#[derive(Debug)] pub(super) struct PropertyTrack {
+#[derive(Debug)] pub(super) struct RawTrack {
     pub component: u32, pub prop_id: u32,
-    pub binding: Option<TrackBinding>,
     keyframes: Vec<Keyframe>,
 }
 
-impl PropertyTrack {
+impl RawTrack {
     pub fn value_type(&self) -> TrackValue { self.keyframes[0].value }
+    pub fn bind(self, binding: TrackBinding) -> PropertyTrack {
+        PropertyTrack { binding, keyframes: self.keyframes }
+    }
 }
 
-#[derive(Debug)] pub(super) struct LinearAnimation {
+#[derive(Debug)] pub(super) struct PropertyTrack {
+    pub binding: TrackBinding,
+    keyframes: Vec<Keyframe>,
+}
+
+#[derive(Debug)] pub(super) struct Animation<T> {
     pub name: Vec<u8>, pub duration: u32, pub fps: u32,
     pub speed: f32, pub loop_mode: u32,
-    pub tracks: Vec<PropertyTrack>,
+    pub tracks: Vec<T>,
     pub geometries: Vec<u32>, pub gradients: Vec<u32>,
 }
 
+pub(super) type RawAnimation = Animation<RawTrack>;
+pub(super) type LinearAnimation = Animation<PropertyTrack>;
+
 pub(super) fn build_animations(file: &RiveFile, context_start: usize, context_end: usize,
-    obj_comps: &[Option<u32>]) -> Result<Vec<LinearAnimation>> {
-    let (mut current_animation, mut animations) = (None, Vec::new());
+    obj_comps: &[Option<u32>]) -> Result<Vec<RawAnimation>> {
+    let mut current_animation = None;
+    let mut animations: Vec<RawAnimation> = Vec::new();
     let (mut current_component, mut current_type, mut current_track) = (None, 0, None);
 
     // Keyed objects are encoded as a flat ordered stream; each entry changes the context for
     // the following properties/keyframes rather than referring to them by child collections.
     for object in &file.ocoll[context_start..context_end] { match object.type_id.0 {
         object_ids::LINEAR_ANIMATION => {
-            animations.push(LinearAnimation {
+            animations.push(RawAnimation {
                 name: object.bytes(property_ids::ANIMATION_NAME)?
                     .unwrap_or_default().to_vec(),
                 duration: uint(object, property_ids::LINEARANIMATION_DURATION)?,
@@ -68,8 +79,8 @@ pub(super) fn build_animations(file: &RiveFile, context_start: usize, context_en
         object_ids::KEYED_PROPERTY => {
             current_track = match (current_animation, current_component) {
                 (Some(animation), Some(component)) => {
-                    animations[animation].tracks.push(PropertyTrack {
-                        component, binding: None,
+                    animations[animation].tracks.push(RawTrack {
+                        component,
                         prop_id: uint(object, property_ids::KEYEDPROPERTY_PROPERTYKEY)?,
                         keyframes: Vec::new(),
                     });
@@ -164,14 +175,17 @@ fn keyframe_interpolation(file: &RiveFile, context_start: usize,
 }
 
 pub(super) fn evaluate_track(track: &PropertyTrack, frame: f32) -> Option<TrackValue> {
+    evaluate(&track.keyframes, frame)
+}
+
+fn evaluate(keyframes: &[Keyframe], frame: f32) -> Option<TrackValue> {
     // partition_point also gives stable last-keyframe-wins behavior for duplicate frame numbers.
-    let first = track.keyframes.first()?;
-    let upper = track.keyframes.partition_point(|keyframe| keyframe.frame as f32 <= frame);
-    if upper == 0 { return Some(first.value) }
-    let current = &track.keyframes[upper - 1];
-    let Some(next) = track.keyframes.get(upper) else { return Some(current.value) };
-    if matches!(current.interp, Interpolation::Hold) ||
-        next.frame == current.frame {
+    let first = keyframes.first()?;
+    let upper = keyframes.partition_point(|keyframe| keyframe.frame as f32 <= frame);
+    if  upper == 0 { return Some(first.value) }
+    let current = &keyframes[upper - 1];
+    let Some(next) = keyframes.get(upper) else { return Some(current.value) };
+    if matches!(current.interp, Interpolation::Hold) || next.frame == current.frame {
         return Some(current.value)
     }
     let mut factor = ((frame - current.frame as f32) /
@@ -221,39 +235,37 @@ fn lerp_color(from: u32, to: u32, factor: f32) -> u32 {
 
 #[cfg(test)] mod tests { use super::*;
 
-    fn track(interp: Interpolation) -> PropertyTrack {
-        PropertyTrack { component: 0, prop_id: 0, binding: None,
-            keyframes: vec![
-            Keyframe { frame: 0, value: TrackValue::Scalar(2.0), interp },
+    fn track(interp: Interpolation) -> RawTrack {
+        RawTrack { component: 0, prop_id: 0, keyframes: vec![
+            Keyframe { frame:  0, value: TrackValue::Scalar(2.0), interp },
             Keyframe { frame: 10, value: TrackValue::Scalar(12.0),
                 interp: Interpolation::Linear },
         ] }
     }
 
     #[test] fn evaluates_hold_linear_and_cubic_tracks() {
-        assert_eq!(evaluate_track(&track(Interpolation::Hold), 5.0),
+        assert_eq!(evaluate(&track(Interpolation::Hold).keyframes, 5.0),
             Some(TrackValue::Scalar(2.0)));
-        assert_eq!(evaluate_track(&track(Interpolation::Linear), 5.0),
+        assert_eq!(evaluate(&track(Interpolation::Linear).keyframes, 5.0),
             Some(TrackValue::Scalar(7.0)));
         let cubic = track(Interpolation::Cubic {
             x1: 1.0 / 3.0, y1: 1.0 / 3.0, x2: 2.0 / 3.0, y2: 2.0 / 3.0,
         });
-        let Some(TrackValue::Scalar(value)) = evaluate_track(&cubic, 5.0)
-            else { panic!() };
+        let Some(TrackValue::Scalar(value)) =
+            evaluate(&cubic.keyframes, 5.0) else { panic!() };
         assert!((value - 7.0).abs() < 1e-4);
-        assert_eq!(evaluate_track(&cubic, -1.0), Some(TrackValue::Scalar(2.0)));
-        assert_eq!(evaluate_track(&cubic, 20.0), Some(TrackValue::Scalar(12.0)));
+        assert_eq!(evaluate(&cubic.keyframes, -1.0), Some(TrackValue::Scalar(2.0)));
+        assert_eq!(evaluate(&cubic.keyframes, 20.0), Some(TrackValue::Scalar(12.0)));
     }
 
     #[test] fn interpolates_argb_channels() {
-        let track = PropertyTrack { component: 0, prop_id: 0,
-            binding: None,
-            keyframes: vec![
+        let track = RawTrack { component: 0, prop_id: 0, keyframes: vec![
                 Keyframe { frame: 0, value: TrackValue::Color(0x0010_80ff),
                     interp: Interpolation::Linear },
                 Keyframe { frame: 10, value: TrackValue::Color(0xfff0_0001),
                     interp: Interpolation::Linear },
-            ] };
-        assert_eq!(evaluate_track(&track, 5.0), Some(TrackValue::Color(0x8080_4080)));
+        ] };
+        assert_eq!(evaluate(&track.keyframes, 5.0),
+            Some(TrackValue::Color(0x8080_4080)));
     }
 }
