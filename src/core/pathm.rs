@@ -95,38 +95,60 @@ pub trait PathBuilder {     //type Point; type Path;
             &pattern.iter().map(|&v| v as f64).collect::<Vec<_>>()).collect())
     }
 
-    // https://lottiefiles.github.io/lottie-docs/scripts/lottie_bezier.js
-    // or use curve_length(curve, merr) and subdivide(t, seg) of flo_curves
+    // https://lottie.github.io/lottie-spec/latest/specs/shapes/#trim-path
     fn trim_path(&self, start: f64, trim: f64) -> Self where Self: Sized {
-        let path = self.to_kurbo();
-
-        use kurbo::{ParamCurve, ParamCurveArclen};
         if trim <= 0. { return Self::new(0) }
-        if 1. <= trim { return Self::from_kurbo(path) }
-
-        let total = path.segments().fold(0.,
-            |acc, seg| acc + seg.arclen(ACCURACY_TOLERANCE));
-        if  total == 0. { return Self::new(0) }
+        let path = MeasuredPath::new(self.to_kurbo());
+        if 1. <= trim { return Self::from_kurbo(path.trim_ranges(&[(0., 1.)])) }
 
         let start = start.rem_euclid(1.);
-        let end   = start + trim;
-        let mut output = Vec::<kurbo::PathSeg>::new();
-        let mut append_range = |from: f64, to: f64| {
-            let (from, to, mut offset) = (from * total, to * total, 0.);
-            for seg in path.segments() {
-                let len = seg.arclen(ACCURACY_TOLERANCE);
+        let end = start + trim;
+        let trimmed = if end <= 1. {
+            path.trim_ranges(&[(start, end)])
+        } else {
+            path.trim_ranges(&[(start, 1.), (0., end - 1.)])
+        };  Self::from_kurbo(trimmed)
+    }
+}
+
+pub(crate) struct MeasuredPath {
+    path: BezPath, pub length: f64,
+    segments: Vec<(kurbo::PathSeg, f64)>,
+}
+
+use kurbo::{ParamCurve, ParamCurveArclen};
+impl MeasuredPath {
+    pub fn new(path: BezPath) -> Self {
+        let segments = path.segments().map(|seg| {
+            let len = seg.arclen(ACCURACY_TOLERANCE); (seg, len)
+        }).collect::<Vec<_>>();
+        let length = segments.iter().map(|(_, len)| len).sum();
+        Self { path, segments, length }
+    }
+
+    pub fn trim_ranges(&self, ranges: &[(f64, f64)]) -> BezPath {
+        if ranges.len() == 1 && ranges[0].0 <= 0. && 1. <= ranges[0].1 {
+            return self.path.clone()
+        }
+        if self.length == 0. { return BezPath::new() }
+        let mut output = vec![];
+
+        for &(from, to) in ranges {
+            let (from, to, mut offset) = (
+                from.clamp(0., 1.) * self.length,
+                  to.clamp(0., 1.) * self.length, 0.);
+            if to <= from { continue }
+
+            for &(seg, len) in &self.segments {
                 let next = offset + len;
                 let (lo, hi) = (from.max(offset), to.min(next));
                 if lo < hi && 0. < len {
-                    output.push(seg.subsegment((lo - offset) / len .. (hi - offset) / len));
-                }
-                offset = next;
+                    let range = seg.inv_arclen(lo - offset, ACCURACY_TOLERANCE)
+                             .. seg.inv_arclen(hi - offset, ACCURACY_TOLERANCE);
+                    output.push(seg.subsegment(range));
+                }   offset = next;
             }
-        };
-
-        append_range(start, end.min(1.));
-        if 1. < end { append_range(0., end - 1.); }
-        Self::from_kurbo(BezPath::from_path_segments(output.into_iter()))
+        }   BezPath::from_path_segments(output.into_iter())
     }
 }
 
@@ -372,6 +394,7 @@ impl PathFactory for ShapeProperty {    // for mask
         let ends = path.elements().iter().filter_map(|el| match el {
             kurbo::PathEl::CurveTo(_, _, end) => Some(*end), _ => None,
         }).collect::<Vec<_>>();
+
         assert_eq!(ends.len(), 4);
         for (actual, expected) in ends.iter().zip(
             [(40., 40.), (-50., 30.), (-40., -40.), (50., -30.), ]) {
@@ -389,11 +412,36 @@ impl PathFactory for ShapeProperty {    // for mask
     #[test] fn trim_path_wraps_across_the_path_end() {
         let mut path = BezPath::new();
         path.move_to((0., 0.)); path.line_to((100., 0.));
-
         let segments = PathBuilder::trim_path(&path, 0.75, 0.5)
             .segments().collect::<Vec<_>>();
-        assert_eq!(segments.len(), 2);  use kurbo::ParamCurve;
+
+        assert_eq! (segments.len(), 2);
         assert_eq!((segments[0].start().x, segments[0].end().x), (75., 100.));
         assert_eq!((segments[1].start().x, segments[1].end().x), (0., 25.));
+    }
+
+    #[test] fn trim_path_uses_bezier_arc_length_not_parameter_ratio() {
+        use kurbo::{CubicBez, Point};
+        let curve = CubicBez::new(
+            Point::new(0., 0.),   Point::new(0., 200.),
+            Point::new(100., 0.), Point::new(100., 0.));
+        let mut path = BezPath::new();
+        path.move_to(curve.p0); path.curve_to(curve.p1, curve.p2, curve.p3);
+
+        let trimmed = PathBuilder::trim_path(&path, 0., 0.5);
+        let actual = trimmed.segments().next().unwrap().end();
+        let t = curve.inv_arclen(
+            curve.arclen(ACCURACY_TOLERANCE) / 2., ACCURACY_TOLERANCE);
+        let expected = curve.eval(t);
+        assert!((actual - expected).hypot() < 1e-6);
+        assert!((actual - curve.eval(0.5)).hypot() > 1.);
+    }
+
+    #[test] fn full_trim_range_preserves_path_closure() {
+        let mut path = BezPath::new();
+        path.move_to((0., 0.));   path.line_to((10., 0.));
+        path.line_to((10., 10.)); path.close_path();
+        let trimmed = PathBuilder::trim_path(&path, 0., 1.);
+        assert!(matches!(trimmed.elements().last(), Some(kurbo::PathEl::ClosePath)));
     }
 }

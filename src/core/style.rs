@@ -78,13 +78,13 @@ impl MatrixConv for kurbo::Affine {
 
         #[cfg(feature = "b2d")] {
             use intvg::blend2d::BLMatrix2D;
-            let mut t = BLMatrix2D::new(a);     t.transform(&BLMatrix2D::new(b));
+            let mut t  = BLMatrix2D::new(a);    t.transform(&BLMatrix2D::new(b));
             assert_eq!(t.get_values(), BLMatrix2D::new(ab).get_values());
 
             let mut t3 = BLMatrix2D::identity(); operate_matrix(&mut t3);
             println!("{t1:?}\n{t2:?}\nBLMatrix2D{:?}", t3.get_values());
             assert!(t1.as_coeffs().iter().zip(t3.get_values().iter())
-                .all(|(&v1, &v2)| (v1 - v2).abs() < 1e-5));
+                .all(|(&v1, &v2)| (v1 - v2).abs() < 1e-5)); // XXX: f64::EPSILON
         }
 //    }
 //}
