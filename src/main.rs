@@ -161,7 +161,7 @@ impl WinitApp {
         }
     }
 
-    #[inline] fn request_redraw(&self) {
+    fn request_redraw(&self) {
         #[cfg(feature = "b2d")] if let Some(surface) =
             &self.surface { surface.window().request_redraw(); }
         if let Some(window) = &self.window { window.request_redraw(); }

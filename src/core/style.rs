@@ -15,26 +15,26 @@ impl MatrixConv for kurbo::Affine {
     /*  | a c e |          Affine::Mul (self * other)
         | b d f |
         | 0 0 1 | */
-    #[inline] fn identity() -> Self { Self::IDENTITY }
-    #[inline] fn rotate(&mut self, angle: f32) { *self = self.then_rotate(angle as _) }
-    #[inline] fn translate(&mut self, pos: Vec2D) { *self = Self::translate(pos) * *self }
-    #[inline] fn skew_x(&mut self, sk: f32) { *self = Self::skew(sk.tan() as _, 0.) * *self }
-    #[inline] fn scale(&mut self, sl: Vec2D) {      // Affine didn't do tan() inside
+    fn identity() -> Self { Self::IDENTITY }
+    fn rotate(&mut self, angle: f32) { *self = self.then_rotate(angle as _) }
+    fn translate(&mut self, pos: Vec2D) { *self = Self::translate(pos) * *self }
+    fn skew_x(&mut self, sk: f32) { *self = Self::skew(sk.tan() as _, 0.) * *self }
+    fn scale(&mut self, sl: Vec2D) {      // Affine didn't do tan() inside
         *self = self.then_scale_non_uniform(sl.x as _, sl.y as _)
     }
-    #[inline] fn premul(&mut self, tm: &Self) { *self *= *tm }
+    fn premul(&mut self, tm: &Self) { *self *= *tm }
 }
 
 #[cfg(feature = "vello")] impl StyleConv for peniko::Brush {
-    #[inline] fn solid_color(color: RGBA) -> Self { Self::Solid(color.into()) }
-    #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
+    fn solid_color(color: RGBA) -> Self { Self::Solid(color.into()) }
+    fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
         let stops = stops.iter().map(|&(offset, color)|
             (offset, DynamicColor::from_alpha_color(color.into())).into())
             .collect::<Vec<ColorStop>>();
         Self::Gradient(peniko::Gradient::new_linear(
             (sp.x, sp.y), (ep.x, ep.y)).with_stops(stops.as_slice()))
     }
-    #[inline] fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
+    fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
             stops: &[(f32, RGBA)]) -> Self {
         let stops = stops.iter().map(|&(offset, color)|
             (offset, DynamicColor::from_alpha_color(color.into())).into())
@@ -46,7 +46,7 @@ impl MatrixConv for kurbo::Affine {
 }
 #[cfg(feature = "vello")] use vello::peniko::{self, ColorStop, color::DynamicColor};
 #[cfg(feature = "vello")] impl From<RGBA> for peniko::Color {
-    #[inline] fn from(color: RGBA) -> Self {
+    fn from(color: RGBA) -> Self {
         Self::from_rgba8(color.r, color.g, color.b, color.a)
     }
 }
@@ -100,13 +100,13 @@ pub trait MatrixConv {
 
 #[derive(Clone)] pub struct TM2DwO<MC: MatrixConv>(pub MC, pub f32);
 impl<MC: MatrixConv> Default for TM2DwO<MC> {
-    #[inline] fn default() -> Self { Self(MC::identity(), 1.) }
+    fn default() -> Self { Self(MC::identity(), 1.) }
 }
 impl<MC: MatrixConv> TM2DwO<MC> {
-    #[inline] pub fn compose(mut self, other: &Self) -> Self {
+    pub fn compose(mut self, other: &Self) -> Self {
         self.0.premul(&other.0);    self.1 *= other.1;  self
     }
-    #[inline] pub fn compose_matrix(mut self, other: &MC) -> Self {
+    pub fn compose_matrix(mut self, other: &MC) -> Self {
         self.0.premul(other);  self
     }
 }

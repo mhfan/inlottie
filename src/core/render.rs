@@ -281,7 +281,7 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
     }
 }
 
-#[inline] fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
+fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
     let (start, end) = (start.clamp(0., 1.), end.clamp(0., 1.));
     ((start.min(end) + offset).rem_euclid(1.), (end - start).abs())
 }

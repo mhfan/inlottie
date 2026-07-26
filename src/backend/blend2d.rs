@@ -94,29 +94,29 @@ impl RenderContext for BLContext {
 }
 
 impl PathBuilder for BLPath {
-    #[inline] fn new(capacity: u32) -> Self {
+    fn new(capacity: u32) -> Self {
         let mut path = Self::new();
         if capacity != 0 { path.reserve((2 * capacity) as _); }     path
     }   // different commands vary in size for BLPath
-    #[inline] fn close(&mut self) { self.close() }
-    #[inline] fn current_pos(&self) -> Option<Vec2D> {
+    fn close(&mut self) { self.close() }
+    fn current_pos(&self) -> Option<Vec2D> {
         self.get_last_vertex().ok()
             .map(|pt| Vec2D { x: pt.x() as _, y: pt.y() as _ })
     }
 
-    #[inline] fn move_to(&mut self, end: Vec2D) { self.move_to(end.into()) }
-    #[inline] fn line_to(&mut self, end: Vec2D) { self.line_to(end.into()) }
-    #[inline] fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
+    fn move_to(&mut self, end: Vec2D) { self.move_to(end.into()) }
+    fn line_to(&mut self, end: Vec2D) { self.line_to(end.into()) }
+    fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
         self.cubic_to(ocp.into(), icp.into(), end.into())
     }
-    #[inline] fn quad_to(&mut self, cp: Vec2D, end: Vec2D) {
+    fn quad_to(&mut self, cp: Vec2D, end: Vec2D) {
         self.quad_to(cp.into(), end.into())
     }
-    #[inline] fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
+    fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
         self.arc_to(center.into(), (radii.x as _, radii.y as _), start as _, sweep as _)
             .expect("failed to append Blend2D arc")
     }
-    #[inline] fn elliptic_arc_to(&mut self, radii: Vec2D,
+    fn elliptic_arc_to(&mut self, radii: Vec2D,
         x_rot: f32, large: bool, sweep: bool, end: Vec2D) {
         self.elliptic_arc_to((radii.x as _, radii.y as _),
                 x_rot as _, large, sweep, end.into())
@@ -136,27 +136,27 @@ impl PathBuilder for BLPath {
         }); pb
     }
 }
-impl From<Vec2D> for BLPoint { #[inline] fn from(pt: Vec2D) -> Self { (pt.x, pt.y).into() } }
+impl From<Vec2D> for BLPoint { fn from(pt: Vec2D) -> Self { (pt.x, pt.y).into() } }
 
 impl MatrixConv for BLMatrix2D {
     /*  | a b 0 |   BLMatrix2D::transform (A' = B * A)
         | c d 0 |
         | e f 1 | */
-    #[inline] fn identity() -> Self { Self::identity() }
-    #[inline] fn rotate(&mut self, angle: f32) { self.post_rotate(angle as _, None) }
-    #[inline] fn translate(&mut self, pos: Vec2D) { self.post_translate(pos.into()) }
-    #[inline] fn skew_x(&mut self, sk: f32) { self.post_skew((sk as _, 0.)) }
-    #[inline] fn scale(&mut self, sl: Vec2D) { self.post_scale((sl.x as _, sl.y as _)) }
-    #[inline] fn premul(&mut self, tm: &Self) { self.transform(tm) }
+    fn identity() -> Self { Self::identity() }
+    fn rotate(&mut self, angle: f32) { self.post_rotate(angle as _, None) }
+    fn translate(&mut self, pos: Vec2D) { self.post_translate(pos.into()) }
+    fn skew_x(&mut self, sk: f32) { self.post_skew((sk as _, 0.)) }
+    fn scale(&mut self, sl: Vec2D) { self.post_scale((sl.x as _, sl.y as _)) }
+    fn premul(&mut self, tm: &Self) { self.transform(tm) }
 }
 
 impl StyleConv for BLStyle {
-    #[inline] fn solid_color(color: RGBA) -> Self {
+    fn solid_color(color: RGBA) -> Self {
         Self::Solid(BLSolidColor::init_rgba32(color.into())
             .expect("failed to create Blend2D solid color"))
     }
 
-    #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
+    fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
         let stops = stops.iter().map(|&(offset, color)|
                 (offset, color.into()).into()).collect::<Vec<_>>();
         Self::Gradient(BLGradient::new(&BLLinearGradientValues::new(sp.into(), ep.into()))
@@ -164,7 +164,7 @@ impl StyleConv for BLStyle {
             .expect("failed to create Blend2D linear gradient"))
     }
 
-    #[inline] fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
+    fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
             stops: &[(f32, RGBA)]) -> Self {
         let stops = stops.iter().map(|&(offset, color)|
                 (offset, color.into()).into()).collect::<Vec<_>>();
@@ -185,5 +185,5 @@ impl BLStyle {
     }
 }
 impl From<RGBA> for BLRgba32 {
-    #[inline] fn from(color: RGBA) -> Self { (color.r, color.g, color.b, color.a).into() }
+    fn from(color: RGBA) -> Self { (color.r, color.g, color.b, color.a).into() }
 }

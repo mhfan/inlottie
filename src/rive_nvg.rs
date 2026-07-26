@@ -17,7 +17,7 @@ impl<T: Renderer> RiveNVG<T> {  /// # Safety
     /// The returned adapter must not outlive `canvas`, and no other code may access the
     /// canvas while the adapter is in use. `rive-rs::Renderer` currently requires `'static`,
     /// so this invariant cannot be expressed in the type.
-    #[inline] pub unsafe fn new(canvas: &mut femtovg::Canvas<T>) -> Self {
+    pub unsafe fn new(canvas: &mut femtovg::Canvas<T>) -> Self {
         #[allow(clippy::missing_transmute_annotations)]
         Self(unsafe { std::mem::transmute(canvas) }) // force pretend to be 'static
     }
@@ -38,17 +38,17 @@ impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
     type Buffer = Buffer;
     type Image  = Image;
 
-    #[inline] fn state_push(&mut self) { self.0.save(); }
-    #[inline] fn state_pop (&mut self) { self.0.restore(); }
-    #[inline] fn set_clip  (&mut self, _path: &Self::Path) { }  // XXX: not capable
+    fn state_push(&mut self) { self.0.save(); }
+    fn state_pop (&mut self) { self.0.restore(); }
+    fn set_clip  (&mut self, _path: &Self::Path) { }  // XXX: not capable
 
-    #[inline] fn transform(&mut self, trfm: &[f32; 6]) {
+    fn transform(&mut self, trfm: &[f32; 6]) {
         //let trfm = unsafe { &*(trfm.as_ptr() as *const TM2D) };
         self.0.set_transform(&TM2D::new(
             trfm[0], trfm[1], trfm[2], trfm[3], trfm[4], trfm[5]));
     }
 
-    #[inline] fn draw_path(&mut self, path: &Self::Path, paint: &Self::Paint) {
+    fn draw_path(&mut self, path: &Self::Path, paint: &Self::Paint) {
         let inner = if path.1 != FillRule::NonZero {
             Some(paint.inner.clone().with_fill_rule(path.1)) } else { None };
         //if paint.bm != BlendMode::SrcOver { }     // XXX: not capable
@@ -180,18 +180,18 @@ impl renderer::Path for Path {
         }
     }
 
-    #[inline] fn reset(&mut self) { self.0 = VGPath::new(); }
-    #[inline] fn set_fill_rule(&mut self, rule: rpath::FillRule) {
+    fn reset(&mut self) { self.0 = VGPath::new(); }
+    fn set_fill_rule(&mut self, rule: rpath::FillRule) {
         self.1 = match rule {
             rpath::FillRule::NonZero => FillRule::NonZero,
             rpath::FillRule::EvenOdd => FillRule::EvenOdd,
         };
     }
 
-    #[inline] fn    close(&mut self) { self.0.close(); }
-    #[inline] fn  move_to(&mut self,  x: f32,  y: f32) {  self.0.move_to(x, y); }
-    #[inline] fn  line_to(&mut self,  x: f32,  y: f32) {  self.0.line_to(x, y); }
-    #[inline] fn cubic_to(&mut self, ox: f32, oy: f32, ix: f32, iy: f32, x: f32, y: f32) {
+    fn    close(&mut self) { self.0.close(); }
+    fn  move_to(&mut self,  x: f32,  y: f32) {  self.0.move_to(x, y); }
+    fn  line_to(&mut self,  x: f32,  y: f32) {  self.0.line_to(x, y); }
+    fn cubic_to(&mut self, ox: f32, oy: f32, ix: f32, iy: f32, x: f32, y: f32) {
         self.0. bezier_to(ox, oy, ix, iy, x, y);
     }
 }
@@ -199,16 +199,16 @@ impl renderer::Path for Path {
 pub struct Paint { bm: BlendMode, style: PaintStyle, inner: VGPaint, }
 
 impl Default for Paint {
-    #[inline] fn default() -> Self { Self {
+    fn default() -> Self { Self {
         bm: BlendMode::SrcOver, style: PaintStyle::Fill, inner: Default::default()
     } }
 }
 
-#[inline] fn to_femtovg_color(color: renderer::Color) -> femtovg::Color {
+fn to_femtovg_color(color: renderer::Color) -> femtovg::Color {
     femtovg::Color::rgba(color.r, color.g, color.b, color.a)
 }
 
-#[inline] fn _to_femtovg_composite_op(bm: BlendMode) -> CompOp {
+fn _to_femtovg_composite_op(bm: BlendMode) -> CompOp {
     match bm {  // TODO:
         BlendMode::SrcOver => CompOp::SourceOver,
         BlendMode::Screen  | BlendMode::Darken  | BlendMode::Overlay | BlendMode::Lighten |
@@ -222,10 +222,10 @@ impl Default for Paint {
 }
 
 impl renderer::Paint for Paint {    type Gradient = Gradient;
-    #[inline] fn set_style(&mut self, style: PaintStyle) { self.style = style; }
-    #[inline] fn set_thickness(&mut self, thick: f32) { self.inner.set_line_width(thick); }
+    fn set_style(&mut self, style: PaintStyle) { self.style = style; }
+    fn set_thickness(&mut self, thick: f32) { self.inner.set_line_width(thick); }
 
-    #[inline] fn set_join(&mut self, join: renderer::StrokeJoin) {  use femtovg::LineJoin;
+    fn set_join(&mut self, join: renderer::StrokeJoin) {  use femtovg::LineJoin;
         self.inner.set_line_join(match join {
             renderer::StrokeJoin::Miter => LineJoin::Miter,
             renderer::StrokeJoin::Round => LineJoin::Round,
@@ -233,7 +233,7 @@ impl renderer::Paint for Paint {    type Gradient = Gradient;
         });
     }
 
-    #[inline] fn set_cap (&mut self,  cap: renderer::StrokeCap) {   use femtovg::LineCap;
+    fn set_cap (&mut self,  cap: renderer::StrokeCap) {   use femtovg::LineCap;
         self.inner.set_line_cap(match cap {
             renderer::StrokeCap::Butt   => LineCap::Butt,
             renderer::StrokeCap::Round  => LineCap::Round,
@@ -241,7 +241,7 @@ impl renderer::Paint for Paint {    type Gradient = Gradient;
         });
     }
 
-    #[inline] fn set_color(&mut self, color: renderer::Color) {
+    fn set_color(&mut self, color: renderer::Color) {
         self.inner.set_color(to_femtovg_color(color));
     }
     fn set_gradient(&mut self, grad: &Self::Gradient) {
@@ -262,8 +262,8 @@ impl renderer::Paint for Paint {    type Gradient = Gradient;
         paint.set_line_cap  (self.inner.line_cap_start());  self.inner = paint;
     }
 
-    #[inline] fn set_blend_mode(&mut self, bm: BlendMode) { self.bm = bm; }
-    #[inline] fn invalidate_stroke(&mut self) { } // not needed in femtovg?
+    fn set_blend_mode(&mut self, bm: BlendMode) { self.bm = bm; }
+    fn invalidate_stroke(&mut self) { } // not needed in femtovg?
 }
 
 enum GradientBase {
@@ -277,13 +277,13 @@ pub struct Gradient {
 }
 
 impl renderer::Gradient for Gradient {
-    #[inline] fn new_linear(sx: f32, sy: f32, ex: f32, ey: f32,
+    fn new_linear(sx: f32, sy: f32, ex: f32, ey: f32,
         colors: &[renderer::Color], stops: &[f32]) -> Self { Self {
             base: GradientBase::Linear { sx, sy, ex, ey },
             stops: stops.iter().copied().zip(colors.iter().copied()).collect(),
     } } //debug_assert!(stops.len() == colors.len());
 
-    #[inline] fn new_radial(cx: f32, cy: f32, radius: f32,
+    fn new_radial(cx: f32, cy: f32, radius: f32,
         colors: &[renderer::Color], stops: &[f32]) -> Self { Self {
             base: GradientBase::Radial { cx, cy, radius },
             stops: stops.iter().copied().zip(colors.iter().copied()).collect(),
@@ -294,9 +294,9 @@ pub struct Buffer(Vec<u8>);
 pub struct Image(Vec<u8>);
 
 impl renderer::Buffer for Buffer {
-    #[inline] fn new(_: BufferType, _: BufferFlags, len: usize) -> Self { Self(vec![0; len]) }
-    #[inline] fn map(&mut self) -> &mut [u8] { &mut self.0 }
-    #[inline] fn unmap(&mut self) {}
+    fn new(_: BufferType, _: BufferFlags, len: usize) -> Self { Self(vec![0; len]) }
+    fn map(&mut self) -> &mut [u8] { &mut self.0 }
+    fn unmap(&mut self) {}
 }
 
 impl renderer::Image for Image {

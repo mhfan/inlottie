@@ -32,7 +32,7 @@ use vello::{Scene, peniko};
 /// Append an [`usvg::Tree`] to a vello [`Scene`](vello::Scene), with default error handling.
 ///
 /// This will draw a red box over (some) unsupported elements.
-#[inline] pub fn render_tree(scene: &mut Scene, svg: &usvg::Tree) {
+pub fn render_tree(scene: &mut Scene, svg: &usvg::Tree) {
     render_tree_with(scene, svg, &mut util::default_error_handler);
 }
 
@@ -41,7 +41,7 @@ use vello::{Scene, peniko};
 ///
 /// See the [module level documentation](crate#unsupported-features)
 /// for a list of some unsupported svg features
-#[inline] pub fn render_tree_with<F: FnMut(&mut Scene, &usvg::Node)>(
+pub fn render_tree_with<F: FnMut(&mut Scene, &usvg::Node)>(
     scene: &mut Scene, svg: &usvg::Tree, error_handler: &mut F) {
     render_group(scene, svg.root(), vello::kurbo::Affine::IDENTITY, error_handler);
 }
@@ -155,11 +155,11 @@ mod util {
 use vello::kurbo::{Affine, BezPath, Rect, Stroke};
 use vello::peniko::{self, Brush, Color, Fill, color::palette};
 
-#[inline] pub fn to_affine(ts: &usvg::Transform) -> Affine {
+pub fn to_affine(ts: &usvg::Transform) -> Affine {
     Affine::new([ts.sx, ts.ky, ts.kx, ts.sy, ts.tx, ts.ty].map(f64::from))
 }
 
-#[inline] pub fn to_fill_rule(rule: usvg::FillRule) -> Fill {
+pub fn to_fill_rule(rule: usvg::FillRule) -> Fill {
     match rule {
         usvg::FillRule::NonZero => Fill::NonZero,
         usvg::FillRule::EvenOdd => Fill::EvenOdd,
@@ -204,7 +204,7 @@ pub fn to_bez_path(path: &usvg::Path) -> BezPath {
 
 pub fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(Brush, Affine)> {
     use peniko::{ColorStop, Gradient};
-    #[inline] fn convert_stops(stops: &[usvg::Stop], opacity: usvg::Opacity) -> Vec<ColorStop> {
+    fn convert_stops(stops: &[usvg::Stop], opacity: usvg::Opacity) -> Vec<ColorStop> {
         stops.iter().map(|stop| ColorStop {     offset: stop.offset().get(),
             color: Color::from_rgba8(stop.color().red, stop.color().green, stop.color().blue,
                 (stop.opacity() * opacity).to_u8()).into()

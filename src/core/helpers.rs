@@ -7,23 +7,23 @@ use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 #[derive(Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
 #[serde(transparent)] pub struct IntBool(u8);
 
-impl IntBool { #[inline] pub fn as_bool(&self) -> bool { (*self).into() } }
-impl From<IntBool> for bool { #[inline] fn from(value: IntBool) -> Self { value.0 != 0 } }
+impl IntBool { pub fn as_bool(&self) -> bool { (*self).into() } }
+impl From<IntBool> for bool { fn from(value: IntBool) -> Self { value.0 != 0 } }
 impl From<bool> for IntBool { fn from(value: bool) -> Self { Self(if value { 1 } else { 0 }) } }
 
 /* #[derive(Clone, Copy)] pub struct Rgb  { pub r: u8, pub g: u8, pub b: u8 }
-impl Rgb {  #[inline] pub fn new_u8 (r:  u8, g:  u8, b:  u8) -> Self { Self { r, g, b } }
-            #[inline] pub fn new_f32(r: f32, g: f32, b: f32) -> Self { Self {
+impl Rgb {  pub fn new_u8 (r:  u8, g:  u8, b:  u8) -> Self { Self { r, g, b } }
+            pub fn new_f32(r: f32, g: f32, b: f32) -> Self { Self {
         r: (r * 255. + 0.5) as _, g: (g * 255. + 0.5) as _, b: (b * 255. + 0.5) as _
     } }
 } */
 
 #[derive(Clone, Copy)] pub struct RGBA { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }
-impl Default for RGBA { #[inline] fn default() -> Self { Self { r: 0, g: 0, b: 0, a: 255 } } }
+impl Default for RGBA { fn default() -> Self { Self { r: 0, g: 0, b: 0, a: 255 } } }
 
 impl RGBA {
-    #[inline] pub fn new_u8 (r:  u8, g:  u8, b:  u8, a:  u8) -> Self { Self { r, g, b, a } }
-    #[inline] pub fn new_f32(r: f32, g: f32, b: f32, a: f32) -> Self { Self {
+    pub fn new_u8 (r:  u8, g:  u8, b:  u8, a:  u8) -> Self { Self { r, g, b, a } }
+    pub fn new_f32(r: f32, g: f32, b: f32, a: f32) -> Self { Self {
         r: (r * 255. + 0.5) as _, g: (g * 255. + 0.5) as _,
         b: (b * 255. + 0.5) as _, a: (a * 255. + 0.5) as _
     } }
@@ -69,16 +69,16 @@ impl core::fmt::Display for RGBA {
     }
 }
 
-#[inline] pub(crate) fn str_to_rgba<'de, D: Deserializer<'de>>(deserializer: D) ->
+pub(crate) fn str_to_rgba<'de, D: Deserializer<'de>>(deserializer: D) ->
     Result<RGBA, D::Error> { String::deserialize(deserializer)?.parse().map_err(D::Error::custom) }
 
-#[inline] pub(crate) fn str_from_rgba<S: Serializer>(c: &RGBA, serializer: S) ->
+pub(crate) fn str_from_rgba<S: Serializer>(c: &RGBA, serializer: S) ->
     Result<S::Ok, S::Error> { serializer.serialize_str(&c.to_string()) }
 
 #[derive(Clone, Copy)] pub struct Vec2D { pub x: f32, pub y: f32 }
 //impl From<Vec2D> for (f32, f32) { fn from(val: Vec2D) -> Self { (val.x, val.y) } }
 impl From<(f32, f32)> for Vec2D {   // for Point/Size/Position/Scale
-    #[inline] fn from((x, y): (f32, f32)) -> Self { Self { x, y } }
+    fn from((x, y): (f32, f32)) -> Self { Self { x, y } }
 }
 
 impl<'de> Deserialize<'de> for Vec2D {
@@ -92,14 +92,14 @@ impl<'de> Deserialize<'de> for Vec2D {
 }
 
 impl Serialize for Vec2D {
-    #[inline] fn serialize<S: Serializer>(&self, serializer: S) ->
+    fn serialize<S: Serializer>(&self, serializer: S) ->
         Result<S::Ok, S::Error> { [self.x, self.y].serialize(serializer) }
 }
 
 #[derive(Clone)] pub struct ColorList(pub Vec<(f32, RGBA)>); // (offset, color) for Gradient
 
 impl  core::ops::Deref for ColorList {  type Target = [(f32, RGBA)];
-    #[inline] fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 impl<'de> Deserialize<'de> for ColorList {
@@ -158,7 +158,7 @@ pub(crate) mod defaults { #![allow(unused)]
     pub fn opacity() -> Value { Value::from_value(100.) }
     pub fn animated2d() -> Animated2D { Animated2D::from_value((100., 100.).into()) }
 
-    #[inline] pub fn is_default<T: Default + PartialEq>(v: &T) -> bool { *v == T::default() }
+    pub fn is_default<T: Default + PartialEq>(v: &T) -> bool { *v == T::default() }
 }
 
 pub use crate::core::schema_impl::{AnyAsset, AnyValue, UnresolvedSlot};
@@ -238,40 +238,40 @@ pub fn fast_atan2(y: f32, x: f32) -> f32 {  use core::f32::consts::PI;
 
 use core::ops::{Div, Mul, Add, Sub, Neg};
 impl Div<f32> for Vec2D {  type Output =  Self;
-    #[inline] fn div(self, scale: f32) -> Self {
+    fn div(self, scale: f32) -> Self {
         Self { x: self.x / scale, y: self.y / scale }
     }
 }
 impl Mul<f32> for Vec2D {  type Output =  Self;
-    #[inline] fn mul(self, scale: f32) -> Self {
+    fn mul(self, scale: f32) -> Self {
         Self { x: self.x * scale, y: self.y * scale }
     }
 }
 impl Add<f32> for Vec2D {  type Output =   Self;
-    #[inline] fn add(self, offset: f32) -> Self {
+    fn add(self, offset: f32) -> Self {
         Self { x: self.x + offset, y: self.y + offset }
     }
 }
 impl Sub<f32> for Vec2D {  type Output =   Self;
-    #[inline] fn sub(self, offset: f32) -> Self {
+    fn sub(self, offset: f32) -> Self {
         Self { x: self.x - offset, y: self.y - offset }
     }
 }
 impl Add for Vec2D {  type Output = Self;
-    #[inline] fn add(self, rhs: Self) -> Self {
+    fn add(self, rhs: Self) -> Self {
         Self { x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }
 impl Sub for Vec2D {  type Output = Self;
-    #[inline] fn sub(self, rhs: Self) -> Self {
+    fn sub(self, rhs: Self) -> Self {
         Self { x: self.x - rhs.x, y: self.y - rhs.y }
     }
 }
 impl Neg for Vec2D {  type Output = Self;
-    #[inline] fn neg(self) -> Self { Self { x: -self.x, y: -self.y } }
+    fn neg(self) -> Self { Self { x: -self.x, y: -self.y } }
 }
 impl Vec2D {
-    #[inline] pub fn from_polar(angle: f32) -> Self { Self { x: angle.cos(), y: angle.sin() } }
+    pub fn from_polar(angle: f32) -> Self { Self { x: angle.cos(), y: angle.sin() } }
 }
 
 /** https://github.com/hannesmann/keyframe, https://github.com/gre/bezier-easing,
@@ -301,9 +301,9 @@ impl CubicBezierEasing {    // https://pomax.github.io/bezierinfo
     //  A = 3b - 3c + d - a  = 3 * x1 - 3 * x2 + 1.
     //  B = 3a - 6b + 3c     = 3 * x2 - 6 * x1
     //  C = 3b - 3a          = 3 * x1
-    #[inline] fn a(x1: f32, x2: f32) -> f32 { 3.0 * x1 - 3.0 * x2 + 1.0 }
-    #[inline] fn b(x1: f32, x2: f32) -> f32 { 3.0 * x2 - 6.0 * x1 }
-    #[inline] fn c(x1: f32) -> f32 { 3.0 * x1 }
+    fn a(x1: f32, x2: f32) -> f32 { 3.0 * x1 - 3.0 * x2 + 1.0 }
+    fn b(x1: f32, x2: f32) -> f32 { 3.0 * x2 - 6.0 * x1 }
+    fn c(x1: f32) -> f32 { 3.0 * x1 }
 
     fn at(t: f32, x1: f32, x2: f32) -> f32 {
         ((Self::a(x1, x2) * t + Self::b(x1, x2)) * t + Self::c(x1)) * t
@@ -337,7 +337,7 @@ impl CubicBezierEasing {    // https://pomax.github.io/bezierinfo
             Self::at(Self::calc_t(x, self.p1.0, self.p2.0), self.p1.1, self.p2.1)
         }
     }
-    #[inline] pub fn new(p1: (f32, f32), p2: (f32, f32)) -> Self { Self { p1, p2 } }
+    pub fn new(p1: (f32, f32), p2: (f32, f32)) -> Self { Self { p1, p2 } }
 
     pub fn linear()      -> Self { Self::new((0.00, 0.0), (1.00, 1.0)) }
     pub fn ease()        -> Self { Self::new((0.25, 0.1), (0.25, 1.0)) }
@@ -365,14 +365,14 @@ impl CubicBezierEasing {    // https://pomax.github.io/bezierinfo
 }
 
 impl From<(f32, f32, f32, f32)> for CubicBezierEasing {
-    #[inline] fn from(cp: (f32, f32, f32, f32)) -> Self { Self::new((cp.0, cp.1), (cp.2, cp.3)) }
+    fn from(cp: (f32, f32, f32, f32)) -> Self { Self::new((cp.0, cp.1), (cp.2, cp.3)) }
 }
 
 /*  https://www.w3.org/TR/css-easing-1/#cubic-bezier-easing-functions
     http://robertpenner.com/easing/, https://lib.rs/keywords/easing,
     https://github.com/orhanbalci/rust-easing, https://github.com/sanbox-irl/tween */
 impl From<[f32; 4]> for CubicBezierEasing {
-    #[inline] fn from(cp: [f32; 4]) -> Self { Self::new((cp[0], cp[1]), (cp[2], cp[3])) }
+    fn from(cp: [f32; 4]) -> Self { Self::new((cp[0], cp[1]), (cp[2], cp[3])) }
 }
 
 pub trait Tween { fn lerp(&self, other: &Self, t: f32) -> Self; // Linear intERPolation
@@ -381,8 +381,8 @@ pub trait Tween { fn lerp(&self, other: &Self, t: f32) -> Self; // Linear intERP
 }
 
 impl Tween for f32 {
-    #[inline] fn lerp(&self, other: &Self, t: f32) -> Self { self + (other - self) * t }
-    //#[inline] fn lerp(&self, other: &Self, t: f32) -> Self { self * (1. - t) + other * t }
+    fn lerp(&self, other: &Self, t: f32) -> Self { self + (other - self) * t }
+    // fn lerp(&self, other: &Self, t: f32) -> Self { self * (1. - t) + other * t }
 }
 
 impl Tween for Vec2D {
@@ -393,7 +393,7 @@ impl Tween for Vec2D {
 
     fn bezc(&self, other: &Self, t: f32, extra: &PositionExtra) -> Self {
         /* impl From<&Vec2D> for Coord2 {
-            #[inline] fn from(val: &Vec2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
+            fn from(val: &Vec2D) -> Self { Self { x: val.x as _, y: val.y as _ } }
         }   use flo_curves::{bezier::Curve, BezierCurve, BezierCurveFactory, Coord2};
         let bezier = Curve::from_points((*self).into(), ((*self + extra.to).into(),
             (*other + extra.ti).into()), (*other).into());
@@ -407,7 +407,7 @@ impl Tween for Vec2D {
         }   let pt = bezier.point_at_pos((tmin + tmax) / 2.); */
 
         #[allow(non_local_definitions)] impl From<Vec2D> for Point {
-            #[inline] fn from(val: Vec2D) -> Self { (val.x, val.y).into() }
+            fn from(val: Vec2D) -> Self { (val.x, val.y).into() }
         }   use kurbo::{CubicBez, ParamCurve, ParamCurveArclen, Point};
         let curve = CubicBez::new::<Point>((*self).into(), (*self + extra.to).into(),
             (*other + extra.ti).into(), (*other).into());

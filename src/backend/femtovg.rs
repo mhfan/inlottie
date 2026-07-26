@@ -15,24 +15,24 @@ use femtovg::{PixelFormat, ImageFlags, RenderTarget,
 const CLEAR_COLOR: VGColor = VGColor::rgbaf(0., 0., 0., 0.);
 
 impl PathBuilder for femtovg::Path {
-    #[inline] fn new(_capacity: u32) -> Self { Self::new() }    // XXX: can't make reservation
-    #[inline] fn close(&mut self) { self.close() }
+    fn new(_capacity: u32) -> Self { Self::new() }    // XXX: can't make reservation
+    fn close(&mut self) { self.close() }
 
-    #[inline] fn move_to(&mut self, end: Vec2D) { self.move_to(end.x, end.y) }
-    #[inline] fn line_to(&mut self, end: Vec2D) { self.line_to(end.x, end.y) }
-    #[inline] fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
+    fn move_to(&mut self, end: Vec2D) { self.move_to(end.x, end.y) }
+    fn line_to(&mut self, end: Vec2D) { self.line_to(end.x, end.y) }
+    fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
         self.bezier_to(ocp.x, ocp.y, icp.x, icp.y, end.x, end.y)
     }
-    #[inline] fn quad_to(&mut self, cp: Vec2D, end: Vec2D) {
+    fn quad_to(&mut self, cp: Vec2D, end: Vec2D) {
         self.quad_to(cp.x, cp.y, end.x, end.y)
     }
-    #[inline] fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
+    fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
         self.arc(center.x, center.y, (radii.x + radii.y) / 2.,
             start as _, sweep as _, femtovg::Solidity::Solid)   // XXX:
         //self.arc_to(x1, y1, x2, y2, (radii.x + radii.y) / 2.);
     }
 
-    #[inline] fn current_pos(&self) -> Option<Vec2D> {  use femtovg::Verb::*;
+    fn current_pos(&self) -> Option<Vec2D> {  use femtovg::Verb::*;
         match self.verbs().last()? {
             MoveTo(x, y) => Some((x, y).into()),
             LineTo(x, y) => Some((x, y).into()),
@@ -57,29 +57,29 @@ impl MatrixConv for femtovg::Transform2D {
     /*  |a c e|              Transform2D::multiply (A' = B * A)
         |b d f|
         |0 0 1| */
-    #[inline] fn identity() -> Self { Self::identity() }
-    #[inline] fn skew_x(&mut self, sk: f32) { self.skew_x(sk) }
-    #[inline] fn rotate(&mut self, angle: f32) { self.rotate(angle) }
-    #[inline] fn translate(&mut self, pos: Vec2D) { self.translate(pos.x, pos.y) }
-    #[inline] fn scale(&mut self, sl: Vec2D) { self.scale(sl.x, sl.y) }
-    #[inline] fn premul(&mut self, tm: &Self) { self.premultiply(tm) }
+    fn identity() -> Self { Self::identity() }
+    fn skew_x(&mut self, sk: f32) { self.skew_x(sk) }
+    fn rotate(&mut self, angle: f32) { self.rotate(angle) }
+    fn translate(&mut self, pos: Vec2D) { self.translate(pos.x, pos.y) }
+    fn scale(&mut self, sl: Vec2D) { self.scale(sl.x, sl.y) }
+    fn premul(&mut self, tm: &Self) { self.premultiply(tm) }
 }
 
 impl StyleConv for femtovg::Paint {
-    #[inline] fn solid_color(color: RGBA) -> Self { Self::color(color.into()) }
-    #[inline] fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
+    fn solid_color(color: RGBA) -> Self { Self::color(color.into()) }
+    fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
         Self::linear_gradient_stops(sp.x, sp.y, ep.x, ep.y,
             stops.iter().map(|&(offset, color)| (offset, color.into())))
     }
 
-    #[inline] fn radial_gradient(cp: Vec2D, _fp: Vec2D, radii: (f32, f32),
+    fn radial_gradient(cp: Vec2D, _fp: Vec2D, radii: (f32, f32),
             stops: &[(f32, RGBA)]) -> Self {
         Self::radial_gradient_stops(cp.x, cp.y, radii.0, radii.1,
             stops.iter().map(|&(offset, color)| (offset, color.into())))
     }
 }
 impl From<RGBA> for VGColor {
-    #[inline] fn from(color: RGBA) -> Self { Self::rgba(color.r, color.g, color.b, color.a) }
+    fn from(color: RGBA) -> Self { Self::rgba(color.r, color.g, color.b, color.a) }
 }
 
 impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canvas<T> {
