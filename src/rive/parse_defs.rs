@@ -279,8 +279,34 @@ fn generate_rs_file(objects: &[ObjectInfo], output: &Path) -> Result<()> {
         writeln!(writer, "    pub const {}: u32 = {};", const_name, prop_id)?;
     }   writeln!(writer, "}}\n")?;
 
+    for (kind, return_type, fallback) in [
+        ("float", "f32", "0.0"), ("varuint", "u32", "0"), ("color", "u32", "0"),
+        ("boolean", "bool", "false"), ("bytes", "&'static [u8]", "b\"\""), ] {
+        writeln!(writer, "pub fn core_{kind}_default(id: u32) -> {return_type} {{
+    match id {{")?;
+        let mut defaults = std::collections::BTreeMap::new();
+        for object in objects {
+            for prop in &object.properties {
+                let Some(prop_id) = prop.property_id else { continue };
+                let (prop_accessor, _, default) = accessor(prop);
+                if prop_accessor == kind {
+                    if let Some(default) = default { defaults.insert(prop_id, default); }
+                }
+            }
+        }
+        for (prop_id, default) in defaults {
+            writeln!(writer, "        property_ids::{} => {default},",
+                id_to_const_name.get(&prop_id).unwrap())?;
+        }
+        writeln!(writer, "        _ => {fallback},
+    }}
+}}\n")?;
+    }
+
     writeln!(writer, "pub mod objects {{
-    use super::{{DecodeError, Object, Result, object_ids, property_ids}};\n")?;
+    use super::{{DecodeError, Object, Result, object_ids, property_ids,
+        core_boolean_default, core_bytes_default, core_color_default,
+        core_float_default, core_varuint_default}};\n")?;
     for obj in objects {
         let type_name = pascal_case(&obj.name);
         let object_id = screaming_snake(&obj.name);
@@ -306,10 +332,11 @@ fn generate_rs_file(objects: &[ObjectInfo], output: &Path) -> Result<()> {
             let Some(prop_id) = prop.property_id else { continue };
             let prop_const = id_to_const_name.get(&prop_id).unwrap();
             let (accessor, return_type, default) = accessor(prop);
-            if let Some(default) = default {
+            if default.is_some() {
                 writeln!(writer,
                     "        pub fn {method}(&self) -> Result<{return_type}> {{ \
-                     Ok(self.0.{accessor}(property_ids::{prop_const})?.unwrap_or({default})) }}")?;
+                     Ok(self.0.{accessor}(property_ids::{prop_const})?.unwrap_or_else(|| \
+                     core_{accessor}_default(property_ids::{prop_const}))) }}")?;
             } else {
                 writeln!(writer,
                     "        pub fn {method}(&self) -> Result<Option<{return_type}>> {{ \

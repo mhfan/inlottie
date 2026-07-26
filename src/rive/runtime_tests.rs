@@ -1,0 +1,492 @@
+
+use super::*;
+use std::io::Cursor;
+use crate::rive::decode::{FieldValue, Header, VarUInt};
+
+fn file(objects: Vec<Object>) -> RiveFile { RiveFile {
+        header: Header {
+            majorv: VarUInt(1), minorv: VarUInt(0),
+            fileid: VarUInt(0), toc: Vec::new(),
+        },  ocoll: objects,
+} }
+
+fn prop(object: &mut Object, id: u32, value: f32) {
+    object.add_prop(VarUInt(id), FieldValue::Float32(value));
+}
+
+fn uint_prop(object: &mut Object, id: u32, value: u32) {
+    object.add_prop(VarUInt(id), FieldValue::VarUInt(VarUInt(value)));
+}
+
+fn artboard() -> Object { Object::new_simple(object_ids::ARTBOARD) }
+
+fn parented(type_id: u32, parent: u32) -> Object {
+    let mut object = Object::new_simple(type_id);
+    object.add_prop(VarUInt(property_ids::COMPONENT_PARENTID),
+        FieldValue::VarUInt(VarUInt(parent)));
+    object
+}
+
+fn straight(x: f32, y: f32, radius: f32) -> Vertex {
+    Vertex { position: Point { x, y }, incoming: None, outgoing: None, radius }
+}
+
+#[test] fn rounds_interior_straight_vertex() {
+    let path = build_path(&[straight(0.0, 0.0, 0.0),
+        straight(10.0, 0.0, 2.0), straight(10.0, 10.0, 0.0)], false);
+    assert_eq!(path.commands[1], PathCommand::LineTo(Point { x: 8.0, y: 0.0 }));
+    let PathCommand::CubicTo { ctrl1, ctrl2, to } = path.commands[2] else { panic!() };
+    assert!((ctrl1.x - 9.104_569).abs() < 1e-5 && ctrl1.y == 0.0);
+    assert!(ctrl2.x == 10.0 && (ctrl2.y - 0.895_431).abs() < 1e-5);
+    assert_eq!(to, Point { x: 10.0, y: 2.0 });
+}
+
+#[test] fn clamps_radius_and_leaves_open_endpoints_square() {
+    let rounded = build_path(&[straight(0.0, 0.0, 0.0),
+        straight(10.0, 0.0, 100.0), straight(10.0, 10.0, 0.0)], false);
+    assert_eq!(rounded.commands[1], PathCommand::LineTo(Point { x: 5.0, y: 0.0 }));
+    let PathCommand::CubicTo { to, .. } = rounded.commands[2] else { panic!() };
+    assert_eq!(to, Point { x: 10.0, y: 5.0 });
+
+    let endpoints = build_path(&[straight(0.0, 0.0, 2.0),
+        straight(10.0, 0.0, 0.0), straight(10.0, 10.0, 2.0)], false);
+    assert_eq!(&*endpoints.commands, &[
+        PathCommand::MoveTo(Point { x: 0.0, y: 0.0 }),
+        PathCommand::LineTo(Point { x: 10.0, y: 0.0 }),
+        PathCommand::LineTo(Point { x: 10.0, y: 10.0 }),
+    ]);
+}
+
+#[test] fn negative_radius_reverses_corner_controls() {
+    let vertices = |radius| [straight(0.0, 0.0, 0.0),
+        straight(10.0, 0.0, radius), straight(10.0, 10.0, 0.0)];
+    let (positive, negative) = (build_path(&vertices(2.0), false),
+        build_path(&vertices(-2.0), false));
+    let (PathCommand::CubicTo { ctrl1: pos1, ctrl2: pos2, .. },
+         PathCommand::CubicTo { ctrl1: neg1, ctrl2: neg2, .. }) =
+        (positive.commands[2], negative.commands[2]) else { panic!() };
+    assert_ne!((pos1, pos2), (neg1, neg2));
+    assert!(neg1.x.is_finite() && neg1.y.is_finite() &&
+            neg2.x.is_finite() && neg2.y.is_finite());
+}
+
+#[test] fn emits_static_geometry_with_retained_parent_transforms() {
+    let mut parent = parented(object_ids::NODE, 0);
+    prop(&mut parent, property_ids::NODE_X, 10.0);
+    prop(&mut parent, property_ids::NODE_Y, 20.0);
+
+    let mut ellipse = parented(object_ids::ELLIPSE, 1);
+    prop(&mut ellipse, property_ids::NODE_X, 5.0);
+    prop(&mut ellipse, property_ids::PARAMETRICPATH_WIDTH,  40.0);
+    prop(&mut ellipse, property_ids::PARAMETRICPATH_HEIGHT, 20.0);
+
+    let runtime = Runtime::from_file(file(vec![artboard(), parent, ellipse])).unwrap();
+    let list = runtime.display_list();
+    assert_eq!(runtime.component_count(), 3);
+    assert_eq!(list.primitives.len(), 1);
+    assert_eq!(list.primitives[0].geometries[0].transform.tx, 15.0);
+    assert_eq!(list.primitives[0].geometries[0].transform.ty, 20.0);
+    assert_eq!(list.primitives[0].geometries[0].geometry,
+        Geometry::Ellipse(Rect { x: -20.0, y: -10.0, width: 40.0, height: 20.0 }));
+}
+
+#[test] fn selects_one_artboard_without_crossing_contexts() {
+    let objects = || {
+        let mut first = parented(object_ids::ELLIPSE, 0);
+        prop(&mut first, property_ids::PARAMETRICPATH_WIDTH, 10.0);
+        let mut second = parented(object_ids::ELLIPSE, 0);
+        prop(&mut second, property_ids::PARAMETRICPATH_WIDTH, 20.0);
+        vec![artboard(), first, artboard(), second]
+    };
+
+    let first = Runtime::from_file(file(objects())).unwrap();
+    assert_eq!(first.artboard_object_index(), 0);
+    assert_eq!(first.component_count(), 2);
+    let second = Runtime::from_artboard(file(objects()), 1).unwrap();
+    assert_eq!(second.artboard_object_index(), 2);
+    assert_eq!(second.component_count(), 2);
+    assert!(matches!(
+        second.display_list().primitives[0].geometries[0].geometry,
+        Geometry::Ellipse(Rect { width: 20.0, .. })));
+    assert!(matches!(Runtime::from_artboard(file(objects()), 2),
+        Err(RuntimeError::ArtboardNotFound(2))));
+}
+
+#[test] fn rectangle_defaults_to_linked_corner_radii() {
+    let mut rectangle = parented(object_ids::RECTANGLE, 0);
+    prop(&mut rectangle, property_ids::PARAMETRICPATH_WIDTH,  20.0);
+    prop(&mut rectangle, property_ids::PARAMETRICPATH_HEIGHT, 10.0);
+    prop(&mut rectangle, property_ids::RECTANGLE_CORNERRADIUSTL, 3.0);
+
+    let runtime = Runtime::from_file(file(vec![artboard(), rectangle])).unwrap();
+    let Geometry::RoundedRect { radii, .. } =
+        &runtime.display_list().primitives[0].geometries[0].geometry else { panic!() };
+    assert_eq!(*radii, CornerRadii {
+        top_left: 3.0, top_right: 3.0, bottom_right: 3.0, bottom_left: 3.0,
+    });
+}
+
+#[test] fn builds_triangle_polygon_and_star_paths() {
+    let mut triangle = parented(object_ids::TRIANGLE, 0);
+    prop(&mut triangle, property_ids::PARAMETRICPATH_WIDTH,  20.0);
+    prop(&mut triangle, property_ids::PARAMETRICPATH_HEIGHT, 10.0);
+
+    let mut polygon = parented(object_ids::POLYGON, 0);
+    prop(&mut polygon, property_ids::PARAMETRICPATH_WIDTH,  20.0);
+    prop(&mut polygon, property_ids::PARAMETRICPATH_HEIGHT, 10.0);
+    uint_prop(&mut polygon, property_ids::POINTS, 4);
+    prop(&mut polygon, property_ids::CORNERRADIUS, 1.0);
+
+    let mut star = parented(object_ids::STAR, 0);
+    prop(&mut star, property_ids::PARAMETRICPATH_WIDTH,  20.0);
+    prop(&mut star, property_ids::PARAMETRICPATH_HEIGHT, 10.0);
+    uint_prop(&mut star, property_ids::POINTS, 5);
+    prop(&mut star, property_ids::INNERRADIUS, 0.5);
+
+    let runtime = Runtime::from_file(file(vec![artboard(), triangle, polygon, star])).unwrap();
+    let list = runtime.display_list();
+    let paths: Vec<_> = list.primitives.iter().map(|primitive| {
+        let Geometry::Path(path) = &primitive.geometries[0].geometry else { panic!() };
+        path
+    }).collect();
+    assert_eq!(&*paths[0].commands, &[
+        PathCommand::MoveTo(Point { x: 0.0, y: -5.0 }),
+        PathCommand::LineTo(Point { x: 10.0, y: 5.0 }),
+        PathCommand::LineTo(Point { x: -10.0, y: 5.0 }),
+        PathCommand::Close,
+    ]);
+    assert_eq!(paths[1].commands.iter()
+        .filter(|command| matches!(command, PathCommand::CubicTo { .. })).count(), 4);
+    assert_eq!(paths[2].commands.len(), 11);
+    let PathCommand::MoveTo(first) = paths[2].commands[0] else { panic!() };
+    assert!(first.x.abs() < 1e-6 && first.y == -5.0);
+}
+
+#[test] fn resolves_parent_ids_through_component_indices() {
+    let ignored = Object::new_simple(u32::MAX);
+    let mut parent  = parented(object_ids::NODE, 0);
+    prop(&mut parent, property_ids::NODE_X, 10.0);
+    let mut ellipse = parented(object_ids::ELLIPSE, 2);
+    prop(&mut ellipse, property_ids::NODE_X, 5.0);
+
+    let runtime =
+        Runtime::from_file(file(vec![artboard(), ignored, parent, ellipse])).unwrap();
+    assert_eq!(runtime.display_list().primitives[0].geometries[0].transform.tx, 15.0);
+}
+
+#[test] fn rejects_invalid_geometry_during_construction() {
+    let mut ellipse = parented(object_ids::ELLIPSE, 0);
+    ellipse.add_prop(VarUInt(property_ids::PARAMETRICPATH_WIDTH),
+        FieldValue::VarUInt(VarUInt(10)));
+
+    assert!(matches!(Runtime::from_file(file(vec![artboard(), ellipse])),
+            Err(RuntimeError::Decode(DecodeError::PropTypeMismatch { .. }))));
+}
+
+#[test] fn rejects_excessive_parametric_vertex_counts() {
+    let mut star = parented(object_ids::STAR, 0);
+    uint_prop(&mut star, property_ids::POINTS, u32::from(u16::MAX));
+    assert!(matches!(Runtime::from_file(file(vec![artboard(), star])),
+        Err(RuntimeError::TooManyVertices(131_070))));
+}
+
+#[test] fn builds_points_path_with_fill_and_stroke() {
+    let shape = parented(object_ids::SHAPE, 0);
+    let mut path = parented(object_ids::POINTS_PATH, 1);
+    path.add_prop(VarUInt(property_ids::POINTSCOMMONPATH_ISCLOSED),
+        FieldValue::VarUInt(VarUInt(1)));
+
+    let mut first  = parented(object_ids::STRAIGHT_VERTEX, 2);
+    prop(&mut first, property_ids::VERTEX_X, 10.0);
+    let mut second = parented(object_ids::STRAIGHT_VERTEX, 2);
+    prop(&mut second, property_ids::VERTEX_Y, 20.0);
+
+    let mut fill = parented(object_ids::FILL, 1);
+    fill.add_prop(VarUInt(property_ids::FILL_FILLRULE),
+        FieldValue::VarUInt(VarUInt(1)));
+    let mut fill_color = parented(object_ids::SOLID_COLOR, 5);
+    fill_color.add_prop(VarUInt(property_ids::SOLIDCOLOR_COLORVALUE),
+        FieldValue::Color(0xff11_2233));
+
+    let mut stroke = parented(object_ids::STROKE, 1);
+    prop(&mut stroke, property_ids::THICKNESS, 3.0);
+    let mut stroke_color = parented(object_ids::SOLID_COLOR, 7);
+    stroke_color.add_prop(VarUInt(property_ids::SOLIDCOLOR_COLORVALUE),
+        FieldValue::Color(0xff44_5566));
+
+    let runtime = Runtime::from_file(file(vec![artboard(), shape, path, first, second,
+        fill, fill_color, stroke, stroke_color])).unwrap();
+    let list = runtime.display_list();
+    assert_eq!(list.primitives.len(), 2);
+    assert_eq!(list.primitives[0].paint, Some(Paint::Fill {
+        brush: Brush::Solid(0xff11_2233), rule: FillRule::EvenOdd,
+        effects: [].into(),
+    }));
+    assert_eq!(list.primitives[1].paint, Some(Paint::Stroke {
+        brush: Brush::Solid(0xff44_5566), width: 3.0,
+        cap: StrokeCap::Butt, join: StrokeJoin::Miter,
+        transform_affects: true, effects: [].into(),
+    }));
+    assert!(std::sync::Arc::ptr_eq(
+        &list.primitives[0].geometries, &list.primitives[1].geometries));
+    let (Geometry::Path(fill_path), Geometry::Path(stroke_path)) =
+        (&list.primitives[0].geometries[0].geometry,
+         &list.primitives[1].geometries[0].geometry) else { panic!() };
+    assert!(std::sync::Arc::ptr_eq(&fill_path.commands, &stroke_path.commands));
+    assert_eq!(list.primitives[0].geometries[0].geometry,
+        Geometry::Path(Path { commands: vec![
+        PathCommand::MoveTo(Point { x: 10.0, y:  0.0 }),
+        PathCommand::LineTo(Point { x:  0.0, y: 20.0 }),
+        PathCommand::Close,
+    ].into() }));
+}
+
+#[test] fn preserves_trim_dash_and_stroke_transform_semantics() {
+    let shape = parented(object_ids::SHAPE, 0);
+    let path = parented(object_ids::POINTS_PATH, 1);
+    let first = parented(object_ids::STRAIGHT_VERTEX, 2);
+    let second = parented(object_ids::STRAIGHT_VERTEX, 2);
+    let mut stroke = parented(object_ids::STROKE, 1);
+    prop(&mut stroke, property_ids::THICKNESS, 2.0);
+    uint_prop(&mut stroke, property_ids::TRANSFORMAFFECTSSTROKE, 0);
+
+    let mut trim = parented(object_ids::TRIM_PATH, 5);
+    prop(&mut trim, property_ids::TRIMPATH_START, 0.2);
+    prop(&mut trim, property_ids::TRIMPATH_END, 0.8);
+    prop(&mut trim, property_ids::TRIMPATH_OFFSET, -0.1);
+    uint_prop(&mut trim, property_ids::TRIMPATH_MODEVALUE, 2);
+
+    let mut dash_path = parented(object_ids::DASH_PATH, 5);
+    prop(&mut dash_path, property_ids::DASHPATH_OFFSET, 0.25);
+    uint_prop(&mut dash_path, property_ids::OFFSETISPERCENTAGE, 1);
+    let mut dash = parented(object_ids::DASH, 7);
+    prop(&mut dash, property_ids::DASH_LENGTH, 4.0);
+    let mut gap = parented(object_ids::DASH, 7);
+    prop(&mut gap, property_ids::DASH_LENGTH, 0.1);
+    uint_prop(&mut gap, property_ids::LENGTHISPERCENTAGE, 1);
+
+    let runtime = Runtime::from_file(file(vec![artboard(), shape, path, first, second,
+        stroke, trim, dash_path, dash, gap])).unwrap();
+    let Some(Paint::Stroke { width, transform_affects, effects, .. }) =
+        &runtime.display_list().primitives[0].paint else { panic!() };
+    assert_eq!((*width, *transform_affects), (2.0, false));
+    assert_eq!(&**effects, &[
+        PathEffect::Trim { start: 0.2, end: 0.8, offset: -0.1,
+            mode: TrimMode::Synchronized },
+        PathEffect::Dash { offset: 0.25, offset_is_percentage: true, segments: vec![
+            DashSegment { length: 4.0, is_percentage: false },
+            DashSegment { length: 0.1, is_percentage: true },
+        ].into() },
+    ]);
+}
+
+#[test] fn omits_non_positive_strokes() {
+    let shape = parented(object_ids::SHAPE, 0);
+    let path = parented(object_ids::ELLIPSE, 1);
+    let mut stroke = parented(object_ids::STROKE, 1);
+    prop(&mut stroke, property_ids::THICKNESS, 0.0);
+    let runtime = Runtime::from_file(file(vec![artboard(), shape, path, stroke])).unwrap();
+    assert!(runtime.display_list().primitives[0].paint.is_none());
+}
+
+#[test] fn rejects_invalid_trim_modes() {
+    let shape = parented(object_ids::SHAPE, 0);
+    let path = parented(object_ids::ELLIPSE, 1);
+    let stroke = parented(object_ids::STROKE, 1);
+    let mut trim = parented(object_ids::TRIM_PATH, 3);
+    uint_prop(&mut trim, property_ids::TRIMPATH_MODEVALUE, 3);
+    assert!(matches!(Runtime::from_file(file(vec![artboard(), shape, path, stroke, trim])),
+        Err(RuntimeError::InvalidTrimMode(3))));
+}
+
+#[test] fn rejects_parent_cycles_during_construction() {
+    let first  = parented(object_ids::NODE, 2);
+    let second = parented(object_ids::NODE, 1);
+
+    assert!(matches!(Runtime::from_file(file(vec![artboard(), first, second])),
+        Err(RuntimeError::ParentCycle(2 | 3))));
+}
+
+#[test] fn combines_shape_paths_before_applying_paint() {
+    let shape = parented(object_ids::SHAPE, 0);
+    let path1 = parented(object_ids::POINTS_PATH, 1);
+    let vertex1 = parented(object_ids::STRAIGHT_VERTEX, 2);
+    let vertex2 = parented(object_ids::STRAIGHT_VERTEX, 2);
+
+    let mut path2 = parented(object_ids::POINTS_PATH, 1);
+    uint_prop(&mut path2, property_ids::ISHOLE, 1);
+    let vertex3 = parented(object_ids::STRAIGHT_VERTEX, 5);
+    let vertex4 = parented(object_ids::STRAIGHT_VERTEX, 5);
+
+    let fill  = parented(object_ids::FILL, 1);
+    let color = parented(object_ids::SOLID_COLOR, 8);
+
+    let runtime = Runtime::from_file(file(vec![artboard(), shape,
+        path1, vertex1, vertex2, path2, vertex3, vertex4, fill, color])).unwrap();
+    let list = runtime.display_list();
+    assert_eq!(list.primitives.len(), 1);
+    assert_eq!(list.primitives[0].geometries.len(), 2);
+    assert!(!list.primitives[0].geometries[0].is_hole);
+    assert!( list.primitives[0].geometries[1].is_hole);
+    assert!(matches!(list.primitives[0].paint, Some(Paint::Fill { .. })));
+}
+
+#[test] fn draw_rules_move_shape_after_target() {
+    let owner = parented(object_ids::NODE, 0);
+    let moved = parented(object_ids::SHAPE, 1);
+    let moved_geometry = parented(object_ids::ELLIPSE, 2);
+    let mut rules = parented(object_ids::DRAW_RULES, 1);
+    uint_prop(&mut rules, property_ids::DRAWTARGETID, 5);
+    let mut target = parented(object_ids::DRAW_TARGET, 4);
+    uint_prop(&mut target, property_ids::DRAWABLEID, 6);
+    uint_prop(&mut target, property_ids::PLACEMENTVALUE, 1);
+    let target_shape = parented(object_ids::SHAPE, 0);
+    let target_geometry = parented(object_ids::ELLIPSE, 6);
+
+    let runtime = Runtime::from_file(file(vec![artboard(), owner, moved, moved_geometry,
+        rules, target, target_shape, target_geometry])).unwrap();
+    assert_eq!(runtime.display_list().primitives.iter()
+        .map(|primitive| primitive.obj_idx).collect::<Vec<_>>(), [6, 2]);
+}
+
+#[test] fn nested_draw_rules_move_attached_blocks_together() {
+    let owner_a = parented(object_ids::NODE, 0);
+    let shape_a = parented(object_ids::SHAPE, 1);
+    let geometry_a = parented(object_ids::ELLIPSE, 2);
+    let mut rules_a = parented(object_ids::DRAW_RULES, 1);
+    uint_prop(&mut rules_a, property_ids::DRAWTARGETID, 5);
+    let mut target_a = parented(object_ids::DRAW_TARGET, 4);
+    uint_prop(&mut target_a, property_ids::DRAWABLEID, 7);
+    uint_prop(&mut target_a, property_ids::PLACEMENTVALUE, 1);
+
+    let owner_b = parented(object_ids::NODE, 0);
+    let shape_b = parented(object_ids::SHAPE, 6);
+    let geometry_b = parented(object_ids::ELLIPSE, 7);
+    let mut rules_b = parented(object_ids::DRAW_RULES, 6);
+    uint_prop(&mut rules_b, property_ids::DRAWTARGETID, 10);
+    let mut target_b = parented(object_ids::DRAW_TARGET, 9);
+    uint_prop(&mut target_b, property_ids::DRAWABLEID, 11);
+    uint_prop(&mut target_b, property_ids::PLACEMENTVALUE, 1);
+
+    let shape_c = parented(object_ids::SHAPE, 0);
+    let geometry_c = parented(object_ids::ELLIPSE, 11);
+    let runtime = Runtime::from_file(file(vec![artboard(),
+        owner_a, shape_a, geometry_a, rules_a, target_a,
+        owner_b, shape_b, geometry_b, rules_b, target_b,
+        shape_c, geometry_c])).unwrap();
+    assert_eq!(runtime.display_list().primitives.iter()
+        .map(|primitive| primitive.obj_idx).collect::<Vec<_>>(), [11, 7, 2]);
+}
+
+#[test] fn rejects_draw_rule_cycles() {
+    let owner_a = parented(object_ids::NODE, 0);
+    let shape_a = parented(object_ids::SHAPE, 1);
+    let geometry_a = parented(object_ids::ELLIPSE, 2);
+    let mut rules_a = parented(object_ids::DRAW_RULES, 1);
+    uint_prop(&mut rules_a, property_ids::DRAWTARGETID, 5);
+    let mut target_a = parented(object_ids::DRAW_TARGET, 4);
+    uint_prop(&mut target_a, property_ids::DRAWABLEID, 7);
+
+    let owner_b = parented(object_ids::NODE, 0);
+    let shape_b = parented(object_ids::SHAPE, 6);
+    let geometry_b = parented(object_ids::ELLIPSE, 7);
+    let mut rules_b = parented(object_ids::DRAW_RULES, 6);
+    uint_prop(&mut rules_b, property_ids::DRAWTARGETID, 10);
+    let mut target_b = parented(object_ids::DRAW_TARGET, 9);
+    uint_prop(&mut target_b, property_ids::DRAWABLEID, 2);
+
+    assert!(matches!(Runtime::from_file(file(vec![artboard(),
+        owner_a, shape_a, geometry_a, rules_a, target_a,
+        owner_b, shape_b, geometry_b, rules_b, target_b])),
+        Err(RuntimeError::DrawOrderCycle(2 | 7))));
+}
+
+#[test] fn inherits_shape_opacity_without_rewriting_color_alpha() {
+    let mut parent = parented(object_ids::NODE, 0);
+    prop(&mut parent, property_ids::WORLDTRANSFORMCOMPONENT_OPACITY, 0.5);
+    let mut shape = parented(object_ids::SHAPE, 1);
+    prop(&mut shape, property_ids::WORLDTRANSFORMCOMPONENT_OPACITY, 0.4);
+    let ellipse = parented(object_ids::ELLIPSE, 2);
+    let fill = parented(object_ids::FILL, 2);
+    let mut color = parented(object_ids::SOLID_COLOR, 4);
+    color.add_prop(VarUInt(property_ids::SOLIDCOLOR_COLORVALUE),
+        FieldValue::Color(0x8011_2233));
+
+    let runtime = Runtime::from_file(file(vec![
+        artboard(), parent, shape, ellipse, fill, color])).unwrap();
+    let primitive = &runtime.display_list().primitives[0];
+    assert!((primitive.opacity - 0.2).abs() < f32::EPSILON);
+    assert!(matches!(&primitive.paint,
+        Some(Paint::Fill { brush: Brush::Solid(0x8011_2233), .. })));
+}
+
+#[test] fn builds_sorted_linear_gradient_in_shape_space() {
+    let mut shape = parented(object_ids::SHAPE, 0);
+    prop(&mut shape, property_ids::NODE_X, 12.0);
+    prop(&mut shape, property_ids::NODE_Y, 34.0);
+    let ellipse = parented(object_ids::ELLIPSE, 1);
+    let fill = parented(object_ids::FILL, 1);
+    let mut gradient = parented(object_ids::LINEAR_GRADIENT, 3);
+    prop(&mut gradient, property_ids::STARTX, 1.0);
+    prop(&mut gradient, property_ids::STARTY, 2.0);
+    prop(&mut gradient, property_ids::ENDX, 8.0);
+    prop(&mut gradient, property_ids::ENDY, 9.0);
+    prop(&mut gradient, property_ids::LINEARGRADIENT_OPACITY, 0.5);
+    let mut last = parented(object_ids::GRADIENT_STOP, 4);
+    prop(&mut last, property_ids::POSITION, 1.5);
+    last.add_prop(VarUInt(property_ids::GRADIENTSTOP_COLORVALUE),
+        FieldValue::Color(0xffaa_bbcc));
+    let mut first = parented(object_ids::GRADIENT_STOP, 4);
+    prop(&mut first, property_ids::POSITION, -0.5);
+    first.add_prop(VarUInt(property_ids::GRADIENTSTOP_COLORVALUE),
+        FieldValue::Color(0xff11_2233));
+
+    let runtime = Runtime::from_file(file(vec![
+        artboard(), shape, ellipse, fill, gradient, last, first])).unwrap();
+    let Some(Paint::Fill { brush: Brush::LinearGradient {
+        start, end, transform, opacity, stops }, ..
+    }) = &runtime.display_list().primitives[0].paint else { panic!() };
+    assert_eq!((*start, *end), (Point { x: 1.0, y: 2.0 }, Point { x: 8.0, y: 9.0 }));
+    assert_eq!((transform.tx, transform.ty), (12.0, 34.0));
+    assert_eq!(*opacity, 0.5);
+    assert_eq!(&**stops, &[GradientStop { position: 0.0, color: 0xff11_2233 },
+                           GradientStop { position: 1.0, color: 0xffaa_bbcc }, ]);
+}
+
+#[test] fn builds_radial_gradient_radius_from_end_point() {
+    let ellipse = parented(object_ids::ELLIPSE, 1);
+    let shape = parented(object_ids::SHAPE, 0);
+    let fill  = parented(object_ids::FILL, 1);
+    let mut gradient = parented(object_ids::RADIAL_GRADIENT, 3);
+    prop(&mut gradient, property_ids::STARTX, 2.0);
+    prop(&mut gradient, property_ids::STARTY, 3.0);
+    prop(&mut gradient, property_ids::ENDX, 5.0);
+    prop(&mut gradient, property_ids::ENDY, 7.0);
+
+    let runtime = Runtime::from_file(file(vec![
+        artboard(), shape, ellipse, fill, gradient])).unwrap();
+    assert!(matches!(&runtime.display_list().primitives[0].paint,
+        Some(Paint::Fill { brush: Brush::RadialGradient {
+            center: Point { x: 2.0, y: 3.0 }, radius: 5.0, ..
+        }, .. })));
+}
+
+#[test] fn omits_fully_transparent_shape() {
+    let mut shape = parented(object_ids::SHAPE, 0);
+    prop(&mut shape, property_ids::WORLDTRANSFORMCOMPONENT_OPACITY, 0.0);
+    let ellipse = parented(object_ids::ELLIPSE, 1);
+
+    let runtime = Runtime::from_file(file(vec![artboard(), shape, ellipse])).unwrap();
+    assert!(runtime.display_list().primitives.is_empty());
+}
+
+#[test] fn imports_repository_sample() {
+    let mut input = Cursor::new(include_bytes!("../../data/rating-animation.riv"));
+    let file = RiveFile::read(&mut input).unwrap();
+    let runtime = Runtime::from_file(file).unwrap();
+    assert!(0 < runtime.component_count());
+    let list =  runtime.display_list();
+    assert!(list.primitives.iter().flat_map(|primitive| primitive.geometries.iter())
+        .any(|geometry| matches!(&geometry.geometry, Geometry::Path(_))));
+    assert!(list.primitives.iter().any(|primitive| primitive.paint.is_some()));
+}
