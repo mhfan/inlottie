@@ -6,7 +6,7 @@
  ****************************************************************/
 
 use crate::core::{helpers::{Vec2D, RGBA, IntBool, math},
-    schema::{Transform, Translation, TransRotation, VisualLayer, LayerItem,
+    schema::{Transform, Translation, TransRotation,
         FillStrokeGrad, ColorGrad, FillStroke, FillRule, GradientType,
         Repeater, Composite, LineJoin, LineCap, StrokeDashType}
 };
@@ -28,23 +28,24 @@ impl MatrixConv for kurbo::Affine {
 #[cfg(feature = "vello")] impl StyleConv for peniko::Brush {
     fn solid_color(color: RGBA) -> Self { Self::Solid(color.into()) }
     fn linear_gradient(sp: Vec2D, ep: Vec2D, stops: &[(f32, RGBA)]) -> Self {
-        let stops = stops.iter().map(|&(offset, color)|
-            (offset, DynamicColor::from_alpha_color(color.into())).into())
-            .collect::<Vec<ColorStop>>();
         Self::Gradient(peniko::Gradient::new_linear(
-            (sp.x, sp.y), (ep.x, ep.y)).with_stops(stops.as_slice()))
+            (sp.x, sp.y), (ep.x, ep.y)).with_stops(VelloStops(stops)))
     }
     fn radial_gradient(cp: Vec2D, fp: Vec2D, radii: (f32, f32),
             stops: &[(f32, RGBA)]) -> Self {
-        let stops = stops.iter().map(|&(offset, color)|
-            (offset, DynamicColor::from_alpha_color(color.into())).into())
-            .collect::<Vec<ColorStop>>();
         Self::Gradient(peniko::Gradient::new_two_point_radial(
             (cp.x, cp.y), radii.0, (fp.x, fp.y), radii.1)
-            .with_stops(stops.as_slice()))
+            .with_stops(VelloStops(stops)))
     }
 }
-#[cfg(feature = "vello")] use vello::peniko::{self, ColorStop, color::DynamicColor};
+#[cfg(feature = "vello")] struct VelloStops<'a>(&'a [(f32, RGBA)]);
+#[cfg(feature = "vello")] impl peniko::ColorStopsSource for VelloStops<'_> {
+    fn collect_stops(self, target: &mut peniko::ColorStops) {
+        target.extend(self.0.iter().map(|&(offset, color)|
+            (offset, DynamicColor::from_alpha_color(color.into())).into()));
+    }
+}
+#[cfg(feature = "vello")] use vello::peniko::{self, color::DynamicColor};
 #[cfg(feature = "vello")] impl From<RGBA> for peniko::Color {
     fn from(color: RGBA) -> Self {
         Self::from_rgba8(color.r, color.g, color.b, color.a)
@@ -175,22 +176,6 @@ impl Transform {
     }
 }
 
-impl VisualLayer {
-    pub fn get_matrix<MC: MatrixConv>(&self,
-        layers: &[LayerItem], global: f32) -> Option<TM2DwO<MC>> {
-        let mut ctm = self.ks.to_matrix(self.base.local_frame(global)?, self.ao);
-        let (mut parent, mut seen) = (self.base.parent, std::collections::HashSet::new());
-        while let Some(pid) = parent {
-            if !seen.insert(pid) { break }
-            let Some(vl) = layers.iter().find_map(|layer| layer.visual_layer()
-                .filter(|vl| vl.base.ind == Some(pid))) else { break };
-            ctm = ctm.compose_matrix(
-                &vl.ks.to_matrix(vl.base.local_frame(global)?, vl.ao).0);
-            parent = vl.base.parent;
-        }   Some(ctm)
-    }
-}
-
 impl Repeater {
     pub fn get_matrix<MC: MatrixConv>(&self, fnth: f32) -> Vec<TM2DwO<MC>> {
         let mut opacity = self.tr.so.as_ref().map_or(1.,
@@ -247,9 +232,8 @@ pub trait StyleConv {
         stops: &[(f32, RGBA)]) -> Self;
 }
 
-pub enum FSOpts {   Fill(FillRule),
-    Stroke { width: f32, limit: f32, join: LineJoin, cap: LineCap,
-        dash: (f32, Vec<f32>), }
+pub enum FSOpts {   Fill(FillRule),     // XXX: use SmallVec for dash?
+    Stroke { width: f32, limit: f32, join: LineJoin, cap: LineCap, dash: (f32, Vec<f32>) }
 }
 
 impl FillStrokeGrad {
@@ -329,42 +313,7 @@ impl FillStrokeGrad {
 }
 
 #[cfg(test)] mod tests {
-    use crate::core::schema::{Animation, ShapeItem};
-
-    #[test] fn layer_matrix_includes_all_ancestors_and_tolerates_missing_parent() {
-        let animation: Animation = serde_json::from_str(r#"{ "layers": [
-            {"ty":3,"ind":1,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[10,0]}}},
-            {"ty":3,"ind":2,"parent":1,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[0,20]}}},
-            {"ty":3,"ind":3,"parent":2,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[3,4]}}},
-            {"ty":3,"ind":4,"parent":99,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[5,6]}}}
-        ] }"#).unwrap();
-
-        let child = animation.layers[2].visual_layer().unwrap();
-        assert_eq!(child.get_matrix::<kurbo::Affine>(&animation.layers, 0.)
-            .unwrap().0.as_coeffs(),
-            [1., 0., 0., 1., 13., 24.]);
-
-        let orphan = animation.layers[3].visual_layer().unwrap();
-        assert_eq!(orphan.get_matrix::<kurbo::Affine>(&animation.layers, 0.)
-            .unwrap().0.as_coeffs(),
-            [1., 0., 0., 1., 5., 6.]);
-    }
-
-    #[test] fn parent_layers_contribute_transform_but_not_opacity() {
-        let animation: Animation = serde_json::from_str(r#"{ "layers": [
-            {"ty":3,"ind":1,"hd":true,"st":0,"ip":0,"op":10,
-                "ks":{"p":{"k":[10,0]},"o":{"k":25}}},
-            {"ty":3,"ind":2,"parent":1,"st":0,"ip":0,"op":10,
-                "ks":{"p":{"k":[0,20]},"o":{"k":50}}},
-            {"ty":3,"ind":3,"parent":2,"st":0,"ip":0,"op":10,
-                "ks":{"p":{"k":[3,4]},"o":{"k":80}}}
-        ] }"#).unwrap();
-
-        let child = animation.layers[2].visual_layer().unwrap();
-        let matrix = child.get_matrix::<kurbo::Affine>(&animation.layers, 0.).unwrap();
-        assert_eq!(matrix.0.as_coeffs(), [1., 0., 0., 1., 13., 24.]);
-        assert_eq!(matrix.1, 0.8);
-    }
+    use crate::core::schema::ShapeItem;
 
     fn stroke_dash(entries: &str) -> (f32, Vec<f32>) {
         let json = format!(r#"{{

@@ -120,10 +120,12 @@ pub(crate) struct MeasuredPath {
 use kurbo::{ParamCurve, ParamCurveArclen};
 impl MeasuredPath {
     pub fn new(path: BezPath) -> Self {
-        let segments = path.segments().map(|seg| {
-            let len = seg.arclen(ACCURACY_TOLERANCE); (seg, len)
-        }).collect::<Vec<_>>();
-        let length = segments.iter().map(|(_, len)| len).sum();
+        let mut segments = Vec::with_capacity(path.elements().len().saturating_sub(1));
+        let mut length = 0.;
+        for seg in path.segments() {
+            let len = seg.arclen(ACCURACY_TOLERANCE);
+            segments.push((seg, len)); length += len;
+        }
         Self { path, segments, length }
     }
 

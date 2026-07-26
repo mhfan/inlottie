@@ -6,12 +6,76 @@
  ****************************************************************/
 
 use core::cell::RefCell;
+use std::collections::HashMap;
 use crate::core::{helpers::{RGBA, IntBool},
     schema::{Animation, AssetItem, LayerItem, ShapeItem, VisualLayer,
         TrimPath, TrimMultiple, MatteMode, FillRule},
     style::{StyleConv, MatrixConv, TM2DwO, FSOpts},
     pathm::{MeasuredPath, PathBuilder, PathFactory}
 };
+
+fn layer_world_matrices<MC: MatrixConv + Clone>(
+    layers: &[LayerItem], global: f32,
+    mut required: impl FnMut(&LayerItem) -> bool) -> Vec<Option<TM2DwO<MC>>> {
+    let mut indices = HashMap::<u32, Option<usize>>::with_capacity(layers.len());
+    for (index, layer) in layers.iter().enumerate() {
+        if let Some(id) = layer.visual_layer().and_then(|vl| vl.base.ind) {
+            indices.entry(id).and_modify(|index| *index = None).or_insert(Some(index));
+        }
+    }
+
+    fn resolve<MC: MatrixConv + Clone>(root: usize, layers: &[LayerItem], global: f32,
+        indices: &HashMap<u32, Option<usize>>, states: &mut [u8],
+        worlds: &mut [Option<TM2DwO<MC>>], stack: &mut Vec<usize>) {
+        if states[root] == 2 { return }
+
+        stack.clear();
+        let mut index = root;
+        let mut valid = loop { match states[index] {
+            0 => {
+                states[index] = 1; stack.push(index);
+                let Some(vl) = layers[index].visual_layer() else { break false };
+                let Some(parent) = vl.base.parent
+                    .and_then(|id| indices.get(&id).copied().flatten())
+                    else { break true };
+                index = parent;
+            }
+            1 => break false,
+            2 => break worlds[index].is_some(),
+            _ => unreachable!(),
+        } };
+
+        while let Some(index) = stack.pop() {
+            if valid {
+                let Some(vl) = layers[index].visual_layer() else {
+                    states[index] = 2; valid = false; continue
+                };
+                let Some(local) = vl.base.local_frame(global) else {
+                    states[index] = 2; valid = false; continue
+                };
+                let mut world = vl.ks.to_matrix(local, vl.ao);
+                if let Some(parent) = vl.base.parent
+                    .and_then(|id| indices.get(&id).copied().flatten()) {
+                    let Some(parent) = &worlds[parent] else {
+                        states[index] = 2; valid = false; continue
+                    };
+                    world = world.compose_matrix(&parent.0);
+                }
+                worlds[index] = Some(world);
+            }
+            states[index] = 2;
+        }
+    }
+
+    let mut states = vec![0; layers.len()];
+    let mut worlds = vec![None; layers.len()];
+    let mut stack = Vec::new();
+    for (index, layer) in layers.iter().enumerate() {
+        if required(layer) {
+            resolve(index, layers, global, &indices, &mut states, &mut worlds, &mut stack);
+        }
+    }   worlds
+}
 
 impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
     //fn get_duration(&self) -> f32 { (self.op - self.ip) / self.fr }
@@ -48,11 +112,16 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
     fn render_layers<RC: RenderContext>(&self, rctx: &mut RC,
         ptm: &TM2DwO<RC::TM2D>, layers: &[LayerItem], fnth: f32) {
         let mut matte = None;
+        let matrices = layer_world_matrices::<RC::TM2D>(layers, fnth, |layer| match layer {
+            LayerItem::Shape(layer) => !layer.vl.should_hide(fnth),
+            LayerItem::PrecompLayer(layer) => !layer.vl.should_hide(fnth),
+            LayerItem::SolidColor(layer) => !layer.vl.should_hide(fnth),
+            _ => false,
+        });
 
-        for layer in layers.iter().rev() { match layer {
-            LayerItem::Shape(shpl) => if !shpl.vl.should_hide(fnth) {
+        for (layer, matrix) in layers.iter().zip(matrices).rev() { match layer {
+            LayerItem::Shape(shpl) => if let Some(ltm) = matrix {
                 let Some(local) = shpl.vl.base.local_frame(fnth) else { continue };
-                let Some(ltm) = shpl.vl.get_matrix(layers, fnth) else { continue };
                 let ltm = ltm.compose(ptm);
                 let (draws, ctm) = convert_shapes(&shpl.shapes, local, shpl.vl.ao);
 
@@ -60,14 +129,13 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
                 rctx.render_shapes(&ctm.compose(&ltm), &draws);
                 rctx.compose_matte(&shpl.vl, &mut matte, &ltm, fnth);
             }
-            LayerItem::PrecompLayer(pcl) => if !pcl.vl.should_hide(fnth) {
+            LayerItem::PrecompLayer(pcl) => if let Some(ltm) = matrix {
                 if let Some(pcomp) = self.assets.iter().find_map(|asset|
                     match asset { AssetItem::Precomp(pcomp)
                         if pcomp.base.id == pcl.rid => Some(pcomp), _ => None }) {
                     let Some(local) = pcl.vl.base.local_frame(fnth) else { continue };
                     let child_fnth = pcl.tm.as_ref().map_or(local,
                         |tm| tm.get_value(local) * pcomp.fr);
-                    let Some(ltm) = pcl.vl.get_matrix(layers, fnth) else { continue };
                     let ltm = ltm.compose(ptm);
 
                     rctx.prepare_matte(&pcl.vl, &mut matte);
@@ -75,17 +143,16 @@ impl Animation {    /// https://lottiefiles.github.io/lottie-docs/rendering/
                     rctx.compose_matte(&pcl.vl, &mut matte, &ltm, fnth);
                 }   // XXX: clipping(pcl.w, pcl.h)?
             }
-            LayerItem::SolidColor(scl) => if !scl.vl.should_hide(fnth) {
-                let Some(ltm) = scl.vl.get_matrix(layers, fnth) else { continue };
+            LayerItem::SolidColor(scl) => if let Some(ltm) = matrix {
                 let ltm = ltm.compose(ptm);
 
                 let mut path = RC::VGPath::new(5);
                 path.rect(0., 0., scl.sw, scl.sh);
 
                 rctx.prepare_matte(&scl.vl, &mut matte);
-                rctx.render_shapes(&ltm, &[DrawItem::Shape(path.into()),
+                rctx.render_shapes(&ltm, &[DrawItem::Shape(path),
                     DrawItem::Style(RefCell::new((RC::VGStyle::solid_color(scl.sc),
-                        FSOpts::Fill(FillRule::NonZero))).into())]);
+                        FSOpts::Fill(FillRule::NonZero))))]);
                 rctx.compose_matte(&scl.vl, &mut matte, &ltm, fnth);
             }
             LayerItem::Image(_) | LayerItem::Text(_)  | LayerItem::Data(_)  |
@@ -165,23 +232,23 @@ pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>
 
     for shape in shapes.iter() { match shape {
         ShapeItem::Rectangle(rect)    if !rect.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(rect.to_path(fnth)))),
+            draws.push(DrawItem::Shape(rect.to_path(fnth))),
         ShapeItem::Polystar(star) if !star.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(star.to_path(fnth)))),
+            draws.push(DrawItem::Shape(star.to_path(fnth))),
         ShapeItem::Ellipse(elps)        if !elps.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(elps.to_path(fnth)))),
+            draws.push(DrawItem::Shape(elps.to_path(fnth))),
         ShapeItem::Path(curv)          if !curv.base.elem.hd =>
-            draws.push(DrawItem::Shape(Box::new(curv.to_path(fnth)))),
+            draws.push(DrawItem::Shape(curv.to_path(fnth))),
 
         // styles affect on all preceding paths ever before
         ShapeItem::Fill(fill)   if !fill.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(fill.to_style(fnth).into()))),
+            draws.push(DrawItem::Style(fill.to_style(fnth).into())),
         ShapeItem::Stroke(line) if !line.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(line.to_style(fnth).into()))),
+            draws.push(DrawItem::Style(line.to_style(fnth).into())),
         ShapeItem::GradientFill(grad)   if !grad.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(grad.to_style(fnth).into()))),
+            draws.push(DrawItem::Style(grad.to_style(fnth).into())),
         ShapeItem::GradientStroke(grad) if !grad.elem.hd =>
-            draws.push(DrawItem::Style(Box::new(grad.to_style(fnth).into()))),
+            draws.push(DrawItem::Style(grad.to_style(fnth).into())),
         ShapeItem::NoStyle(_) => eprintln!("Nothing to do here?"),
 
         ShapeItem::Group(group) if !group.elem.hd => {
@@ -209,8 +276,8 @@ pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>
 
 //  https://lottie.github.io/lottie-spec/latest/specs/shapes/#graphic-element
 pub enum DrawItem<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv> {
-    Shape(Box<VGPath>),                     // DrawItem is a.k.a Graphic Element
-    Style(Box<RefCell<(VGPaint, FSOpts)>>), // RefCell interior mutation for femtovg
+    Shape(VGPath),                          // DrawItem is a.k.a Graphic Element
+    Style(RefCell<(VGPaint, FSOpts)>),      // RefCell interior mutation for femtovg
     Group(Vec<Self>, Vec<TM2DwO<TM2D>>),    // support batch Groups for Repeater
 }
 
@@ -316,6 +383,90 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
         fn fill_stroke(&mut self, _: &Self::VGPath, _: &RefCell<(Self::VGStyle, FSOpts)>) {}
     }
 
+    #[test] fn layer_world_matrix_includes_ancestors_and_tolerates_missing_parent() {
+        let animation: Animation = serde_json::from_str(r#"{ "layers": [
+            {"ty":3,"ind":1,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[10,0]}}},
+            {"ty":3,"ind":2,"parent":1,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[0,20]}}},
+            {"ty":3,"ind":3,"parent":2,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[3,4]}}},
+            {"ty":3,"ind":4,"parent":99,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[5,6]}}}
+        ] }"#).unwrap();
+
+        let matrices = layer_world_matrices::<kurbo::Affine>(
+            &animation.layers, 0., |_| true);
+        assert_eq!(matrices[2].as_ref().unwrap().0.as_coeffs(),
+            [1., 0., 0., 1., 13., 24.]);
+        assert_eq!(matrices[3].as_ref().unwrap().0.as_coeffs(),
+            [1., 0., 0., 1., 5., 6.]);
+    }
+
+    #[test] fn parent_layers_contribute_transform_but_not_opacity() {
+        let animation: Animation = serde_json::from_str(r#"{ "layers": [
+            {"ty":3,"ind":1,"hd":true,"st":0,"ip":0,"op":10,
+                "ks":{"p":{"k":[10,0]},"o":{"k":25}}},
+            {"ty":3,"ind":2,"parent":1,"st":0,"ip":0,"op":10,
+                "ks":{"p":{"k":[0,20]},"o":{"k":50}}},
+            {"ty":3,"ind":3,"parent":2,"st":0,"ip":0,"op":10,
+                "ks":{"p":{"k":[3,4]},"o":{"k":80}}}
+        ] }"#).unwrap();
+
+        let matrices = layer_world_matrices::<kurbo::Affine>(
+            &animation.layers, 0., |_| true);
+        let child = matrices[2].as_ref().unwrap();
+        assert_eq!(child.0.as_coeffs(), [1., 0., 0., 1., 13., 24.]);
+        assert_eq!(child.1, 0.8);
+    }
+
+    #[test] fn layer_world_matrix_skips_parent_cycles_and_their_descendants() {
+        let animation: Animation = serde_json::from_str(r#"{ "layers": [
+            {"ty":3,"ind":1,"parent":2,"st":0,"ip":0,"op":10,"ks":{}},
+            {"ty":3,"ind":2,"parent":1,"st":0,"ip":0,"op":10,"ks":{}},
+            {"ty":3,"ind":3,"parent":1,"st":0,"ip":0,"op":10,"ks":{}},
+            {"ty":3,"ind":4,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[5,6]}}}
+        ] }"#).unwrap();
+
+        let matrices = layer_world_matrices::<kurbo::Affine>(
+            &animation.layers, 0., |_| true);
+        assert!(matrices[..3].iter().all(Option::is_none));
+        assert_eq!(matrices[3].as_ref().unwrap().0.as_coeffs(),
+            [1., 0., 0., 1., 5., 6.]);
+    }
+
+    #[test] fn layer_world_matrix_only_evaluates_required_layers_and_their_parents() {
+        let animation: Animation = serde_json::from_str(r#"{ "layers": [
+            {"ty":3,"ind":1,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[10,0]}}},
+            {"ty":3,"ind":2,"parent":1,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[0,20]}}},
+            {"ty":3,"ind":3,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[30,40]}}}
+        ] }"#).unwrap();
+
+        let matrices = layer_world_matrices::<kurbo::Affine>(
+            &animation.layers, 0., |layer|
+                layer.visual_layer().is_some_and(|vl| vl.base.ind == Some(2)));
+        assert!(matrices[0].is_some());
+        assert_eq!(matrices[1].as_ref().unwrap().0.as_coeffs(),
+            [1., 0., 0., 1., 10., 20.]);
+        assert!(matrices[2].is_none());
+    }
+
+    #[test] fn layer_world_matrix_handles_deep_parent_chains_iteratively() {
+        use std::fmt::Write;
+        const COUNT: u32 = 4096;
+        let mut json = String::from("{\"layers\":[");
+        for id in 1..=COUNT {
+            if 1 < id { json.push(','); }
+            write!(json, "{{\"ty\":3,\"ind\":{id},\"st\":0,\"ip\":0,\"op\":10,\"ks\":{{}}")
+                .unwrap();
+            if 1 < id { write!(json, ",\"parent\":{}", id - 1).unwrap(); }
+            json.push('}');
+        }
+        json.push_str("]}");
+        let animation: Animation = serde_json::from_str(&json).unwrap();
+
+        let matrices = layer_world_matrices::<kurbo::Affine>(
+            &animation.layers, 0., |layer|
+                layer.visual_layer().is_some_and(|vl| vl.base.ind == Some(COUNT)));
+        assert!(matrices.iter().all(Option::is_some));
+    }
+
     #[test] fn playback_starts_and_wraps_at_the_in_point() {
         let mut animation: Animation =
             serde_json::from_str(r#"{"ip":10,"op":12,"fr":1,"layers":[]}"#).unwrap();
@@ -375,13 +526,13 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
             }
         }
 
-        let path = || DrawItem::Shape(Box::new(BezPath::new()));
+        let path = || DrawItem::Shape(BezPath::new());
         let draws = vec![
             path(),
             DrawItem::Group(vec![path()],
                 vec![TM2DwO(kurbo::Affine::IDENTITY, 0.4)]),
-            DrawItem::Style(Box::new(RefCell::new(
-                (TestStyle, FSOpts::Fill(FillRule::NonZero))))),
+            DrawItem::Style(RefCell::new(
+                (TestStyle, FSOpts::Fill(FillRule::NonZero)))),
         ];
         let mut context = StateContext { opacity: 1., ..Default::default() };
 
@@ -410,7 +561,7 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
         let mut path = BezPath::new();
         path.move_to((0., 0.)); path.line_to((100., 0.));
         let mut draws: Vec<DrawItem<BezPath, TestStyle, kurbo::Affine>> =
-            vec![DrawItem::Shape(Box::new(path))];
+            vec![DrawItem::Shape(path)];
 
         trim_shapes(&trim, &mut draws, 0.);
         let DrawItem::Shape(path) = &draws[0] else { panic!() };
@@ -431,8 +582,8 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
             path.move_to((0., y)); path.line_to((length, y)); path
         };
         let mut draws: Vec<DrawItem<BezPath, TestStyle, kurbo::Affine>> = vec![
-            DrawItem::Shape(Box::new(line(100., 0.))),
-            DrawItem::Shape(Box::new(line( 50., 1.))),
+            DrawItem::Shape(line(100., 0.)),
+            DrawItem::Shape(line( 50., 1.)),
         ];
 
         trim_shapes(&trim, &mut draws, 0.);
@@ -453,11 +604,11 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
             path.move_to((0., y)); path.line_to((length, y)); path
         };
         let group = vec![
-            DrawItem::Shape(Box::new(line(30., 1.))),
-            DrawItem::Shape(Box::new(line(20., 2.))),
+            DrawItem::Shape(line(30., 1.)),
+            DrawItem::Shape(line(20., 2.)),
         ];
         let mut draws: Vec<DrawItem<BezPath, TestStyle, kurbo::Affine>> = vec![
-            DrawItem::Shape(Box::new(line(100., 0.))),
+            DrawItem::Shape(line(100., 0.)),
             DrawItem::Group(group, vec![TM2DwO::default()]),
         ];
 
@@ -479,8 +630,8 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
             path.move_to((0., y)); path.line_to((length, y)); path
         };
         let mut draws: Vec<DrawItem<BezPath, TestStyle, kurbo::Affine>> = vec![
-            DrawItem::Shape(Box::new(line(100., 0.))),
-            DrawItem::Shape(Box::new(line(40., 1.))),
+            DrawItem::Shape(line(100., 0.)),
+            DrawItem::Shape(line(40., 1.)),
         ];
 
         trim_shapes(&trim, &mut draws, 0.);
