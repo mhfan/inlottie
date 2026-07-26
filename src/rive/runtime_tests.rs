@@ -27,6 +27,50 @@ fn parented(type_id: u32, parent: u32) -> Object {
     object
 }
 
+fn linear_animation(name: &[u8], duration: u32, fps: u32, loop_mode: u32) -> Object {
+    let mut animation = Object::new_simple(object_ids::LINEAR_ANIMATION);
+    animation.add_prop(VarUInt(property_ids::ANIMATION_NAME),
+        FieldValue::Bytes(name.to_vec()));
+    uint_prop(&mut animation, property_ids::LINEARANIMATION_DURATION, duration);
+    uint_prop(&mut animation, property_ids::FPS, fps);
+    uint_prop(&mut animation, property_ids::LOOPVALUE, loop_mode);
+    animation
+}
+
+fn keyed_object(object_id: u32) -> Object {
+    let mut object = Object::new_simple(object_ids::KEYED_OBJECT);
+    uint_prop(&mut object, property_ids::KEYEDOBJECT_OBJECTID, object_id); object
+}
+
+fn keyed_property(prop_id: u32) -> Object {
+    let mut object = Object::new_simple(object_ids::KEYED_PROPERTY);
+    uint_prop(&mut object, property_ids::KEYEDPROPERTY_PROPERTYKEY, prop_id); object
+}
+
+fn double_keyframe(frame: u32, value: f32, interpolation: u32) -> Object {
+    let mut keyframe = Object::new_simple(object_ids::KEY_FRAME_DOUBLE);
+    uint_prop(&mut keyframe, property_ids::FRAME, frame);
+    uint_prop(&mut keyframe,
+        property_ids::INTERPOLATINGKEYFRAME_INTERPOLATIONTYPE, interpolation);
+    prop(&mut keyframe, property_ids::KEYFRAMEDOUBLE_VALUE, value); keyframe
+}
+
+fn cubic_interpolator(x1: f32, y1: f32, x2: f32, y2: f32) -> Object {
+    let mut interpolator = Object::new_simple(object_ids::CUBIC_INTERPOLATOR);
+    prop(&mut interpolator, property_ids::CUBICINTERPOLATOR_X1, x1);
+    prop(&mut interpolator, property_ids::CUBICINTERPOLATOR_Y1, y1);
+    prop(&mut interpolator, property_ids::CUBICINTERPOLATOR_X2, x2);
+    prop(&mut interpolator, property_ids::CUBICINTERPOLATOR_Y2, y2);
+    interpolator
+}
+
+fn cubic_keyframe(frame: u32, value: f32, interpolator_id: u32) -> Object {
+    let mut keyframe = double_keyframe(frame, value, 2);
+    uint_prop(&mut keyframe,
+        property_ids::INTERPOLATINGKEYFRAME_INTERPOLATORID, interpolator_id);
+    keyframe
+}
+
 fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     Vertex { position: Point { x, y }, incoming: None, outgoing: None, radius }
 }
@@ -88,6 +132,122 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     assert_eq!(list.primitives[0].geometries[0].transform.ty, 20.0);
     assert_eq!(list.primitives[0].geometries[0].geometry,
         Geometry::Ellipse(Rect { x: -20.0, y: -10.0, width: 40.0, height: 20.0 }));
+}
+
+#[test] fn discovers_selects_and_advances_linear_animation() {
+    let mut ellipse = parented(object_ids::ELLIPSE, 0);
+    prop(&mut ellipse, property_ids::PARAMETRICPATH_WIDTH, 10.0);
+    let objects = vec![
+        artboard(), ellipse,
+        linear_animation(b"move", 10, 10, 1),
+        keyed_object(1), keyed_property(property_ids::NODE_X),
+        double_keyframe(0, 0.0, 1), double_keyframe(10, 20.0, 1),
+    ];
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    assert_eq!(runtime.animation_count(), 1);
+    assert_eq!(runtime.animation(0), Some(AnimationInfo {
+        name: b"move", duration: 10, fps: 10, speed: 1.0, loop_mode: 1,
+    }));
+    assert!(runtime.set_animation_by_name(b"move").is_ok());
+
+    assert!(runtime.advance(0.5));
+    assert_eq!(runtime.elapsed(), 0.5);
+    assert!((runtime.display_list().primitives[0].geometries[0].transform.tx - 10.0)
+        .abs() < 1e-6);
+    assert!(runtime.advance(1.0));
+    assert!((runtime.display_list().primitives[0].geometries[0].transform.tx - 10.0)
+        .abs() < 1e-6);
+    assert!(!runtime.advance(0.0));
+    assert!(matches!(runtime.set_animation(1), Err(RuntimeError::AnimationNotFound(1))));
+}
+
+#[test] fn cubic_keyframes_resolve_and_apply_their_interpolator() {
+    let mut ellipse = parented(object_ids::ELLIPSE, 0);
+    prop(&mut ellipse, property_ids::PARAMETRICPATH_WIDTH, 10.0);
+    let objects = vec![
+        artboard(), ellipse, cubic_interpolator(0.42, 0.0, 1.0, 1.0),
+        linear_animation(b"ease", 10, 10, 0),
+        keyed_object(1), keyed_property(property_ids::NODE_X),
+        cubic_keyframe(0, 0.0, 2), double_keyframe(10, 20.0, 1),
+    ];
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    let x = runtime.display_list().primitives[0].geometries[0].transform.tx;
+    assert!((6.0..6.4).contains(&x), "{x}");
+}
+
+#[test] fn animates_stroke_width_and_trim_parameters() {
+    let shape = parented(object_ids::SHAPE, 0);
+    let path = parented(object_ids::ELLIPSE, 1);
+    let mut stroke = parented(object_ids::STROKE, 1);
+    prop(&mut stroke, property_ids::THICKNESS, 0.0);
+    let mut trim = parented(object_ids::TRIM_PATH, 3);
+    prop(&mut trim, property_ids::TRIMPATH_START, 0.2);
+    prop(&mut trim, property_ids::TRIMPATH_END, 0.8);
+    prop(&mut trim, property_ids::TRIMPATH_OFFSET, -0.1);
+    uint_prop(&mut trim, property_ids::TRIMPATH_MODEVALUE, 1);
+
+    let mut objects = vec![artboard(), shape, path, stroke, trim,
+        linear_animation(b"paint", 10, 10, 0), keyed_object(3)];
+    objects.extend([keyed_property(property_ids::THICKNESS),
+        double_keyframe(0, 0.0, 1), double_keyframe(10, 8.0, 1)]);
+    objects.push(keyed_object(4));
+    for (prop_id, from, to) in [
+        (property_ids::TRIMPATH_START, 0.2, 0.6),
+        (property_ids::TRIMPATH_END, 0.8, 0.4),
+        (property_ids::TRIMPATH_OFFSET, -0.1, 0.3),
+    ] {
+        objects.extend([keyed_property(prop_id), double_keyframe(0, from, 1),
+            double_keyframe(10, to, 1)]);
+    }
+
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    let Some(Paint::Stroke { width, effects, .. }) =
+        &runtime.display_list().primitives[0].paint else { panic!() };
+    assert!((*width - 4.0).abs() < 1e-6);
+    let PathEffect::Trim { start, end, offset, .. } = effects[0] else { panic!() };
+    assert!((start - 0.4).abs() < 1e-6);
+    assert!((end - 0.6).abs() < 1e-6);
+    assert!((offset - 0.1).abs() < 1e-6);
+}
+
+#[test] fn rejects_unknown_keyframe_interpolation_and_cubic_reference() {
+    let animation_file = |interpolation, interpolator| file(vec![
+        artboard(), parented(object_ids::ELLIPSE, 0),
+        linear_animation(b"invalid", 10, 10, 0),
+        keyed_object(1), keyed_property(property_ids::NODE_X), {
+            let mut keyframe = double_keyframe(0, 0.0, interpolation);
+            if let Some(id) = interpolator {
+                uint_prop(&mut keyframe,
+                    property_ids::INTERPOLATINGKEYFRAME_INTERPOLATORID, id);
+            }   keyframe
+        },
+    ]);
+    assert!(matches!(Runtime::from_file(animation_file(3, None)),
+        Err(RuntimeError::InvalidInterpolation(3))));
+    assert!(matches!(Runtime::from_file(animation_file(2, Some(99))),
+        Err(RuntimeError::InvalidInterpolator(99))));
+}
+
+#[test] fn hold_keyframes_update_opacity_and_propagate_to_children() {
+    let parent = parented(object_ids::NODE, 0);
+    let mut ellipse = parented(object_ids::ELLIPSE, 1);
+    prop(&mut ellipse, property_ids::PARAMETRICPATH_WIDTH, 10.0);
+    let objects = vec![
+        artboard(), parent, ellipse,
+        linear_animation(b"hide", 10, 10, 0),
+        keyed_object(1), keyed_property(property_ids::WORLDTRANSFORMCOMPONENT_OPACITY),
+        double_keyframe(0, 1.0, 0), double_keyframe(5, 0.25, 0),
+    ];
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.25);
+    assert_eq!(runtime.display_list().primitives[0].opacity, 1.0);
+    runtime.advance(0.5);
+    assert_eq!(runtime.display_list().primitives[0].opacity, 0.25);
 }
 
 #[test] fn selects_one_artboard_without_crossing_contexts() {
@@ -483,8 +643,11 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
 #[test] fn imports_repository_sample() {
     let mut input = Cursor::new(include_bytes!("../../data/rating-animation.riv"));
     let file = RiveFile::read(&mut input).unwrap();
-    let runtime = Runtime::from_file(file).unwrap();
+    let mut runtime = Runtime::from_file(file).unwrap();
     assert!(0 < runtime.component_count());
+    assert!(0 < runtime.animation_count());
+    runtime.set_animation(0).unwrap();
+    assert!(runtime.advance(1.0 / 60.0));
     let list =  runtime.display_list();
     assert!(list.primitives.iter().flat_map(|primitive| primitive.geometries.iter())
         .any(|geometry| matches!(&geometry.geometry, Geometry::Path(_))));

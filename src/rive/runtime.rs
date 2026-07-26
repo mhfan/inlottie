@@ -14,17 +14,24 @@ use super::{display_list::{Affine2, Brush, CornerRadii, DashSegment, DisplayList
 pub type Result<T> = std::result::Result<T, RuntimeError>;
 
 #[derive(Debug)] pub enum RuntimeError {
-    Decode(DecodeError), ArtboardNotFound(u32), DrawOrderCycle(u32), InvalidTrimMode(u32),
-    ParentCycle(u32), TooManyObjects, TooManyVertices(u32),
+    Decode(DecodeError), AnimationNameNotFound, AnimationNotFound(u32), ArtboardNotFound(u32),
+    DrawOrderCycle(u32), InvalidInterpolation(u32), InvalidInterpolator(u32),
+    InvalidTrimMode(u32), ParentCycle(u32), TooManyObjects, TooManyVertices(u32),
     InvalidParent { comp_id: u32, parent_id: u32 },
 }
 
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { match self {
         Self::Decode(error) => error.fmt(f),
+        Self::AnimationNameNotFound => f.write_str("Rive animation name does not exist"),
+        Self::AnimationNotFound(index) => write!(f, "Rive animation {index} does not exist"),
         Self::ArtboardNotFound(index) => write!(f, "Rive artboard {index} does not exist"),
         Self::DrawOrderCycle(obj_idx) =>
             write!(f, "Rive draw-rule cycle at object {obj_idx}"),
+        Self::InvalidInterpolation(value) =>
+            write!(f, "invalid Rive keyframe interpolation {value}"),
+        Self::InvalidInterpolator(index) =>
+            write!(f, "invalid Rive cubic interpolator {index}"),
         Self::InvalidTrimMode(value) => write!(f, "invalid Rive trim-path mode {value}"),
         Self::TooManyObjects => f.write_str("Rive object count exceeds u32"),
         Self::TooManyVertices(count) =>
@@ -60,7 +67,29 @@ impl From<DecodeError> for RuntimeError {
     obj_idx: u32,
     opacity_component: u32,
     components: Vec<u32>,
-    paints: Vec<Paint>,
+    paints: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)] pub struct AnimationInfo<'a> {
+    pub name: &'a [u8], pub duration: u32, pub fps: u32,
+    pub speed: f32, pub loop_mode: u32,
+}
+
+#[derive(Debug, Clone, Copy)] enum Interpolation {
+    Hold, Linear, Cubic { x1: f32, y1: f32, x2: f32, y2: f32 },
+}
+
+#[derive(Debug)] struct Keyframe {
+    frame: u32, value: f32, interpolation: Interpolation,
+}
+
+#[derive(Debug)] struct PropertyTrack {
+    component: u32, prop_id: u32, keyframes: Vec<Keyframe>,
+}
+
+#[derive(Debug)] struct LinearAnimation {
+    name: Vec<u8>, duration: u32, fps: u32, speed: f32, loop_mode: u32,
+    tracks: Vec<PropertyTrack>,
 }
 
 /// Retained Rive scene state.
@@ -73,6 +102,9 @@ impl From<DecodeError> for RuntimeError {
     components: Vec<Component>,
     update_order: Vec<u32>,
     draw_groups: Vec<DrawGroup>,
+    effect_targets: Vec<Option<(u32, u32)>>,
+    animations: Vec<LinearAnimation>,
+    active_animation: Option<u32>,
 }
 
 impl Runtime {
@@ -129,9 +161,12 @@ impl Runtime {
             components[index].parent = Some(parent);
         }
 
-        let mut runtime = Self { file, artboard_obj: context_start as u32,
-            components, update_order: Vec::new(),
-            draw_groups: Vec::new(), elapsed: 0.0 };
+        let effect_targets = vec![None; components.len()];
+        let animations = build_animations(&file, context_start, context_end, &obj_comps)?;
+        let mut runtime = Self { file, artboard_obj: context_start as u32, components,
+            update_order: Vec::new(), draw_groups: Vec::new(), effect_targets,
+            animations, active_animation: None, elapsed: 0.0
+        };
         runtime.validate_hierarchy()?;
         runtime.update_world_state();
         runtime.build_paths_and_paints()?;
@@ -145,8 +180,30 @@ impl Runtime {
     pub fn artboard_object_index(&self) -> u32 { self.artboard_obj }
     pub fn component_count(&self) -> usize { self.components.len() }
 
-    pub fn advance(&mut self, delta_seconds: f32) {
+    pub fn animation_count(&self) -> u32 { self.animations.len() as u32 }
+    pub fn animation(&self, index: u32) -> Option<AnimationInfo<'_>> {
+        self.animations.get(index as usize).map(|animation| AnimationInfo {
+            name: &animation.name, duration: animation.duration, fps: animation.fps,
+            speed: animation.speed, loop_mode: animation.loop_mode,
+        })
+    }
+    pub fn set_animation(&mut self, index: u32) -> Result<()> {
+        if index as usize >= self.animations.len() {
+            return Err(RuntimeError::AnimationNotFound(index))
+        }
+        self.active_animation = Some(index); self.elapsed = 0.0;
+        self.apply_animation(); Ok(())
+    }
+    pub fn set_animation_by_name(&mut self, name: &[u8]) -> Result<()> {
+        let index = self.animations.iter().position(|animation| animation.name == name)
+            .ok_or(RuntimeError::AnimationNameNotFound)? as u32;
+        self.set_animation(index)
+    }
+
+    pub fn advance(&mut self, delta_seconds: f32) -> bool {
+        if delta_seconds <= 0.0 || self.active_animation.is_none() { return false }
         self.elapsed += delta_seconds.max(0.0);
+        self.apply_animation(); true
     }
 
     pub fn display_list(&self) -> DisplayList {
@@ -159,7 +216,9 @@ impl Runtime {
         list.clear();
         let primitive_count = self.draw_groups.iter().filter(|group|
                 0.0 < self.components[group.opacity_component as usize].world_opacity)
-            .map(|group| group.paints.len().max(1)).sum();
+            .map(|group| group.paints.iter().filter_map(|&index|
+                self.components[index as usize].paint.as_ref())
+                .filter(|paint| visible_paint(paint)).count().max(1)).sum();
         list.primitives.reserve(primitive_count);
 
         for group in &self.draw_groups {
@@ -175,12 +234,112 @@ impl Runtime {
                 list.primitives.push(Primitive {
                     obj_idx: group.obj_idx, opacity, geometries, paint: None });
             } else {
-                list.primitives.extend(group.paints.iter().cloned().map(|paint| Primitive {
-                    obj_idx: group.obj_idx, opacity,
-                    geometries: geometries.clone(), paint: Some(paint),
+                let start = list.primitives.len();
+                list.primitives.extend(group.paints.iter().filter_map(|&index| {
+                    let paint = self.components[index as usize].paint.as_ref()?;
+                    visible_paint(paint).then(|| Primitive {
+                        obj_idx: group.obj_idx, opacity,
+                        geometries: geometries.clone(), paint: Some(paint.clone()),
+                    })
                 }));
+                if  list.primitives.len() == start {
+                    list.primitives.push(Primitive {
+                        obj_idx: group.obj_idx, opacity, geometries, paint: None });
+                }
             }
         }
+    }
+
+    fn apply_animation(&mut self) {
+        let Some(animation) = self.active_animation
+            .and_then(|index| self.animations.get(index as usize)) else { return };
+        let duration = animation.duration as f32;
+        let mut frame = self.elapsed * animation.fps as f32 * animation.speed;
+        if 0.0 < duration { match animation.loop_mode {
+            1 => frame = frame.rem_euclid(duration),
+            2 => {
+                frame = frame.rem_euclid(duration * 2.0);
+                if duration < frame { frame = duration * 2.0 - frame }
+            }
+            _ => frame = frame.min(duration),
+        }}
+
+        #[derive(Clone, Copy)] struct TransformValues {
+            x: f32, y: f32, rotation: f32, scale_x: f32, scale_y: f32, opacity: f32,
+        }
+        let mut values: Vec<_> = self.components.iter().map(|component| {
+            let object = &self.file.ocoll[component.obj_idx as usize];
+            TransformValues {
+                x: float(object, property_ids::NODE_X).unwrap_or(0.0),
+                y: float(object, property_ids::NODE_Y).unwrap_or(0.0),
+                rotation: float(object, property_ids::TRANSFORMCOMPONENT_ROTATION)
+                    .unwrap_or(0.0),
+                scale_x: float(object, property_ids::TRANSFORMCOMPONENT_SCALEX)
+                    .unwrap_or(1.0),
+                scale_y: float(object, property_ids::TRANSFORMCOMPONENT_SCALEY)
+                    .unwrap_or(1.0),
+                opacity: float(object, property_ids::WORLDTRANSFORMCOMPONENT_OPACITY)
+                    .unwrap_or(1.0),
+            }
+        }).collect();
+        let mut paint_values = Vec::new();
+        for (component, state) in self.components.iter().enumerate() {
+            let object = &self.file.ocoll[state.obj_idx as usize];
+            match object.type_id.0 {
+                object_ids::STROKE => paint_values.push((component as u32,
+                    property_ids::THICKNESS,
+                    float(object, property_ids::THICKNESS).unwrap_or(0.0))),
+                object_ids::TRIM_PATH => {
+                    for prop_id in [property_ids::TRIMPATH_START,
+                        property_ids::TRIMPATH_END, property_ids::TRIMPATH_OFFSET] {
+                        paint_values.push((component as u32, prop_id,
+                            float(object, prop_id).unwrap_or(0.0)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        for track in &animation.tracks {
+            let Some(value) = evaluate_track(track, frame) else { continue };
+            let target = &mut values[track.component as usize];
+            match track.prop_id {
+                property_ids::NODE_X => target.x = value,
+                property_ids::NODE_Y => target.y = value,
+                property_ids::TRANSFORMCOMPONENT_SCALEX => target.scale_x = value,
+                property_ids::TRANSFORMCOMPONENT_SCALEY => target.scale_y = value,
+                property_ids::TRANSFORMCOMPONENT_ROTATION => target.rotation = value,
+                property_ids::WORLDTRANSFORMCOMPONENT_OPACITY => target.opacity = value,
+                property_ids::THICKNESS | property_ids::TRIMPATH_START
+                    | property_ids::TRIMPATH_END | property_ids::TRIMPATH_OFFSET =>
+                    paint_values.push((track.component, track.prop_id, value)),
+                _ => {},
+            }
+        }
+        for (component, value) in self.components.iter_mut().zip(values) {
+             component.local = Affine2::from_transform(value.x, value.y,
+                value.rotation, value.scale_x, value.scale_y);
+             component.local_opacity = value.opacity;
+        }
+        for (component, prop_id, value) in paint_values {
+            if prop_id == property_ids::THICKNESS {
+                if let Some(Paint::Stroke { width, .. }) =
+                    &mut self.components[component as usize].paint {
+                    *width = value;
+                }   continue
+            }
+            let Some((paint, effect)) = self.effect_targets[component as usize] else { continue };
+            let Some(Paint::Fill { effects, .. } | Paint::Stroke { effects, .. }) =
+                &mut self.components[paint as usize].paint else { continue };
+            let Some(PathEffect::Trim { start, end, offset, .. }) =
+                std::sync::Arc::make_mut(effects).get_mut(effect as usize) else { continue };
+            match prop_id {
+                property_ids::TRIMPATH_OFFSET => *offset = value,
+                property_ids::TRIMPATH_START => *start = value,
+                property_ids::TRIMPATH_END => *end = value,
+                _ => {}
+            }
+        }
+        self.update_world_state();
     }
 
     fn ancestor_of_type(&self, mut component: Option<u32>, type_id: u32) -> Option<u32> {
@@ -215,7 +374,7 @@ impl Runtime {
             let Some(shape) = shapes[index] else { continue };
             let group = &mut self.draw_groups[shape_groups[shape as usize].unwrap()];
             if component.geometry.is_some() { group.components.push(index as u32) }
-            if let Some(paint) = &component.paint { group.paints.push(paint.clone()) }
+            if component.paint.is_some() { group.paints.push(index as u32) }
         }
         self.draw_groups.retain(|group| !group.components.is_empty());
     }
@@ -370,26 +529,25 @@ impl Runtime {
                 }
                 object_ids::TRIM_PATH => {
                     let mode = match uint(object, property_ids::TRIMPATH_MODEVALUE)? {
-                        1 => TrimMode::Sequential,
-                        2 => TrimMode::Synchronized,
+                        1 => TrimMode::Sequential, 2 => TrimMode::Synchronized,
                         value => return Err(RuntimeError::InvalidTrimMode(value)),
                     };
                     if let Some(parent) = self.components[index].parent {
-                        effects[parent as usize].push(PathEffect::Trim {
+                        effects[parent as usize].push((index as u32, PathEffect::Trim {
                              start: float(object, property_ids::TRIMPATH_START)?,
                                end: float(object, property_ids::TRIMPATH_END)?,
                             offset: float(object, property_ids::TRIMPATH_OFFSET)?, mode,
-                        });
+                        }));
                     }
                 }
                 object_ids::DASH_PATH => {
                     if let Some(parent) = self.components[index].parent {
-                        effects[parent as usize].push(PathEffect::Dash {
+                        effects[parent as usize].push((index as u32, PathEffect::Dash {
                             offset: float(object, property_ids::DASHPATH_OFFSET)?,
                             offset_is_percentage:
                                 boolean(object, property_ids::OFFSETISPERCENTAGE)?,
                             segments: mem::take(&mut dash_segments[index]).into(),
-                        });
+                        }));
                     }
                 }
                 _ => {}
@@ -407,7 +565,14 @@ impl Runtime {
                 object_ids::FILL => {
                     if boolean(object, property_ids::SHAPEPAINT_ISVISIBLE)? {
                         let mut paint_effects = mem::take(&mut effects[index]);
-                        paint_effects.retain(|effect| matches!(effect, PathEffect::Trim { .. }));
+                        paint_effects.retain(|(_, effect)|
+                            matches!(effect, PathEffect::Trim { .. }));
+                        let paint_effects: Vec<_> = paint_effects.into_iter().enumerate()
+                            .map(|(effect, (source, value))| {
+                                self.effect_targets[source as usize] =
+                                    Some((index as u32, effect as u32));
+                                value
+                            }).collect();
                         self.components[index].paint = Some(Paint::Fill {
                             brush: brushes[index].take().unwrap_or_else(|| Brush::Solid(
                                 core_color_default(property_ids::SOLIDCOLOR_COLORVALUE))),
@@ -418,16 +583,21 @@ impl Runtime {
                 }
                 object_ids::STROKE
                     if boolean(object, property_ids::SHAPEPAINT_ISVISIBLE)? => {
-                        let width = float(object, property_ids::THICKNESS)?;
-                        if  width <= 0.0 { continue }
-                        self.components[index].paint = Some(Paint::Stroke { width,
+                        let paint_effects: Vec<_> = mem::take(&mut effects[index])
+                            .into_iter().enumerate().map(|(effect, (source, value))| {
+                                self.effect_targets[source as usize] =
+                                    Some((index as u32, effect as u32));
+                                value
+                            }).collect();
+                        self.components[index].paint = Some(Paint::Stroke {
+                            width: float(object, property_ids::THICKNESS)?,
                             brush: brushes[index].take().unwrap_or_else(|| Brush::Solid(
                                 core_color_default(property_ids::SOLIDCOLOR_COLORVALUE))),
                              cap: stroke_cap (uint(object, property_ids::CAP)?),
                             join: stroke_join(uint(object, property_ids::JOIN)?),
                             transform_affects:
                                 boolean(object, property_ids::TRANSFORMAFFECTSSTROKE)?,
-                            effects: mem::take(&mut effects[index]).into(),
+                            effects: paint_effects.into(),
                         });
                     }
                 _ => {}
@@ -467,6 +637,128 @@ impl Runtime {
             self.components[index].world = world;
         }
     }
+}
+
+fn build_animations(file: &RiveFile, context_start: usize, context_end: usize,
+    obj_comps: &[Option<u32>]) -> Result<Vec<LinearAnimation>> {
+    let (mut current_animation, mut animations) = (None, Vec::new());
+    let (mut current_component, mut current_track) = (None, None);
+
+    for object in &file.ocoll[context_start..context_end] { match object.type_id.0 {
+        object_ids::LINEAR_ANIMATION => {
+            animations.push(LinearAnimation {
+                name: object.bytes(property_ids::ANIMATION_NAME)?
+                    .unwrap_or_default().to_vec(),
+                duration: uint(object, property_ids::LINEARANIMATION_DURATION)?,
+                fps: uint(object, property_ids::FPS)?,
+                speed: float(object, property_ids::LINEARANIMATION_SPEED)?,
+                loop_mode: uint(object, property_ids::LOOPVALUE)?,
+                tracks: Vec::new(),
+            });
+            current_animation = Some(animations.len() - 1);
+            current_component = None; current_track = None;
+        }
+        object_ids::KEYED_OBJECT => {
+            let target = context_start.checked_add(
+                uint(object, property_ids::KEYEDOBJECT_OBJECTID)? as usize);
+            current_component = target.and_then(|index|
+                obj_comps.get(index).copied().flatten());
+            current_track = None;
+        }
+        object_ids::KEYED_PROPERTY => {
+            current_track = match (current_animation, current_component) {
+                (Some(animation), Some(component)) => {
+                    animations[animation].tracks.push(PropertyTrack {
+                        component,
+                        prop_id: uint(object, property_ids::KEYEDPROPERTY_PROPERTYKEY)?,
+                        keyframes: Vec::new(),
+                    });
+                    Some((animation, animations[animation].tracks.len() - 1))
+                }
+                _ => None,
+            };
+        }
+        object_ids::KEY_FRAME_DOUBLE => if let Some((animation, track)) = current_track {
+            animations[animation].tracks[track].keyframes.push(Keyframe {
+                frame: uint(object, property_ids::FRAME)?,
+                value: float(object, property_ids::KEYFRAMEDOUBLE_VALUE)?,
+                interpolation: keyframe_interpolation(file, context_start, object)?,
+            });
+        }
+        _ => {}
+    }}
+    for animation in &mut animations {
+        animation.tracks.retain(|track| !track.keyframes.is_empty());
+        for track in &mut animation.tracks {
+            track.keyframes.sort_by_key(|keyframe| keyframe.frame);
+        }
+    }
+    Ok(animations)
+}
+
+fn keyframe_interpolation(file: &RiveFile, context_start: usize,
+    keyframe: &Object) -> Result<Interpolation> {
+    let kind = uint(keyframe, property_ids::INTERPOLATINGKEYFRAME_INTERPOLATIONTYPE)?;
+    if  kind == 0 { return Ok(Interpolation::Hold) }
+    if  kind == 1 { return Ok(Interpolation::Linear) }
+    if  kind != 2 { return Err(RuntimeError::InvalidInterpolation(kind)) }
+
+    let id = uint(keyframe, property_ids::INTERPOLATINGKEYFRAME_INTERPOLATORID)?;
+    let interpolator = context_start.checked_add(id as usize)
+        .and_then(|index| file.ocoll.get(index))
+        .ok_or(RuntimeError::InvalidInterpolator(id))?;
+    let props = if interpolator.type_id.0 == object_ids::CUBIC_INTERPOLATOR_COMPONENT {
+        [property_ids::CUBICINTERPOLATORCOMPONENT_X1,
+         property_ids::CUBICINTERPOLATORCOMPONENT_Y1,
+         property_ids::CUBICINTERPOLATORCOMPONENT_X2,
+         property_ids::CUBICINTERPOLATORCOMPONENT_Y2]
+    } else if matches!(interpolator.type_id.0, object_ids::CUBIC_EASE_INTERPOLATOR |
+        object_ids::CUBIC_VALUE_INTERPOLATOR | object_ids::CUBIC_INTERPOLATOR) {
+        [property_ids::CUBICINTERPOLATOR_X1, property_ids::CUBICINTERPOLATOR_Y1,
+         property_ids::CUBICINTERPOLATOR_X2, property_ids::CUBICINTERPOLATOR_Y2]
+    } else { return Err(RuntimeError::InvalidInterpolator(id)) };
+    let [x1, y1, x2, y2] = props;
+    let (x1, y1, x2, y2) = (float(interpolator, x1)?, float(interpolator, y1)?,
+        float(interpolator, x2)?, float(interpolator, y2)?);
+    if [x1, y1, x2, y2].iter().any(|value| !value.is_finite()) {
+        return Err(RuntimeError::InvalidInterpolator(id))
+    }
+    Ok(Interpolation::Cubic { x1, y1, x2, y2 })
+}
+
+fn evaluate_track(track: &PropertyTrack, frame: f32) -> Option<f32> {
+    let first = track.keyframes.first()?;
+    let upper = track.keyframes.partition_point(|keyframe| keyframe.frame as f32 <= frame);
+    if upper == 0 { return Some(first.value) }
+    let current = &track.keyframes[upper - 1];
+    let Some(next) = track.keyframes.get(upper) else { return Some(current.value) };
+    if matches!(current.interpolation, Interpolation::Hold) ||
+        next.frame == current.frame {
+        return Some(current.value)
+    }
+    let mut factor = ((frame - current.frame as f32) /
+        (next.frame - current.frame) as f32).clamp(0.0, 1.0);
+    if let Interpolation::Cubic { x1, y1, x2, y2 } = current.interpolation {
+        let at = |t: f32, p1: f32, p2: f32|
+            ((3.0 * p1 - 3.0 * p2 + 1.0) * t +
+             (3.0 * p2 - 6.0 * p1)) * t * t + 3.0 * p1 * t;
+        let slope = |t: f32, p1: f32, p2: f32|
+            3.0 * (3.0 * p1 - 3.0 * p2 + 1.0) * t * t +
+            2.0 * (3.0 * p2 - 6.0 * p1) * t + 3.0 * p1;
+        let (x, mut parameter) = (factor, factor);
+        for _ in 0..6 {
+            let derivative = slope(parameter, x1, x2);
+            if  derivative.abs() <= f32::EPSILON { break }
+            parameter = (parameter - (at(parameter, x1, x2) - x) / derivative)
+                .clamp(0.0, 1.0);
+        }
+        let (mut lower, mut upper) = (0.0, 1.0);
+        for _ in 0..10 {
+            if at(parameter, x1, x2) < x { lower = parameter } else { upper = parameter }
+            parameter = (lower + upper) * 0.5;
+        }   factor = at(parameter, y1, y2);
+    }
+    Some(current.value + (next.value - current.value) * factor)
 }
 
 #[derive(Clone, Copy)] struct Vertex {
@@ -628,6 +920,11 @@ fn rotate_around(point: Point, origin: Point, angle: f32) -> Point {
 
 fn fill_rule(value: u32) -> FillRule { match value {
     1 => FillRule::EvenOdd, 2 => FillRule::Clockwise, _ => FillRule::NonZero,
+} }
+
+fn visible_paint(paint: &Paint) -> bool { match paint {
+    Paint::Stroke { width, .. } => 0.0 < *width,
+    _ => true,
 } }
 
 fn stroke_cap(value: u32) -> StrokeCap { match value {
