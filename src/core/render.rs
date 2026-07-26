@@ -326,7 +326,7 @@ pub struct TrackMatte<T> {
 pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone>(
     shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
     (Vec<DrawItem<VGPath, VGPaint, TM2D>>, TM2DwO<TM2D>) {
-    let mut draws = Vec::with_capacity(shapes.len());
+    let mut draws: Vec<DrawItem<VGPath, VGPaint, TM2D>> = Vec::with_capacity(shapes.len());
     let mut ctm = Default::default();
 
     for shape in shapes.iter() { match shape {
@@ -362,10 +362,19 @@ pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv 
 
         // other modifiers usually just affect on all preceding paths ever before
         ShapeItem::Trim(mdfr) if !mdfr.elem.hd => trim_shapes(mdfr, &mut draws, fnth),
+        ShapeItem::RoundedCorners(mdfr) if !mdfr.elem.hd => {
+            let radius = mdfr.radius.get_value(fnth);
+            for_each_path_mut(&mut draws, &mut |path| path.round_corners(radius));
+        }
+        ShapeItem::OffsetPath(mdfr) if !mdfr.elem.hd => {
+            let amount = mdfr.amount.as_ref().map_or(0., |amount| amount.get_value(fnth));
+            let limit = mdfr.ml.as_ref().map_or(4., |limit| limit.get_value(fnth));
+            for_each_path_mut(&mut draws,
+                &mut |path| path.offset_path(amount, mdfr.lj, limit));
+        }
 
-        ShapeItem::Merge (_) | ShapeItem::OffsetPath (_) |
-        ShapeItem::Twist (_) | ShapeItem::PuckerBloat(_) |
-        ShapeItem::ZigZag(_) | ShapeItem::RoundedCorners(_) => dbg!(),  // TODO:
+        ShapeItem::Merge (_) | ShapeItem::PuckerBloat(_) |
+        ShapeItem::Twist (_) | ShapeItem::ZigZag(_) => dbg!(),  // TODO:
 
         ShapeItem::Transform(ts) if !ts.elem.hd => ctm = ts.trfm.to_matrix(fnth, ao),
 
@@ -391,12 +400,12 @@ fn for_each_path_mut<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
         DrawItem::Shape(path) => closure(path),
         DrawItem::Style(_) => (), // skip/ignore Style
     });
-}   // XXX: how to treat repeated shapes?
+}
 
 fn duplicate_draws<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone>(
     draws: &[DrawItem<VGPath, VGPaint, TM2D>],
-    paths: &mut HashMap<usize, crate::core::pathm::BezPath>)
-    -> Vec<DrawItem<VGPath, VGPaint, TM2D>> {
+    paths: &mut HashMap<usize, crate::core::pathm::BezPath>) ->
+    Vec<DrawItem<VGPath, VGPaint, TM2D>> {
     draws.iter().map(|draw| match draw {
         DrawItem::Shape(path) => {
             let key = path as *const VGPath as usize;
@@ -450,7 +459,7 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone
     if 1. <= trim { return }
 
     if mdfr.multiple.is_some_and(|ml| matches!(ml, TrimMultiple::Simultaneously)) {
-        for_each_path_mut(draws, &mut |path| *path = path.trim_path(start, trim));
+        for_each_path_mut(draws, &mut |path| path.trim_path(start, trim));
     } else {
         expand_repeats(draws);
         let (mut idx, mut total) = (0usize, 0.);

@@ -7,7 +7,7 @@
 
 use core::f32::consts::PI;
 use crate::core::{helpers::{Vec2D, ACCURACY_TOLERANCE},
-    schema::{Rectangle, Polystar, Ellipse, FreePath, ShapeProperty, StarType}};
+    schema::{Rectangle, Polystar, Ellipse, FreePath, ShapeProperty, StarType, LineJoin}};
 
 impl From<Vec2D> for kurbo::Vec2 {
     fn from(val: Vec2D) -> Self { Self::new(val.x as _, val.y as _) }
@@ -97,18 +97,216 @@ pub trait PathBuilder {     //type Point; type Path;
     } */
 
     // https://lottie.github.io/lottie-spec/latest/specs/shapes/#trim-path
-    fn trim_path(&self, start: f64, trim: f64) -> Self where Self: Sized {
-        if trim <= 0. { return Self::new(0) }
-        let path = MeasuredPath::new(self.to_kurbo());
-        if 1. <= trim { return Self::from_kurbo(path.trim_ranges(&[(0., 1.)])) }
+    fn trim_path(&mut self, start: f64, trim: f64) where Self: Sized {
+        if trim <= 0. { *self = Self::new(0); return }
+        if 1. <= trim { return }
 
+        let path = MeasuredPath::new(self.to_kurbo());
         let start = start.rem_euclid(1.);
         let end = start + trim;
         let trimmed = if end <= 1. {
             path.trim_ranges(&[(start, end)])
         } else {
             path.trim_ranges(&[(start, 1.), (0., end - 1.)])
-        };  Self::from_kurbo(trimmed)
+        };  *self = Self::from_kurbo(trimmed);
+    }
+
+    fn round_corners(&mut self, radius: f32) where Self: Sized {
+        use kurbo::{PathEl::*, Point};
+        let radius = f64::from(radius.max(0.));
+        if  radius == 0. { return }
+
+        let (source, mut output) = (self.to_kurbo(), BezPath::new());
+        let (mut elements, mut points) = (Vec::new(), Vec::new());
+        let (mut straight, mut closed) = (true, false);
+        let flush = |output: &mut BezPath, elements: &mut Vec<kurbo::PathEl>,
+            points: &mut Vec<Point>, straight: &mut bool, closed: &mut bool| {
+            if points.len() < 2 || !*straight { output.extend(elements.drain(..)); } else {
+                if *closed && points.last() == points.first() { points.pop(); }
+                let count = points.len();
+                if  count < 2 { output.extend(elements.drain(..)); } else {
+                    let corner = |index: usize| {
+                        let current = points[index];
+                        let previous = points[(index + count - 1) % count];
+                        let next = points[(index + 1) % count];
+                        let (incoming, outgoing) = (previous - current, next - current);
+                        let distance = radius.min(incoming.hypot() * 0.5)
+                            .min(outgoing.hypot() * 0.5);
+                        if distance == 0. { (current, current) } else {
+                            (current + incoming * (distance / incoming.hypot()),
+                             current + outgoing * (distance / outgoing.hypot()))
+                        }
+                    };
+
+                    if *closed {
+                        let (_, first) = corner(0);
+                        output.move_to(first);
+                        for index in 1..=count {
+                            let (entry, exit) = corner(index % count);
+                            output.line_to(entry);
+                            output.quad_to(points[index % count], exit);
+                        }   output.close_path();
+                    } else {
+                        output.move_to(points[0]);
+                        for index in 1..count - 1 {
+                            let (entry, exit) = corner(index);
+                            output.line_to(entry);
+                            output.quad_to(points[index], exit);
+                        }   output.line_to(points[count - 1]);
+                    }   elements.clear();
+                }
+            }
+            points.clear(); *straight = true; *closed = false;
+        };
+
+        for element in source.iter() { match element {
+            MoveTo(point) => {
+                if !elements.is_empty() {
+                    flush(&mut output, &mut elements, &mut points,
+                        &mut straight, &mut closed);
+                }
+                elements.push(MoveTo(point)); points.push(point);
+            }
+            LineTo(point) => {
+                elements.push(LineTo(point)); points.push(point);
+            }
+            QuadTo(control, point) => {
+                elements.push(QuadTo(control, point));
+                straight &= points.last().is_some_and(|&start| control == start || control == point);
+                points.push(point);
+            }
+            CurveTo(first, second, point) => {
+                elements.push(CurveTo(first, second, point));
+                straight &= points.last().is_some_and(|&start| first == start && second == point);
+                points.push(point);
+            }
+            ClosePath => {
+                elements.push(ClosePath); closed = true;
+                flush(&mut output, &mut elements, &mut points, &mut straight, &mut closed);
+            }
+        }}
+        if !elements.is_empty() {
+            flush(&mut output, &mut elements, &mut points, &mut straight, &mut closed);
+        }   *self = Self::from_kurbo(output);
+    }
+
+    fn offset_path(&mut self, amount: f32, join: LineJoin, miter_limit: f32)
+        where Self: Sized {
+        use kurbo::{ParamCurve, PathEl::*, Point, Vec2};
+        let amount = f64::from(amount);
+        if  amount == 0. { return }
+        let source = self.to_kurbo();
+
+        fn flatten(segment: kurbo::PathSeg, points: &mut Vec<Point>, depth: u8) {
+            let (start, end, middle) =
+                (segment.eval(0.), segment.eval(1.), segment.eval(0.5));
+            let chord = end - start;
+            let distance = if chord.hypot2() == 0. { (middle - start).hypot()
+            } else { chord.cross(middle - start).abs() / chord.hypot() };
+            if distance <= ACCURACY_TOLERANCE || depth == 12 { points.push(end); } else {
+                flatten(segment.subsegment(0. .. 0.5), points, depth + 1);
+                flatten(segment.subsegment(0.5 .. 1.), points, depth + 1);
+            }
+        }
+        fn intersection(a: Point, av: Vec2, b: Point, bv: Vec2) -> Option<Point> {
+            let cross = av.cross(bv);
+            (cross.abs() > 1e-9).then(|| a + av * ((b - a).cross(bv) / cross))
+        }
+
+        let mut contours: Vec<(Vec<Point>, bool)> = Vec::new();
+        let (mut points, mut current) = (Vec::new(), None);
+        for element in source.iter() { match element {
+            MoveTo(point) => {
+                if !points.is_empty() { contours.push((core::mem::take(&mut points), false)); }
+                points.push(point); current = Some(point);
+            }
+            LineTo(point) => { points.push(point); current = Some(point); }
+            QuadTo(control, point) => {
+                if let Some(start) = current {
+                    flatten(kurbo::QuadBez::new(start, control, point).into(), &mut points, 0);
+                }
+                current = Some(point);
+            }
+            CurveTo(first, second, point) => {
+                if let Some(start) = current {
+                    flatten(kurbo::CubicBez::new(start, first, second, point).into(),
+                        &mut points, 0);
+                }   current = Some(point);
+            }
+            ClosePath => {
+                if points.len() > 1 {
+                    contours.push((core::mem::take(&mut points), true));
+                }   current = None;
+            }
+        }}
+        if !points.is_empty() { contours.push((points, false)); }
+
+        let mut output = BezPath::new();
+        for (mut points, closed) in contours { points.dedup();
+            if closed && points.len() > 1 && points.last() == points.first() { points.pop(); }
+            if points.len() < 2 { continue }
+            let count = points.len();
+            let signed_area = if closed {
+                (0..count).map(|index| {
+                    let (a, b) = (points[index], points[(index + 1) % count]);
+                    a.x * b.y - b.x * a.y
+                }).sum::<f64>()
+            } else { 0. };
+            let distance = if closed && 0. < signed_area { -amount } else { amount };
+            let direction = |from: Point, to: Point| (to - from).normalize();
+            let normal = |dir: Vec2| Vec2::new(-dir.y, dir.x) * distance;
+
+            let append_join = |path: &mut BezPath, index: usize| {
+                let previous = points[(index + count - 1) % count];
+                let (point, next) = (points[index], points[(index + 1) % count]);
+                let (before, after) = (direction(previous, point), direction(point, next));
+                let (first, second) = (point + normal(before), point + normal(after));
+                match join {
+                    LineJoin::Miter => {
+                        let miter = intersection(first, before, second, after);
+                        if let Some(miter) = miter.filter(|miter|
+                            (*miter - point).hypot() <=
+                                distance.abs() * f64::from(miter_limit.max(1.))) {
+                            path.line_to(miter);
+                        } else {
+                            path.line_to(first); path.line_to(second);
+                        }
+                    }
+                    LineJoin::Bevel => { path.line_to(first); path.line_to(second); }
+                    LineJoin::Round => {
+                        path.line_to(first);
+                        let start = (first - point).atan2();
+                        let mut sweep = (second - point).atan2() - start;
+                        if 0. < distance && sweep < 0. { sweep += core::f64::consts::TAU; }
+                        if distance < 0. && 0. < sweep { sweep -= core::f64::consts::TAU; }
+                        kurbo::Arc::new(point, (distance.abs(), distance.abs()),
+                            start, sweep, 0.).to_cubic_beziers(ACCURACY_TOLERANCE,
+                            |first, second, end| path.curve_to(first, second, end));
+                    }
+                }
+            };
+
+            if closed {
+                let point = points[0];
+                let before = direction(points[count - 1], point);
+                let after = direction(point, points[1]);
+                let (first, second) = (point + normal(before), point + normal(after));
+                let start = if matches!(join, LineJoin::Miter) {
+                    intersection(first, before, second, after).filter(|miter|
+                        (*miter - point).hypot() <=
+                            distance.abs() * f64::from(miter_limit.max(1.)))
+                        .unwrap_or(first)
+                } else { first };
+                output.move_to(start);
+                for index in 0..count { append_join(&mut output, index); }
+                output.close_path();
+            } else {
+                output.move_to(points[0] + normal(direction(points[0], points[1])));
+                for index in 1..count - 1 { append_join(&mut output, index); }
+                output.line_to(points[count - 1] +
+                    normal(direction(points[count - 2], points[count - 1])));
+            }
+        }   *self = Self::from_kurbo(output);
     }
 }
 
@@ -383,6 +581,53 @@ fn bezier_path<PB: PathBuilder>(curve: &crate::core::schema::Bezier, reversed: b
 
 #[cfg(test)] mod tests { use super::*;
     use crate::core::schema::{AnimatedProperty, Bezier};
+    use kurbo::Shape;
+
+    fn square() -> BezPath {
+        let mut path = BezPath::new();
+        path.move_to((0., 0.)); path.line_to((10., 0.));
+        path.line_to((10., 10.)); path.line_to((0., 10.)); path.close_path();
+        path
+    }
+
+    #[test] fn geometry_modifiers_leave_zero_values_in_place() {
+        let mut path = square();
+        let storage = path.elements().as_ptr();
+        path.round_corners(0.);
+        path.offset_path(0., LineJoin::Round, 4.);
+        assert_eq!(storage, path.elements().as_ptr());
+    }
+
+    #[test] fn rounded_corners_rounds_closed_straight_contours_and_limits_radius() {
+        let mut rounded = square(); rounded.round_corners(20.);
+        assert!(matches!(rounded.elements().last(), Some(kurbo::PathEl::ClosePath)));
+        assert_eq!(rounded.elements().iter()
+            .filter(|element| matches!(element, kurbo::PathEl::QuadTo(..))).count(), 4);
+        assert_eq!(rounded.bounding_box(), kurbo::Rect::new(0., 0., 10., 10.));
+    }
+
+    #[test] fn offset_path_expands_and_contracts_closed_contours() {
+        let (mut expanded, mut contracted) = (square(), square());
+        expanded.offset_path(2., LineJoin::Miter, 4.);
+        contracted.offset_path(-2., LineJoin::Miter, 4.);
+        assert_eq!(expanded.bounding_box(), kurbo::Rect::new(-2., -2., 12., 12.));
+        assert_eq!(contracted.bounding_box(), kurbo::Rect::new(2., 2., 8., 8.));
+        assert!(matches!(expanded.elements().last(), Some(kurbo::PathEl::ClosePath)));
+    }
+
+    #[test] fn offset_path_supports_round_and_bevel_joins_on_curves() {
+        let mut path = BezPath::new();
+        path.move_to((0., 0.)); path.curve_to((0., 10.), (10., 10.), (10., 0.));
+        path.line_to((20., 0.));
+
+        let (mut round, mut bevel) = (path.clone(), path);
+        round.offset_path(2., LineJoin::Round, 4.);
+        bevel.offset_path(2., LineJoin::Bevel, 4.);
+        assert!(round.elements().iter()
+            .any(|element| matches!(element, kurbo::PathEl::CurveTo(..))));
+        assert!(bevel.elements().iter()
+            .all(|element| !matches!(element, kurbo::PathEl::CurveTo(..))));
+    }
 
     #[test] fn rounded_rectangle_has_four_quarter_curves() {
         let rect: Rectangle = serde_json::from_str(
@@ -465,8 +710,8 @@ fn bezier_path<PB: PathBuilder>(curve: &crate::core::schema::Bezier, reversed: b
     #[test] fn trim_path_wraps_across_the_path_end() {
         let mut path = BezPath::new();
         path.move_to((0., 0.)); path.line_to((100., 0.));
-        let segments = PathBuilder::trim_path(&path, 0.75, 0.5)
-            .segments().collect::<Vec<_>>();
+        path.trim_path(0.75, 0.5);
+        let segments = path.segments().collect::<Vec<_>>();
 
         assert_eq! (segments.len(), 2);
         assert_eq!((segments[0].start().x, segments[0].end().x), (75., 100.));
@@ -481,8 +726,8 @@ fn bezier_path<PB: PathBuilder>(curve: &crate::core::schema::Bezier, reversed: b
         let mut path = BezPath::new();
         path.move_to(curve.p0); path.curve_to(curve.p1, curve.p2, curve.p3);
 
-        let trimmed = PathBuilder::trim_path(&path, 0., 0.5);
-        let actual = trimmed.segments().next().unwrap().end();
+        path.trim_path(0., 0.5);
+        let actual = path.segments().next().unwrap().end();
         let t = curve.inv_arclen(
             curve.arclen(ACCURACY_TOLERANCE) / 2., ACCURACY_TOLERANCE);
         let expected = curve.eval(t);
@@ -494,7 +739,9 @@ fn bezier_path<PB: PathBuilder>(curve: &crate::core::schema::Bezier, reversed: b
         let mut path = BezPath::new();
         path.move_to((0., 0.));   path.line_to((10., 0.));
         path.line_to((10., 10.)); path.close_path();
-        let trimmed = PathBuilder::trim_path(&path, 0., 1.);
-        assert!(matches!(trimmed.elements().last(), Some(kurbo::PathEl::ClosePath)));
+        let storage = path.elements().as_ptr();
+        path.trim_path(0., 1.);
+        assert_eq!(storage, path.elements().as_ptr());
+        assert!(matches!(path.elements().last(), Some(kurbo::PathEl::ClosePath)));
     }
 }
