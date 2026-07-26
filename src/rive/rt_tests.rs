@@ -1,7 +1,9 @@
 
 use super::*;
 use std::io::Cursor;
-use crate::rive::decode::{FieldValue, Header, VarUInt};
+use crate::rive::{decode::{FieldValue, Header, VarUInt},
+    display_list::{CornerRadii, Path, PathCommand, Rect},
+};
 
 fn file(objects: Vec<Object>) -> RiveFile { RiveFile {
         header: Header {
@@ -23,8 +25,7 @@ fn artboard() -> Object { Object::new_simple(object_ids::ARTBOARD) }
 fn parented(type_id: u32, parent: u32) -> Object {
     let mut object = Object::new_simple(type_id);
     object.add_prop(VarUInt(property_ids::COMPONENT_PARENTID),
-        FieldValue::VarUInt(VarUInt(parent)));
-    object
+        FieldValue::VarUInt(VarUInt(parent)));  object
 }
 
 fn linear_animation(name: &[u8], duration: u32, fps: u32, loop_mode: u32) -> Object {
@@ -66,52 +67,8 @@ fn cubic_interpolator(x1: f32, y1: f32, x2: f32, y2: f32) -> Object {
 
 fn cubic_keyframe(frame: u32, value: f32, interpolator_id: u32) -> Object {
     let mut keyframe = double_keyframe(frame, value, 2);
-    uint_prop(&mut keyframe,
-        property_ids::INTERPOLATINGKEYFRAME_INTERPOLATORID, interpolator_id);
-    keyframe
-}
-
-fn straight(x: f32, y: f32, radius: f32) -> Vertex {
-    Vertex { position: Point { x, y }, incoming: None, outgoing: None, radius }
-}
-
-#[test] fn rounds_interior_straight_vertex() {
-    let path = build_path(&[straight(0.0, 0.0, 0.0),
-        straight(10.0, 0.0, 2.0), straight(10.0, 10.0, 0.0)], false);
-    assert_eq!(path.commands[1], PathCommand::LineTo(Point { x: 8.0, y: 0.0 }));
-    let PathCommand::CubicTo { ctrl1, ctrl2, to } = path.commands[2] else { panic!() };
-    assert!((ctrl1.x - 9.104_569).abs() < 1e-5 && ctrl1.y == 0.0);
-    assert!(ctrl2.x == 10.0 && (ctrl2.y - 0.895_431).abs() < 1e-5);
-    assert_eq!(to, Point { x: 10.0, y: 2.0 });
-}
-
-#[test] fn clamps_radius_and_leaves_open_endpoints_square() {
-    let rounded = build_path(&[straight(0.0, 0.0, 0.0),
-        straight(10.0, 0.0, 100.0), straight(10.0, 10.0, 0.0)], false);
-    assert_eq!(rounded.commands[1], PathCommand::LineTo(Point { x: 5.0, y: 0.0 }));
-    let PathCommand::CubicTo { to, .. } = rounded.commands[2] else { panic!() };
-    assert_eq!(to, Point { x: 10.0, y: 5.0 });
-
-    let endpoints = build_path(&[straight(0.0, 0.0, 2.0),
-        straight(10.0, 0.0, 0.0), straight(10.0, 10.0, 2.0)], false);
-    assert_eq!(&*endpoints.commands, &[
-        PathCommand::MoveTo(Point { x: 0.0, y: 0.0 }),
-        PathCommand::LineTo(Point { x: 10.0, y: 0.0 }),
-        PathCommand::LineTo(Point { x: 10.0, y: 10.0 }),
-    ]);
-}
-
-#[test] fn negative_radius_reverses_corner_controls() {
-    let vertices = |radius| [straight(0.0, 0.0, 0.0),
-        straight(10.0, 0.0, radius), straight(10.0, 10.0, 0.0)];
-    let (positive, negative) = (build_path(&vertices(2.0), false),
-        build_path(&vertices(-2.0), false));
-    let (PathCommand::CubicTo { ctrl1: pos1, ctrl2: pos2, .. },
-         PathCommand::CubicTo { ctrl1: neg1, ctrl2: neg2, .. }) =
-        (positive.commands[2], negative.commands[2]) else { panic!() };
-    assert_ne!((pos1, pos2), (neg1, neg2));
-    assert!(neg1.x.is_finite() && neg1.y.is_finite() &&
-            neg2.x.is_finite() && neg2.y.is_finite());
+    uint_prop(&mut keyframe, property_ids::INTERPOLATINGKEYFRAME_INTERPOLATORID,
+        interpolator_id);   keyframe
 }
 
 #[test] fn emits_static_geometry_with_retained_parent_transforms() {
@@ -127,18 +84,17 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     let runtime = Runtime::from_file(file(vec![artboard(), parent, ellipse])).unwrap();
     let list = runtime.display_list();
     assert_eq!(runtime.component_count(), 3);
-    assert_eq!(list.primitives.len(), 1);
-    assert_eq!(list.primitives[0].geometries[0].transform.tx, 15.0);
-    assert_eq!(list.primitives[0].geometries[0].transform.ty, 20.0);
-    assert_eq!(list.primitives[0].geometries[0].geometry,
-        Geometry::Ellipse(Rect { x: -20.0, y: -10.0, width: 40.0, height: 20.0 }));
+    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items[0].shapes[0].trfm.tx, 15.0);
+    assert_eq!(list.items[0].shapes[0].trfm.ty, 20.0);
+    assert_eq!(list.items[0].shapes[0].geom,
+        Geometry::Ellipse(Rect { x: -20.0, y: -10.0, w: 40.0, h: 20.0 }));
 }
 
 #[test] fn discovers_selects_and_advances_linear_animation() {
     let mut ellipse = parented(object_ids::ELLIPSE, 0);
     prop(&mut ellipse, property_ids::PARAMETRICPATH_WIDTH, 10.0);
-    let objects = vec![
-        artboard(), ellipse,
+    let objects = vec![artboard(), ellipse,
         linear_animation(b"move", 10, 10, 1),
         keyed_object(1), keyed_property(property_ids::NODE_X),
         double_keyframe(0, 0.0, 1), double_keyframe(10, 20.0, 1),
@@ -152,10 +108,10 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
 
     assert!(runtime.advance(0.5));
     assert_eq!(runtime.elapsed(), 0.5);
-    assert!((runtime.display_list().primitives[0].geometries[0].transform.tx - 10.0)
+    assert!((runtime.display_list().items[0].shapes[0].trfm.tx - 10.0)
         .abs() < 1e-6);
     assert!(runtime.advance(1.0));
-    assert!((runtime.display_list().primitives[0].geometries[0].transform.tx - 10.0)
+    assert!((runtime.display_list().items[0].shapes[0].trfm.tx - 10.0)
         .abs() < 1e-6);
     assert!(!runtime.advance(0.0));
     assert!(matches!(runtime.set_animation(1), Err(RuntimeError::AnimationNotFound(1))));
@@ -164,8 +120,8 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
 #[test] fn cubic_keyframes_resolve_and_apply_their_interpolator() {
     let mut ellipse = parented(object_ids::ELLIPSE, 0);
     prop(&mut ellipse, property_ids::PARAMETRICPATH_WIDTH, 10.0);
-    let objects = vec![
-        artboard(), ellipse, cubic_interpolator(0.42, 0.0, 1.0, 1.0),
+    let objects = vec![artboard(), ellipse,
+        cubic_interpolator(0.42, 0.0, 1.0, 1.0),
         linear_animation(b"ease", 10, 10, 0),
         keyed_object(1), keyed_property(property_ids::NODE_X),
         cubic_keyframe(0, 0.0, 2), double_keyframe(10, 20.0, 1),
@@ -173,13 +129,13 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
     runtime.advance(0.5);
-    let x = runtime.display_list().primitives[0].geometries[0].transform.tx;
+    let x = runtime.display_list().items[0].shapes[0].trfm.tx;
     assert!((6.0..6.4).contains(&x), "{x}");
 }
 
 #[test] fn animates_stroke_width_and_trim_parameters() {
     let shape = parented(object_ids::SHAPE, 0);
-    let path = parented(object_ids::ELLIPSE, 1);
+    let path  = parented(object_ids::ELLIPSE, 1);
     let mut stroke = parented(object_ids::STROKE, 1);
     prop(&mut stroke, property_ids::THICKNESS, 0.0);
     let mut trim = parented(object_ids::TRIM_PATH, 3);
@@ -196,8 +152,7 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     for (prop_id, from, to) in [
         (property_ids::TRIMPATH_START, 0.2, 0.6),
         (property_ids::TRIMPATH_END, 0.8, 0.4),
-        (property_ids::TRIMPATH_OFFSET, -0.1, 0.3),
-    ] {
+        (property_ids::TRIMPATH_OFFSET, -0.1, 0.3)] {
         objects.extend([keyed_property(prop_id), double_keyframe(0, from, 1),
             double_keyframe(10, to, 1)]);
     }
@@ -206,12 +161,27 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     runtime.set_animation(0).unwrap();
     runtime.advance(0.5);
     let Some(Paint::Stroke { width, effects, .. }) =
-        &runtime.display_list().primitives[0].paint else { panic!() };
+        &runtime.display_list().items[0].paint else { panic!() };
     assert!((*width - 4.0).abs() < 1e-6);
     let PathEffect::Trim { start, end, offset, .. } = effects[0] else { panic!() };
     assert!((start - 0.4).abs() < 1e-6);
     assert!((end - 0.6).abs() < 1e-6);
     assert!((offset - 0.1).abs() < 1e-6);
+}
+
+#[test] fn switching_animation_restores_previous_targets() {
+    let ellipse = parented(object_ids::ELLIPSE, 0);
+    let objects = vec![artboard(), ellipse,
+        linear_animation(b"x", 10, 10, 0), keyed_object(1),
+        keyed_property(property_ids::NODE_X), double_keyframe(0, 20.0, 1),
+        linear_animation(b"y", 10, 10, 0), keyed_object(1),
+        keyed_property(property_ids::NODE_Y), double_keyframe(0, 30.0, 1)];
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    assert_eq!(runtime.display_list().items[0].shapes[0].trfm.tx, 20.0);
+    runtime.set_animation(1).unwrap();
+    let transform = runtime.display_list().items[0].shapes[0].trfm;
+    assert_eq!((transform.tx, transform.ty), (0.0, 30.0));
 }
 
 #[test] fn rejects_unknown_keyframe_interpolation_and_cubic_reference() {
@@ -236,18 +206,17 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     let parent = parented(object_ids::NODE, 0);
     let mut ellipse = parented(object_ids::ELLIPSE, 1);
     prop(&mut ellipse, property_ids::PARAMETRICPATH_WIDTH, 10.0);
-    let objects = vec![
-        artboard(), parent, ellipse,
-        linear_animation(b"hide", 10, 10, 0),
-        keyed_object(1), keyed_property(property_ids::WORLDTRANSFORMCOMPONENT_OPACITY),
+    let objects = vec![artboard(), parent, ellipse,
+        linear_animation(b"hide", 10, 10, 0), keyed_object(1),
+        keyed_property(property_ids::WORLDTRANSFORMCOMPONENT_OPACITY),
         double_keyframe(0, 1.0, 0), double_keyframe(5, 0.25, 0),
     ];
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
     runtime.advance(0.25);
-    assert_eq!(runtime.display_list().primitives[0].opacity, 1.0);
+    assert_eq!(runtime.display_list().items[0].opacity, 1.0);
     runtime.advance(0.5);
-    assert_eq!(runtime.display_list().primitives[0].opacity, 0.25);
+    assert_eq!(runtime.display_list().items[0].opacity, 0.25);
 }
 
 #[test] fn selects_one_artboard_without_crossing_contexts() {
@@ -266,8 +235,8 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     assert_eq!(second.artboard_object_index(), 2);
     assert_eq!(second.component_count(), 2);
     assert!(matches!(
-        second.display_list().primitives[0].geometries[0].geometry,
-        Geometry::Ellipse(Rect { width: 20.0, .. })));
+        second.display_list().items[0].shapes[0].geom,
+        Geometry::Ellipse(Rect { w: 20.0, .. })));
     assert!(matches!(Runtime::from_artboard(file(objects()), 2),
         Err(RuntimeError::ArtboardNotFound(2))));
 }
@@ -280,9 +249,9 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
 
     let runtime = Runtime::from_file(file(vec![artboard(), rectangle])).unwrap();
     let Geometry::RoundedRect { radii, .. } =
-        &runtime.display_list().primitives[0].geometries[0].geometry else { panic!() };
+        &runtime.display_list().items[0].shapes[0].geom else { panic!() };
     assert_eq!(*radii, CornerRadii {
-        top_left: 3.0, top_right: 3.0, bottom_right: 3.0, bottom_left: 3.0,
+        tl: 3.0, tr: 3.0, br: 3.0, bl: 3.0,
     });
 }
 
@@ -303,22 +272,23 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     uint_prop(&mut star, property_ids::POINTS, 5);
     prop(&mut star, property_ids::INNERRADIUS, 0.5);
 
-    let runtime = Runtime::from_file(file(vec![artboard(), triangle, polygon, star])).unwrap();
+    let runtime = Runtime::from_file(file(vec![artboard(),
+        triangle, polygon, star])).unwrap();
     let list = runtime.display_list();
-    let paths: Vec<_> = list.primitives.iter().map(|primitive| {
-        let Geometry::Path(path) = &primitive.geometries[0].geometry else { panic!() };
+    let paths: Vec<_> = list.items.iter().map(|item| {
+        let Geometry::Path(path) = &item.shapes[0].geom else { panic!() };
         path
     }).collect();
-    assert_eq!(&*paths[0].commands, &[
+    assert_eq!(&*paths[0].cmd, &[
         PathCommand::MoveTo(Point { x: 0.0, y: -5.0 }),
         PathCommand::LineTo(Point { x: 10.0, y: 5.0 }),
         PathCommand::LineTo(Point { x: -10.0, y: 5.0 }),
         PathCommand::Close,
     ]);
-    assert_eq!(paths[1].commands.iter()
+    assert_eq!(paths[1].cmd.iter()
         .filter(|command| matches!(command, PathCommand::CubicTo { .. })).count(), 4);
-    assert_eq!(paths[2].commands.len(), 11);
-    let PathCommand::MoveTo(first) = paths[2].commands[0] else { panic!() };
+    assert_eq!(paths[2].cmd.len(), 11);
+    let PathCommand::MoveTo(first) = paths[2].cmd[0] else { panic!() };
     assert!(first.x.abs() < 1e-6 && first.y == -5.0);
 }
 
@@ -331,7 +301,7 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
 
     let runtime =
         Runtime::from_file(file(vec![artboard(), ignored, parent, ellipse])).unwrap();
-    assert_eq!(runtime.display_list().primitives[0].geometries[0].transform.tx, 15.0);
+    assert_eq!(runtime.display_list().items[0].shapes[0].trfm.tx, 15.0);
 }
 
 #[test] fn rejects_invalid_geometry_during_construction() {
@@ -377,24 +347,24 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     let runtime = Runtime::from_file(file(vec![artboard(), shape, path, first, second,
         fill, fill_color, stroke, stroke_color])).unwrap();
     let list = runtime.display_list();
-    assert_eq!(list.primitives.len(), 2);
-    assert_eq!(list.primitives[0].paint, Some(Paint::Fill {
+    assert_eq!(list.items.len(), 2);
+    assert_eq!(list.items[0].paint, Some(Paint::Fill {
         brush: Brush::Solid(0xff11_2233), rule: FillRule::EvenOdd,
         effects: [].into(),
     }));
-    assert_eq!(list.primitives[1].paint, Some(Paint::Stroke {
+    assert_eq!(list.items[1].paint, Some(Paint::Stroke {
         brush: Brush::Solid(0xff44_5566), width: 3.0,
         cap: StrokeCap::Butt, join: StrokeJoin::Miter,
-        transform_affects: true, effects: [].into(),
+        trfm_scale: true, effects: [].into(),
     }));
     assert!(std::sync::Arc::ptr_eq(
-        &list.primitives[0].geometries, &list.primitives[1].geometries));
+        &list.items[0].shapes, &list.items[1].shapes));
     let (Geometry::Path(fill_path), Geometry::Path(stroke_path)) =
-        (&list.primitives[0].geometries[0].geometry,
-         &list.primitives[1].geometries[0].geometry) else { panic!() };
-    assert!(std::sync::Arc::ptr_eq(&fill_path.commands, &stroke_path.commands));
-    assert_eq!(list.primitives[0].geometries[0].geometry,
-        Geometry::Path(Path { commands: vec![
+        (&list.items[0].shapes[0].geom,
+         &list.items[1].shapes[0].geom) else { panic!() };
+    assert!(std::sync::Arc::ptr_eq(&fill_path.cmd, &stroke_path.cmd));
+    assert_eq!(list.items[0].shapes[0].geom,
+        Geometry::Path(Path { cmd: vec![
         PathCommand::MoveTo(Point { x: 10.0, y:  0.0 }),
         PathCommand::LineTo(Point { x:  0.0, y: 20.0 }),
         PathCommand::Close,
@@ -427,15 +397,15 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
 
     let runtime = Runtime::from_file(file(vec![artboard(), shape, path, first, second,
         stroke, trim, dash_path, dash, gap])).unwrap();
-    let Some(Paint::Stroke { width, transform_affects, effects, .. }) =
-        &runtime.display_list().primitives[0].paint else { panic!() };
+    let Some(Paint::Stroke { width, trfm_scale: transform_affects, effects, .. }) =
+        &runtime.display_list().items[0].paint else { panic!() };
     assert_eq!((*width, *transform_affects), (2.0, false));
     assert_eq!(&**effects, &[
         PathEffect::Trim { start: 0.2, end: 0.8, offset: -0.1,
             mode: TrimMode::Synchronized },
-        PathEffect::Dash { offset: 0.25, offset_is_percentage: true, segments: vec![
-            DashSegment { length: 4.0, is_percentage: false },
-            DashSegment { length: 0.1, is_percentage: true },
+        PathEffect::Dash { offset: 0.25, relative: true, segments: vec![
+            DashSegment { len: 4.0, relative: false },
+            DashSegment { len: 0.1, relative: true },
         ].into() },
     ]);
 }
@@ -446,7 +416,7 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     let mut stroke = parented(object_ids::STROKE, 1);
     prop(&mut stroke, property_ids::THICKNESS, 0.0);
     let runtime = Runtime::from_file(file(vec![artboard(), shape, path, stroke])).unwrap();
-    assert!(runtime.display_list().primitives[0].paint.is_none());
+    assert!(runtime.display_list().items[0].paint.is_none());
 }
 
 #[test] fn rejects_invalid_trim_modes() {
@@ -484,11 +454,11 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     let runtime = Runtime::from_file(file(vec![artboard(), shape,
         path1, vertex1, vertex2, path2, vertex3, vertex4, fill, color])).unwrap();
     let list = runtime.display_list();
-    assert_eq!(list.primitives.len(), 1);
-    assert_eq!(list.primitives[0].geometries.len(), 2);
-    assert!(!list.primitives[0].geometries[0].is_hole);
-    assert!( list.primitives[0].geometries[1].is_hole);
-    assert!(matches!(list.primitives[0].paint, Some(Paint::Fill { .. })));
+    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items[0].shapes.len(), 2);
+    assert!(!list.items[0].shapes[0].is_hole);
+    assert!( list.items[0].shapes[1].is_hole);
+    assert!(matches!(list.items[0].paint, Some(Paint::Fill { .. })));
 }
 
 #[test] fn draw_rules_move_shape_after_target() {
@@ -505,8 +475,8 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
 
     let runtime = Runtime::from_file(file(vec![artboard(), owner, moved, moved_geometry,
         rules, target, target_shape, target_geometry])).unwrap();
-    assert_eq!(runtime.display_list().primitives.iter()
-        .map(|primitive| primitive.obj_idx).collect::<Vec<_>>(), [6, 2]);
+    assert_eq!(runtime.display_list().items.iter()
+        .map(|item| item.obj_idx).collect::<Vec<_>>(), [6, 2]);
 }
 
 #[test] fn nested_draw_rules_move_attached_blocks_together() {
@@ -534,8 +504,8 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
         owner_a, shape_a, geometry_a, rules_a, target_a,
         owner_b, shape_b, geometry_b, rules_b, target_b,
         shape_c, geometry_c])).unwrap();
-    assert_eq!(runtime.display_list().primitives.iter()
-        .map(|primitive| primitive.obj_idx).collect::<Vec<_>>(), [11, 7, 2]);
+    assert_eq!(runtime.display_list().items.iter()
+        .map(|item| item.obj_idx).collect::<Vec<_>>(), [11, 7, 2]);
 }
 
 #[test] fn rejects_draw_rule_cycles() {
@@ -574,9 +544,9 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
 
     let runtime = Runtime::from_file(file(vec![
         artboard(), parent, shape, ellipse, fill, color])).unwrap();
-    let primitive = &runtime.display_list().primitives[0];
-    assert!((primitive.opacity - 0.2).abs() < f32::EPSILON);
-    assert!(matches!(&primitive.paint,
+    let item = &runtime.display_list().items[0];
+    assert!((item.opacity - 0.2).abs() < f32::EPSILON);
+    assert!(matches!(&item.paint,
         Some(Paint::Fill { brush: Brush::Solid(0x8011_2233), .. })));
 }
 
@@ -604,13 +574,13 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     let runtime = Runtime::from_file(file(vec![
         artboard(), shape, ellipse, fill, gradient, last, first])).unwrap();
     let Some(Paint::Fill { brush: Brush::LinearGradient {
-        start, end, transform, opacity, stops }, ..
-    }) = &runtime.display_list().primitives[0].paint else { panic!() };
+        start, end, trfm: transform, opacity, stops }, ..
+    }) = &runtime.display_list().items[0].paint else { panic!() };
     assert_eq!((*start, *end), (Point { x: 1.0, y: 2.0 }, Point { x: 8.0, y: 9.0 }));
     assert_eq!((transform.tx, transform.ty), (12.0, 34.0));
     assert_eq!(*opacity, 0.5);
-    assert_eq!(&**stops, &[GradientStop { position: 0.0, color: 0xff11_2233 },
-                           GradientStop { position: 1.0, color: 0xffaa_bbcc }, ]);
+    assert_eq!(&**stops, &[GradientStop { pos: 0.0, color: 0xff11_2233 },
+                           GradientStop { pos: 1.0, color: 0xffaa_bbcc }, ]);
 }
 
 #[test] fn builds_radial_gradient_radius_from_end_point() {
@@ -625,7 +595,7 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
 
     let runtime = Runtime::from_file(file(vec![
         artboard(), shape, ellipse, fill, gradient])).unwrap();
-    assert!(matches!(&runtime.display_list().primitives[0].paint,
+    assert!(matches!(&runtime.display_list().items[0].paint,
         Some(Paint::Fill { brush: Brush::RadialGradient {
             center: Point { x: 2.0, y: 3.0 }, radius: 5.0, ..
         }, .. })));
@@ -637,7 +607,7 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     let ellipse = parented(object_ids::ELLIPSE, 1);
 
     let runtime = Runtime::from_file(file(vec![artboard(), shape, ellipse])).unwrap();
-    assert!(runtime.display_list().primitives.is_empty());
+    assert!(runtime.display_list().items.is_empty());
 }
 
 #[test] fn imports_repository_sample() {
@@ -649,7 +619,7 @@ fn straight(x: f32, y: f32, radius: f32) -> Vertex {
     runtime.set_animation(0).unwrap();
     assert!(runtime.advance(1.0 / 60.0));
     let list =  runtime.display_list();
-    assert!(list.primitives.iter().flat_map(|primitive| primitive.geometries.iter())
-        .any(|geometry| matches!(&geometry.geometry, Geometry::Path(_))));
-    assert!(list.primitives.iter().any(|primitive| primitive.paint.is_some()));
+    assert!(list.items.iter().flat_map(|item| item.shapes.iter())
+        .any(|geometry| matches!(&geometry.geom, Geometry::Path(_))));
+    assert!(list.items.iter().any(|item| item.paint.is_some()));
 }

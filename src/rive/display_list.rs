@@ -1,4 +1,6 @@
 
+//! Backend-neutral, immutable drawing data emitted by the retained Rive runtime.
+
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -10,14 +12,13 @@ pub struct Point { pub x: f32, pub y: f32 }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Path { pub commands: Arc<[PathCommand]> }
+pub struct Path { pub cmd: Arc<[PathCommand]> }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Rect { pub x: f32, pub y: f32, pub width: f32, pub height: f32 }
+pub struct Rect { pub x: f32, pub y: f32, pub w: f32, pub h: f32 }
 
 #[derive(Debug, Clone, Copy, PartialEq)] pub struct CornerRadii {
-    pub top_left: f32, pub top_right: f32,
-    pub bottom_right: f32, pub bottom_left: f32,
+    pub tl: f32, pub tr: f32, pub br: f32, pub bl: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)] pub struct Affine2 {
@@ -69,49 +70,52 @@ pub enum FillRule { NonZero, EvenOdd, Clockwise }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)] pub enum TrimMode { Sequential, Synchronized }
 
 #[derive(Debug, Clone, Copy, PartialEq)] pub struct DashSegment {
-    pub length: f32, pub is_percentage: bool,
+    pub len: f32, pub relative: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)] pub enum PathEffect {
     Trim { start: f32, end: f32, offset: f32, mode: TrimMode },
-    Dash { offset: f32, offset_is_percentage: bool, segments: Arc<[DashSegment]> },
+    Dash { offset: f32, relative: bool, segments: Arc<[DashSegment]> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)] pub struct GradientStop {
-    pub position: f32, pub color: u32,
+    pub pos: f32, pub color: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)] pub enum Brush { Solid(u32),
-    LinearGradient {  start: Point,  end: Point, transform: Affine2,
+    LinearGradient {  start: Point,  end: Point, trfm: Affine2,
         opacity: f32, stops: Arc<[GradientStop]> },
-    RadialGradient { center: Point, radius: f32, transform: Affine2,
+    RadialGradient { center: Point, radius: f32, trfm: Affine2,
         opacity: f32, stops: Arc<[GradientStop]> },
 }
 
 #[derive(Debug, Clone, PartialEq)] pub enum Paint {
     Stroke { brush: Brush, width: f32, cap: StrokeCap, join: StrokeJoin,
-        transform_affects: bool, effects: Arc<[PathEffect]> },
+        trfm_scale: bool, effects: Arc<[PathEffect]> },
     Fill   { brush: Brush, rule: FillRule, effects: Arc<[PathEffect]> },
 }
 
-#[derive(Debug, Clone, PartialEq)] pub struct GeometryInstance {
+#[derive(Debug, Clone, PartialEq)] pub struct Shape {
+    /// Source object index, retained for diagnostics and future hit testing.
     pub obj_idx: u32,
     pub is_hole: bool,
-    pub transform: Affine2,
-    pub geometry: Geometry,
+    pub trfm: Affine2,
+    pub geom: Geometry,
 }
 
-#[derive(Debug, Clone, PartialEq)] pub struct Primitive {
+#[derive(Debug, Clone, PartialEq)] pub struct DrawItem {
+    /// One paint application over a combined, ordered set of shape contours.
     pub obj_idx: u32, pub opacity: f32, pub paint: Option<Paint>,
-    pub geometries: Arc<[GeometryInstance]>,
+    pub shapes: Arc<[Shape]>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct DisplayList { pub primitives: Vec<Primitive> }
+/// A frame snapshot; backends may consume it after the Runtime advances again.
+pub struct DisplayList { pub items: Vec<DrawItem> }
 
 impl DisplayList {
-    pub fn clear(&mut self) { self.primitives.clear() }
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &Primitive> {
-        self.primitives.iter()
+    pub fn clear(&mut self) { self.items.clear() }
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &DrawItem> {
+        self.items.iter()
     }
 }
