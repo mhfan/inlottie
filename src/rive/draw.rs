@@ -2,17 +2,14 @@
 
 use std::mem;
 
-use super::{
-    DrawGroup, Result, Runtime, RuntimeError, uint,
-    object_ids, property_ids,
-    DisplayList, DrawItem, Paint, Shape,
+use super::{ComponentPaint, DrawGroup, Result, Runtime, RuntimeError, uint,
+    object_ids, property_ids, DisplayList, DrawItem, Paint, Shape,
 };
 
 impl Runtime {
     pub fn display_list(&self) -> DisplayList {
         let mut list = DisplayList::default();
-        self.write_display_list(&mut list);
-        list
+        self.write_display_list(&mut list);     list
     }
 
     pub fn write_display_list(&self, list: &mut DisplayList) {
@@ -33,7 +30,7 @@ impl Runtime {
                 let component = &self.components[index as usize];
                 Shape { obj_idx: component.obj_idx, is_hole: component.is_hole,
                     trfm: component.world,
-                    geom: component.geometry.as_ref().unwrap().clone() }
+                    geom: component.geom.as_ref().unwrap().geometry().clone() }
             }).collect();
             if group.paints.is_empty() {
                 list.items.push(DrawItem {
@@ -44,7 +41,7 @@ impl Runtime {
                     let paint = self.components[index as usize].paint.as_ref()?;
                     visible_paint(paint).then(|| DrawItem {
                         obj_idx: group.obj_idx, opacity,
-                        shapes: shapes.clone(), paint: Some(paint.clone()),
+                        shapes: shapes.clone(), paint: Some(paint.value.clone()),
                     })
                 }));
                 if  list.items.len() == start {
@@ -78,7 +75,7 @@ impl Runtime {
                     obj_idx: component.obj_idx, opacity_component: index as u32,
                     components: Vec::new(), paints: Vec::new()
                 });
-            } else if component.geometry.is_some() && shapes[index].is_none() {
+            } else if component.geom.is_some() && shapes[index].is_none() {
                 self.draw_groups.push(DrawGroup {
                     obj_idx: component.obj_idx, opacity_component: index as u32,
                     components: vec![index as u32], paints: Vec::new(),
@@ -88,10 +85,9 @@ impl Runtime {
         for (index, component) in self.components.iter().enumerate() {
             let Some(shape) = shapes[index] else { continue };
             let group = &mut self.draw_groups[shape_groups[shape as usize].unwrap()];
-            if component.geometry.is_some() { group.components.push(index as u32) }
+            if component.geom.is_some() { group.components.push(index as u32) }
             if component.paint.is_some() { group.paints.push(index as u32) }
-        }
-        self.draw_groups.retain(|group| !group.components.is_empty());
+        }   self.draw_groups.retain(|group| !group.components.is_empty());
     }
 
     pub(super) fn apply_draw_rules(&mut self) -> Result<()> {
@@ -177,12 +173,12 @@ impl Runtime {
         }
         if let Some(index) = state.iter().position(|&value| value == 0) {
             emit(index, &mut groups, &before, &after, &mut state, &mut output)?;
-        }
-        self.draw_groups = output;  Ok(())
+        }   self.draw_groups = output;  Ok(())
     }
 }
 
-fn visible_paint(paint: &Paint) -> bool { match paint {
-    Paint::Stroke { width, .. } => 0.0 < *width,
-    _ => true,
-} }
+fn visible_paint(paint: &ComponentPaint) -> bool {
+    paint.visible && match &paint.value {
+        Paint::Stroke { width, .. } => 0.0 < *width, _ => true,
+    }
+}

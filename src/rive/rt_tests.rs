@@ -56,6 +56,28 @@ fn double_keyframe(frame: u32, value: f32, interpolation: u32) -> Object {
     prop(&mut keyframe, property_ids::KEYFRAMEDOUBLE_VALUE, value); keyframe
 }
 
+fn color_keyframe(frame: u32, value: u32, interpolation: u32) -> Object {
+    let mut keyframe = Object::new_simple(object_ids::KEY_FRAME_COLOR);
+    uint_prop(&mut keyframe, property_ids::FRAME, frame);
+    uint_prop(&mut keyframe,
+        property_ids::INTERPOLATINGKEYFRAME_INTERPOLATIONTYPE, interpolation);
+    keyframe.add_prop(VarUInt(property_ids::KEYFRAMECOLOR_VALUE),
+        FieldValue::Color(value));   keyframe
+}
+
+fn bool_keyframe(frame: u32, value: bool) -> Object {
+    let mut keyframe = Object::new_simple(object_ids::KEY_FRAME_BOOL);
+    uint_prop(&mut keyframe, property_ids::FRAME, frame);
+    keyframe.add_prop(VarUInt(property_ids::KEYFRAMEBOOL_VALUE),
+        FieldValue::VarUInt(VarUInt(u32::from(value))));   keyframe
+}
+
+fn uint_keyframe(frame: u32, value: u32) -> Object {
+    let mut keyframe = Object::new_simple(object_ids::KEY_FRAME_UINT);
+    uint_prop(&mut keyframe, property_ids::FRAME, frame);
+    uint_prop(&mut keyframe, property_ids::KEYFRAMEUINT_VALUE, value); keyframe
+}
+
 fn cubic_interpolator(x1: f32, y1: f32, x2: f32, y2: f32) -> Object {
     let mut interpolator = Object::new_simple(object_ids::CUBIC_INTERPOLATOR);
     prop(&mut interpolator, property_ids::CUBICINTERPOLATOR_X1, x1);
@@ -167,6 +189,153 @@ fn cubic_keyframe(frame: u32, value: f32, interpolator_id: u32) -> Object {
     assert!((start - 0.4).abs() < 1e-6);
     assert!((end - 0.6).abs() < 1e-6);
     assert!((offset - 0.1).abs() < 1e-6);
+}
+
+#[test] fn animates_parametric_geometry() {
+    let mut rectangle = parented(object_ids::RECTANGLE, 0);
+    prop(&mut rectangle, property_ids::PARAMETRICPATH_WIDTH, 10.0);
+    prop(&mut rectangle, property_ids::PARAMETRICPATH_HEIGHT, 20.0);
+    prop(&mut rectangle, property_ids::RECTANGLE_CORNERRADIUSTL, 1.0);
+    let mut objects = vec![artboard(), rectangle,
+        linear_animation(b"geometry", 10, 10, 0), keyed_object(1)];
+    for (prop_id, from, to) in [
+        (property_ids::PARAMETRICPATH_WIDTH, 10.0, 30.0),
+        (property_ids::RECTANGLE_CORNERRADIUSTL, 1.0, 5.0), ] {
+        objects.extend([keyed_property(prop_id), double_keyframe(0, from, 1),
+            double_keyframe(10, to, 1)]);
+    }
+
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    let Geometry::RoundedRect { rect, radii } =
+        runtime.display_list().items[0].shapes[0].geom else { panic!() };
+    assert_eq!(rect, Rect { x: -10.0, y: -10.0, w: 20.0, h: 20.0 });
+    assert_eq!(radii, CornerRadii { tl: 3.0, tr: 3.0, br: 3.0, bl: 3.0 });
+
+    runtime.set_animation(0).unwrap();
+    let Geometry::RoundedRect { rect, radii } =
+        runtime.display_list().items[0].shapes[0].geom else { panic!() };
+    assert_eq!(rect.w, 10.0);
+    assert_eq!(radii, CornerRadii { tl: 1.0, tr: 1.0, br: 1.0, bl: 1.0 });
+}
+
+#[test] fn animates_gradient_stop_colors_and_positions() {
+    let shape = parented(object_ids::SHAPE, 0);
+    let ellipse = parented(object_ids::ELLIPSE, 1);
+    let fill = parented(object_ids::FILL, 1);
+    let mut solid = parented(object_ids::SOLID_COLOR, 3);
+    solid.add_prop(VarUInt(property_ids::SOLIDCOLOR_COLORVALUE),
+        FieldValue::Color(0x0010_80ff));
+    let gradient_fill = parented(object_ids::FILL, 1);
+    let gradient = parented(object_ids::LINEAR_GRADIENT, 5);
+    let mut stop = parented(object_ids::GRADIENT_STOP, 6);
+    prop(&mut stop, property_ids::POSITION, 1.0);
+    stop.add_prop(VarUInt(property_ids::GRADIENTSTOP_COLORVALUE),
+        FieldValue::Color(0xff00_0000));
+    let mut first_stop = parented(object_ids::GRADIENT_STOP, 6);
+    first_stop.add_prop(VarUInt(property_ids::GRADIENTSTOP_COLORVALUE),
+        FieldValue::Color(0xff12_3456));
+
+    let objects = vec![artboard(), shape, ellipse, fill, solid,
+        gradient_fill, gradient, stop, first_stop,
+        linear_animation(b"color", 10, 10, 0),
+        keyed_object(4), keyed_property(property_ids::SOLIDCOLOR_COLORVALUE),
+        color_keyframe(0, 0x0010_80ff, 1),
+        color_keyframe(10, 0xfff0_0001, 1),
+        keyed_object(7), keyed_property(property_ids::GRADIENTSTOP_COLORVALUE),
+        color_keyframe(0, 0xff00_0000, 1),
+        color_keyframe(10, 0xffff_ffff, 1),
+        keyed_property(property_ids::POSITION),
+        double_keyframe(0, 1.0, 1), double_keyframe(10, -1.0, 1),
+        linear_animation(b"idle", 10, 10, 0),
+    ];
+
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    let list = runtime.display_list();
+    assert!(matches!(&list.items[0].paint,
+        Some(Paint::Fill { brush: Brush::Solid(0x8080_4080), .. })));
+    let Some(Paint::Fill { brush: Brush::LinearGradient { stops, .. }, .. }) =
+        &list.items[1].paint else { panic!() };
+    assert_eq!(stops[0], GradientStop { pos: 0.0, color: 0xff80_8080 });
+    assert_eq!(stops[1], GradientStop { pos: 0.0, color: 0xff12_3456 });
+
+    runtime.set_animation(1).unwrap();
+    let list = runtime.display_list();
+    assert!(matches!(&list.items[0].paint,
+        Some(Paint::Fill { brush: Brush::Solid(0x0010_80ff), .. })));
+    let Some(Paint::Fill { brush: Brush::LinearGradient { stops, .. }, .. }) =
+        &list.items[1].paint else { panic!() };
+    assert_eq!(stops[0], GradientStop { pos: 0.0, color: 0xff12_3456 });
+    assert_eq!(stops[1], GradientStop { pos: 1.0, color: 0xff00_0000 });
+}
+
+#[test] fn applies_discrete_bool_and_uint_tracks() {
+    let shape = parented(object_ids::SHAPE, 0);
+    let path = parented(object_ids::POINTS_PATH, 1);
+    let first = parented(object_ids::STRAIGHT_VERTEX, 2);
+    let second = parented(object_ids::STRAIGHT_VERTEX, 2);
+    let mut fill = parented(object_ids::FILL, 1);
+    fill.add_prop(VarUInt(property_ids::SHAPEPAINT_ISVISIBLE),
+        FieldValue::VarUInt(VarUInt(0)));
+    let mut polygon = parented(object_ids::POLYGON, 0);
+    prop(&mut polygon, property_ids::PARAMETRICPATH_WIDTH, 10.0);
+    prop(&mut polygon, property_ids::PARAMETRICPATH_HEIGHT, 10.0);
+    uint_prop(&mut polygon, property_ids::POINTS, 3);
+    let objects = vec![artboard(), shape, path, first, second, fill, polygon,
+        linear_animation(b"discrete", 10, 10, 0),
+        keyed_object(5), keyed_property(property_ids::SHAPEPAINT_ISVISIBLE),
+        bool_keyframe(0, false), bool_keyframe(5, true),
+        keyed_object(2), keyed_property(property_ids::POINTSCOMMONPATH_ISCLOSED),
+        bool_keyframe(0, false), bool_keyframe(5, true),
+        keyed_object(6), keyed_property(property_ids::POINTS),
+        uint_keyframe(0, 3), uint_keyframe(5, 5),
+    ];
+
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    let list = runtime.display_list();
+    assert!(list.items[0].paint.is_none());
+    let Geometry::Path(path) = &list.items[0].shapes[0].geom else { panic!() };
+    assert!(!matches!(path.cmd.last(), Some(PathCommand::Close)));
+    let Geometry::Path(polygon) = &list.items[1].shapes[0].geom else { panic!() };
+    assert_eq!(polygon.cmd.len(), 4);
+
+    runtime.advance(0.6);
+    let list = runtime.display_list();
+    assert!(matches!(list.items[0].paint, Some(Paint::Fill { .. })));
+    let Geometry::Path(path) = &list.items[0].shapes[0].geom else { panic!() };
+    assert!(matches!(path.cmd.last(), Some(PathCommand::Close)));
+    let Geometry::Path(polygon) = &list.items[1].shapes[0].geom else { panic!() };
+    assert_eq!(polygon.cmd.len(), 6);
+}
+
+#[test] fn animates_points_path_vertices_and_restores_them() {
+    let shape = parented(object_ids::SHAPE, 0);
+    let path = parented(object_ids::POINTS_PATH, 1);
+    let first = parented(object_ids::STRAIGHT_VERTEX, 2);
+    let mut second = parented(object_ids::STRAIGHT_VERTEX, 2);
+    prop(&mut second, property_ids::VERTEX_X, 10.0);
+    let objects = vec![artboard(), shape, path, first, second,
+        linear_animation(b"vertex", 10, 10, 0),
+        keyed_object(3), keyed_property(property_ids::VERTEX_X),
+        double_keyframe(0, 0.0, 1), double_keyframe(10, 4.0, 1),
+        linear_animation(b"idle", 10, 10, 0),
+    ];
+
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    let list = runtime.display_list();
+    let Geometry::Path(path) = &list.items[0].shapes[0].geom else { panic!() };
+    assert_eq!(path.cmd[0], PathCommand::MoveTo(Point { x: 2.0, y: 0.0 }));
+
+    runtime.set_animation(1).unwrap();
+    let list = runtime.display_list();
+    let Geometry::Path(path) = &list.items[0].shapes[0].geom else { panic!() };
+    assert_eq!(path.cmd[0], PathCommand::MoveTo(Point { x: 0.0, y: 0.0 }));
 }
 
 #[test] fn switching_animation_restores_previous_targets() {
@@ -318,6 +487,15 @@ fn cubic_keyframe(frame: u32, value: f32, interpolator_id: u32) -> Object {
     uint_prop(&mut star, property_ids::POINTS, u32::from(u16::MAX));
     assert!(matches!(Runtime::from_file(file(vec![artboard(), star])),
         Err(RuntimeError::TooManyVertices(131_070))));
+
+    let star = parented(object_ids::STAR, 0);
+    let animated = file(vec![artboard(), star,
+        linear_animation(b"invalid", 10, 10, 0), keyed_object(1),
+        keyed_property(property_ids::POINTS),
+        uint_keyframe(0, u32::from(u16::MAX)),
+    ]);
+    assert!(matches!(Runtime::from_file(animated),
+        Err(RuntimeError::TooManyVertices(131_070))));
 }
 
 #[test] fn builds_points_path_with_fill_and_stroke() {
@@ -410,6 +588,94 @@ fn cubic_keyframe(frame: u32, value: f32, interpolator_id: u32) -> Object {
     ]);
 }
 
+#[test] fn animates_dash_path_and_segments() {
+    let shape = parented(object_ids::SHAPE, 0);
+    let path = parented(object_ids::ELLIPSE, 1);
+    let mut stroke = parented(object_ids::STROKE, 1);
+    prop(&mut stroke, property_ids::THICKNESS, 2.0);
+    let mut dash_path = parented(object_ids::DASH_PATH, 3);
+    prop(&mut dash_path, property_ids::DASHPATH_OFFSET, 0.25);
+    uint_prop(&mut dash_path, property_ids::OFFSETISPERCENTAGE, 1);
+    let mut dash = parented(object_ids::DASH, 4);
+    prop(&mut dash, property_ids::DASH_LENGTH, 4.0);
+    let objects = vec![artboard(), shape, path, stroke, dash_path, dash,
+        linear_animation(b"dash", 10, 10, 0),
+        keyed_object(4), keyed_property(property_ids::DASHPATH_OFFSET),
+        double_keyframe(0, 0.25, 1), double_keyframe(10, 0.75, 1),
+        keyed_property(property_ids::OFFSETISPERCENTAGE),
+        bool_keyframe(0, true), bool_keyframe(5, false),
+        keyed_object(5), keyed_property(property_ids::DASH_LENGTH),
+        double_keyframe(0, 4.0, 1), double_keyframe(10, 8.0, 1),
+        keyed_property(property_ids::LENGTHISPERCENTAGE),
+        bool_keyframe(0, false), bool_keyframe(5, true),
+        linear_animation(b"idle", 10, 10, 0),
+    ];
+
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    let list = runtime.display_list();
+    let Some(Paint::Stroke { effects, .. }) = &list.items[0].paint else { panic!() };
+    let PathEffect::Dash { offset, relative, segments } = &effects[0] else { panic!() };
+    assert_eq!((*offset, *relative, segments[0]), (0.5, false,
+        DashSegment { len: 6.0, relative: true }));
+
+    runtime.set_animation(1).unwrap();
+    let list = runtime.display_list();
+    let Some(Paint::Stroke { effects, .. }) = &list.items[0].paint else { panic!() };
+    let PathEffect::Dash { offset, relative, segments } = &effects[0] else { panic!() };
+    assert_eq!((*offset, *relative, segments[0]), (0.25, true,
+        DashSegment { len: 4.0, relative: false }));
+}
+
+#[test] fn animates_discrete_paint_and_trim_properties() {
+    let shape = parented(object_ids::SHAPE, 0);
+    let path = parented(object_ids::ELLIPSE, 1);
+    let fill = parented(object_ids::FILL, 1);
+    let mut stroke = parented(object_ids::STROKE, 1);
+    prop(&mut stroke, property_ids::THICKNESS, 1.0);
+    let mut trim = parented(object_ids::TRIM_PATH, 4);
+    uint_prop(&mut trim, property_ids::TRIMPATH_MODEVALUE, 1);
+    let objects = vec![artboard(), shape, path, fill, stroke, trim,
+        linear_animation(b"paint", 10, 10, 0),
+        keyed_object(3), keyed_property(property_ids::FILL_FILLRULE),
+        uint_keyframe(0, 0), uint_keyframe(5, 1),
+        keyed_object(4), keyed_property(property_ids::CAP),
+        uint_keyframe(0, 0), uint_keyframe(5, 1),
+        keyed_property(property_ids::JOIN),
+        uint_keyframe(0, 0), uint_keyframe(5, 2),
+        keyed_property(property_ids::TRANSFORMAFFECTSSTROKE),
+        bool_keyframe(0, true), bool_keyframe(5, false),
+        keyed_object(5), keyed_property(property_ids::TRIMPATH_MODEVALUE),
+        uint_keyframe(0, 1), uint_keyframe(5, 2),
+        linear_animation(b"idle", 10, 10, 0),
+    ];
+
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    let list = runtime.display_list();
+    assert!(matches!(&list.items[0].paint,
+        Some(Paint::Fill { rule: FillRule::EvenOdd, .. })));
+    let Some(Paint::Stroke { cap, join, trfm_scale, effects, .. }) =
+        &list.items[1].paint else { panic!() };
+    assert_eq!((*cap, *join, *trfm_scale),
+        (StrokeCap::Round, StrokeJoin::Bevel, false));
+    assert!(matches!(effects[0],
+        PathEffect::Trim { mode: TrimMode::Synchronized, .. }));
+
+    runtime.set_animation(1).unwrap();
+    let list = runtime.display_list();
+    assert!(matches!(&list.items[0].paint,
+        Some(Paint::Fill { rule: FillRule::NonZero, .. })));
+    let Some(Paint::Stroke { cap, join, trfm_scale, effects, .. }) =
+        &list.items[1].paint else { panic!() };
+    assert_eq!((*cap, *join, *trfm_scale),
+        (StrokeCap::Butt, StrokeJoin::Miter, true));
+    assert!(matches!(effects[0],
+        PathEffect::Trim { mode: TrimMode::Sequential, .. }));
+}
+
 #[test] fn omits_non_positive_strokes() {
     let shape = parented(object_ids::SHAPE, 0);
     let path = parented(object_ids::ELLIPSE, 1);
@@ -426,6 +692,16 @@ fn cubic_keyframe(frame: u32, value: f32, interpolator_id: u32) -> Object {
     let mut trim = parented(object_ids::TRIM_PATH, 3);
     uint_prop(&mut trim, property_ids::TRIMPATH_MODEVALUE, 3);
     assert!(matches!(Runtime::from_file(file(vec![artboard(), shape, path, stroke, trim])),
+        Err(RuntimeError::InvalidTrimMode(3))));
+
+    let shape = parented(object_ids::SHAPE, 0);
+    let stroke = parented(object_ids::STROKE, 1);
+    let mut trim = parented(object_ids::TRIM_PATH, 2);
+    uint_prop(&mut trim, property_ids::TRIMPATH_MODEVALUE, 1);
+    let animated = file(vec![artboard(), shape, stroke, trim,
+        linear_animation(b"invalid", 10, 10, 0), keyed_object(3),
+        keyed_property(property_ids::TRIMPATH_MODEVALUE), uint_keyframe(0, 3)]);
+    assert!(matches!(Runtime::from_file(animated),
         Err(RuntimeError::InvalidTrimMode(3))));
 }
 
@@ -599,6 +875,45 @@ fn cubic_keyframe(frame: u32, value: f32, interpolator_id: u32) -> Object {
         Some(Paint::Fill { brush: Brush::RadialGradient {
             center: Point { x: 2.0, y: 3.0 }, radius: 5.0, ..
         }, .. })));
+}
+
+#[test] fn animates_gradient_parameters_and_world_transform() {
+    let parent  = parented(object_ids::NODE, 0);
+    let ellipse = parented(object_ids::ELLIPSE, 2);
+    let shape = parented(object_ids::SHAPE, 1);
+    let fill  = parented(object_ids::FILL, 2);
+    let mut gradient = parented(object_ids::RADIAL_GRADIENT, 4);
+    prop(&mut gradient, property_ids::ENDX, 4.0);
+    let stop = parented(object_ids::GRADIENT_STOP, 5);
+    let mut objects = vec![artboard(), parent, shape, ellipse, fill, gradient, stop,
+        linear_animation(b"gradient", 10, 10, 0),
+        keyed_object(1), keyed_property(property_ids::NODE_X),
+        double_keyframe(0, 0.0, 1), double_keyframe(10, 10.0, 1), keyed_object(5)];
+    for (prop_id, from, to) in [
+        (property_ids::STARTX, 0.0, 2.0), (property_ids::ENDX, 4.0, 8.0),
+        (property_ids::LINEARGRADIENT_OPACITY, 1.0, 0.5), ] {
+        objects.extend([keyed_property(prop_id), double_keyframe(0, from, 1),
+            double_keyframe(10, to, 1)]);
+    }
+    objects.push(linear_animation(b"idle", 10, 10, 0));
+
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    let list = runtime.display_list();
+    let Some(Paint::Fill { brush: Brush::RadialGradient {
+        center, radius, trfm, opacity, .. }, .. }) =
+        &list.items[0].paint else { panic!() };
+    assert_eq!((*center, *radius, trfm.tx, *opacity),
+        (Point { x: 1.0, y: 0.0 }, 5.0, 5.0, 0.75));
+
+    runtime.set_animation(1).unwrap();
+    let list = runtime.display_list();
+    let Some(Paint::Fill { brush: Brush::RadialGradient {
+        center, radius, trfm, opacity, .. }, .. }) =
+        &list.items[0].paint else { panic!() };
+    assert_eq!((*center, *radius, trfm.tx, *opacity),
+        (Point { x: 0.0, y: 0.0 }, 4.0, 0.0, 1.0));
 }
 
 #[test] fn omits_fully_transparent_shape() {

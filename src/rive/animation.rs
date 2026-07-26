@@ -1,7 +1,7 @@
 
-//! Linear-animation discovery and scalar keyframe evaluation.
+//! Linear-animation discovery and keyframe evaluation.
 
-use super::{decode::{Object, RiveFile, object_ids, property_ids},
+use super::{decode::{Object, RiveFile, core_color_default, object_ids, property_ids},
     runtime::{Result, RuntimeError, float, uint},
 };
 
@@ -9,12 +9,31 @@ use super::{decode::{Object, RiveFile, object_ids, property_ids},
     Hold, Linear, Cubic { x1: f32, y1: f32, x2: f32, y2: f32 },
 }
 
-#[derive(Debug)] struct Keyframe { frame: u32, value: f32, interp: Interpolation }
+#[derive(Debug, Clone, Copy, PartialEq)] pub(super) enum TrackValue {
+    Scalar(f32), Color(u32), Bool(bool), Uint(u32),
+}
+
+#[derive(Clone, Copy, PartialEq)] pub(super) enum TrackKind {
+    Scalar, Color, Bool, Uint,
+}
+
+#[derive(Debug)] struct Keyframe {
+    frame: u32, value: TrackValue, interp: Interpolation,
+}
 
 #[derive(Debug)] pub(super) struct PropertyTrack {
     // `slot` indexes LinearAnimation::components, avoiding a component-sized table per frame.
     pub component: u32, pub slot: u32, pub prop_id: u32,
     keyframes: Vec<Keyframe>,
+}
+
+impl PropertyTrack {
+    pub fn kind(&self) -> TrackKind { match self.keyframes[0].value {
+        TrackValue::Scalar(_) => TrackKind::Scalar,
+        TrackValue::Color(_) => TrackKind::Color,
+        TrackValue::Bool(_) => TrackKind::Bool,
+        TrackValue::Uint(_) => TrackKind::Uint,
+    } }
 }
 
 #[derive(Debug)] pub(super) struct LinearAnimation {
@@ -26,7 +45,7 @@ use super::{decode::{Object, RiveFile, object_ids, property_ids},
 pub(super) fn build_animations(file: &RiveFile, context_start: usize, context_end: usize,
     obj_comps: &[Option<u32>]) -> Result<Vec<LinearAnimation>> {
     let (mut current_animation, mut animations) = (None, Vec::new());
-    let (mut current_component, mut current_track) = (None, None);
+    let (mut current_component, mut current_type, mut current_track) = (None, 0, None);
 
     // Keyed objects are encoded as a flat ordered stream; each entry changes the context for
     // the following properties/keyframes rather than referring to them by child collections.
@@ -49,6 +68,8 @@ pub(super) fn build_animations(file: &RiveFile, context_start: usize, context_en
                 uint(object, property_ids::KEYEDOBJECT_OBJECTID)? as usize);
             current_component = target.and_then(|index|
                 obj_comps.get(index).copied().flatten());
+            current_type = target.and_then(|index| file.ocoll.get(index))
+                .map_or(0, |object| object.type_id.0);
             current_track = None;
         }
         object_ids::KEYED_PROPERTY => {
@@ -63,12 +84,50 @@ pub(super) fn build_animations(file: &RiveFile, context_start: usize, context_en
                 }   _ => None,
             };
         }
-        // TODO: Add non-scalar keyed value types when color/bool/path animation is consumed.
         object_ids::KEY_FRAME_DOUBLE => if let Some((animation, track)) = current_track {
             animations[animation].tracks[track].keyframes.push(Keyframe {
                 frame: uint(object, property_ids::FRAME)?,
-                value: float(object, property_ids::KEYFRAMEDOUBLE_VALUE)?,
+                value: TrackValue::Scalar(
+                    float(object, property_ids::KEYFRAMEDOUBLE_VALUE)?),
                 interp: keyframe_interpolation(file, context_start, object)?,
+            });
+        }
+        object_ids::KEY_FRAME_COLOR => if let Some((animation, track)) = current_track {
+            animations[animation].tracks[track].keyframes.push(Keyframe {
+                frame: uint(object, property_ids::FRAME)?,
+                value: TrackValue::Color(object.color(property_ids::KEYFRAMECOLOR_VALUE)?
+                    .unwrap_or_else(||
+                        core_color_default(property_ids::KEYFRAMECOLOR_VALUE))),
+                interp: keyframe_interpolation(file, context_start, object)?,
+            });
+        }
+        object_ids::KEY_FRAME_BOOL => if let Some((animation, track)) = current_track {
+            animations[animation].tracks[track].keyframes.push(Keyframe {
+                frame: uint(object, property_ids::FRAME)?,
+                value: TrackValue::Bool(object.boolean(property_ids::KEYFRAMEBOOL_VALUE)?
+                    .unwrap_or_else(||
+                        super::decode::core_boolean_default(
+                            property_ids::KEYFRAMEBOOL_VALUE))),
+                interp: Interpolation::Hold,
+            });
+        }
+        object_ids::KEY_FRAME_UINT => if let Some((animation, track)) = current_track {
+            let value = uint(object, property_ids::KEYFRAMEUINT_VALUE)?;
+            if animations[animation].tracks[track].prop_id == property_ids::POINTS {
+                let count = if current_type == object_ids::STAR {
+                    value.saturating_mul(2)
+                } else { value };
+                if u32::from(u16::MAX) < count {
+                    return Err(RuntimeError::TooManyVertices(count))
+                }
+            } else if animations[animation].tracks[track].prop_id ==
+                property_ids::TRIMPATH_MODEVALUE && !matches!(value, 1 | 2) {
+                return Err(RuntimeError::InvalidTrimMode(value))
+            }
+            animations[animation].tracks[track].keyframes.push(Keyframe {
+                frame: uint(object, property_ids::FRAME)?,
+                value: TrackValue::Uint(value),
+                interp: Interpolation::Hold,
             });
         }   _ => {}
     }}
@@ -107,16 +166,16 @@ fn keyframe_interpolation(file: &RiveFile, context_start: usize,
         [property_ids::CUBICINTERPOLATOR_X1, property_ids::CUBICINTERPOLATOR_Y1,
          property_ids::CUBICINTERPOLATOR_X2, property_ids::CUBICINTERPOLATOR_Y2]
     } else { return Err(RuntimeError::InvalidInterpolator(id)) };
+
     let [x1, y1, x2, y2] = props;
     let (x1, y1, x2, y2) = (float(interpolator, x1)?, float(interpolator, y1)?,
         float(interpolator, x2)?, float(interpolator, y2)?);
     if [x1, y1, x2, y2].iter().any(|value| !value.is_finite()) {
         return Err(RuntimeError::InvalidInterpolator(id))
-    }
-    Ok(Interpolation::Cubic { x1, y1, x2, y2 })
+    }   Ok(Interpolation::Cubic { x1, y1, x2, y2 })
 }
 
-pub(super) fn evaluate_track(track: &PropertyTrack, frame: f32) -> Option<f32> {
+pub(super) fn evaluate_track(track: &PropertyTrack, frame: f32) -> Option<TrackValue> {
     // partition_point also gives stable last-keyframe-wins behavior for duplicate frame numbers.
     let first = track.keyframes.first()?;
     let upper = track.keyframes.partition_point(|keyframe| keyframe.frame as f32 <= frame);
@@ -152,26 +211,59 @@ pub(super) fn evaluate_track(track: &PropertyTrack, frame: f32) -> Option<f32> {
                 parameter = (lower + upper) * 0.5;
             }
         }   factor = at(parameter, y1, y2);
-    }   Some(current.value + (next.value - current.value) * factor)
+    }
+    Some(match (current.value, next.value) {
+        (TrackValue::Scalar(from), TrackValue::Scalar(to)) =>
+            TrackValue::Scalar(from + (to - from) * factor),
+        (TrackValue::Color(from), TrackValue::Color(to)) =>
+            TrackValue::Color(lerp_color(from, to, factor)),
+        (TrackValue::Bool(value), TrackValue::Bool(_)) => TrackValue::Bool(value),
+        (TrackValue::Uint(value), TrackValue::Uint(_)) => TrackValue::Uint(value),
+        _ => current.value,
+    })
+}
+
+fn lerp_color(from: u32, to: u32, factor: f32) -> u32 {
+    let channel = |shift: u32| {
+        let from = ((from >> shift) & 0xff_u32) as f32;
+        let to = ((to >> shift) & 0xff_u32) as f32;
+        (from + (to - from) * factor).round().clamp(0.0, 255.0) as u32
+    };  channel(24) << 24 | channel(16) << 16 | channel(8) << 8 | channel(0)
 }
 
 #[cfg(test)] mod tests { use super::*;
 
     fn track(interp: Interpolation) -> PropertyTrack {
         PropertyTrack { component: 0, slot: 0, prop_id: 0, keyframes: vec![
-            Keyframe { frame:  0, value:  2.0, interp },
-            Keyframe { frame: 10, value: 12.0, interp: Interpolation::Linear },
+            Keyframe { frame: 0, value: TrackValue::Scalar(2.0), interp },
+            Keyframe { frame: 10, value: TrackValue::Scalar(12.0),
+                interp: Interpolation::Linear },
         ] }
     }
 
     #[test] fn evaluates_hold_linear_and_cubic_tracks() {
-        assert_eq!(evaluate_track(&track(Interpolation::Hold), 5.0), Some(2.0));
-        assert_eq!(evaluate_track(&track(Interpolation::Linear), 5.0), Some(7.0));
+        assert_eq!(evaluate_track(&track(Interpolation::Hold), 5.0),
+            Some(TrackValue::Scalar(2.0)));
+        assert_eq!(evaluate_track(&track(Interpolation::Linear), 5.0),
+            Some(TrackValue::Scalar(7.0)));
         let cubic = track(Interpolation::Cubic {
             x1: 1.0 / 3.0, y1: 1.0 / 3.0, x2: 2.0 / 3.0, y2: 2.0 / 3.0,
         });
-        assert!((evaluate_track(&cubic, 5.0).unwrap() - 7.0).abs() < 1e-4);
-        assert_eq!(evaluate_track(&cubic, -1.0), Some(2.0));
-        assert_eq!(evaluate_track(&cubic, 20.0), Some(12.0));
+        let Some(TrackValue::Scalar(value)) = evaluate_track(&cubic, 5.0)
+            else { panic!() };
+        assert!((value - 7.0).abs() < 1e-4);
+        assert_eq!(evaluate_track(&cubic, -1.0), Some(TrackValue::Scalar(2.0)));
+        assert_eq!(evaluate_track(&cubic, 20.0), Some(TrackValue::Scalar(12.0)));
+    }
+
+    #[test] fn interpolates_argb_channels() {
+        let track = PropertyTrack { component: 0, slot: 0, prop_id: 0,
+            keyframes: vec![
+                Keyframe { frame: 0, value: TrackValue::Color(0x0010_80ff),
+                    interp: Interpolation::Linear },
+                Keyframe { frame: 10, value: TrackValue::Color(0xfff0_0001),
+                    interp: Interpolation::Linear },
+            ] };
+        assert_eq!(evaluate_track(&track, 5.0), Some(TrackValue::Color(0x8080_4080)));
     }
 }

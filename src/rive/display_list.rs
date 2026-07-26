@@ -7,8 +7,8 @@ use std::sync::Arc;
 pub struct Point { pub x: f32, pub y: f32 }
 
 #[derive(Debug, Clone, Copy, PartialEq)] pub enum PathCommand {
-    MoveTo(Point), LineTo(Point), Close,
     CubicTo { ctrl1: Point, ctrl2: Point, to: Point },
+    MoveTo(Point), LineTo(Point), Close,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
