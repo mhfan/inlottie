@@ -17,7 +17,7 @@ impl Runtime {
         let primitive_count = self.draw_groups.iter().filter(|group|
                 0.0 < self.components[group.opacity_component as usize].world_opacity)
             .map(|group| group.paints.iter().filter_map(|&index|
-                self.components[index as usize].paint.as_ref())
+                self.components[index as usize].paint())
                 .filter(|paint| visible_paint(paint)).count().max(1)).sum();
         list.items.reserve(primitive_count);
 
@@ -30,7 +30,7 @@ impl Runtime {
                 let component = &self.components[index as usize];
                 Shape { obj_idx: component.obj_idx, is_hole: component.is_hole,
                     trfm: component.world,
-                    geom: component.geom.as_ref().unwrap().geometry().clone() }
+                    geom: component.geom().unwrap().geometry().clone() }
             }).collect();
             if group.paints.is_empty() {
                 list.items.push(DrawItem {
@@ -38,7 +38,7 @@ impl Runtime {
             } else {
                 let start = list.items.len();
                 list.items.extend(group.paints.iter().filter_map(|&index| {
-                    let paint = self.components[index as usize].paint.as_ref()?;
+                    let paint = self.components[index as usize].paint()?;
                     visible_paint(paint).then(|| DrawItem {
                         obj_idx: group.obj_idx, opacity,
                         shapes: shapes.clone(), paint: Some(paint.value.clone()),
@@ -75,7 +75,7 @@ impl Runtime {
                     obj_idx: component.obj_idx, opacity_component: index as u32,
                     components: Vec::new(), paints: Vec::new()
                 });
-            } else if component.geom.is_some() && shapes[index].is_none() {
+            } else if component.geom().is_some() && shapes[index].is_none() {
                 self.draw_groups.push(DrawGroup {
                     obj_idx: component.obj_idx, opacity_component: index as u32,
                     components: vec![index as u32], paints: Vec::new(),
@@ -85,8 +85,8 @@ impl Runtime {
         for (index, component) in self.components.iter().enumerate() {
             let Some(shape) = shapes[index] else { continue };
             let group = &mut self.draw_groups[shape_groups[shape as usize].unwrap()];
-            if component.geom.is_some() { group.components.push(index as u32) }
-            if component.paint.is_some() { group.paints.push(index as u32) }
+            if component.geom().is_some() { group.components.push(index as u32) }
+            if component.paint().is_some() { group.paints.push(index as u32) }
         }   self.draw_groups.retain(|group| !group.components.is_empty());
     }
 

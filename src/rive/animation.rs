@@ -2,7 +2,7 @@
 //! Linear-animation discovery and keyframe evaluation.
 
 use super::{decode::{Object, RiveFile, core_color_default, object_ids, property_ids},
-    runtime::{Result, RuntimeError, float, uint},
+    runtime::{Result, RuntimeError, TrackBinding, float, uint},
 };
 
 #[derive(Debug, Clone, Copy)] enum Interpolation {
@@ -13,33 +13,25 @@ use super::{decode::{Object, RiveFile, core_color_default, object_ids, property_
     Scalar(f32), Color(u32), Bool(bool), Uint(u32),
 }
 
-#[derive(Clone, Copy, PartialEq)] pub(super) enum TrackKind {
-    Scalar, Color, Bool, Uint,
-}
-
 #[derive(Debug)] struct Keyframe {
     frame: u32, value: TrackValue, interp: Interpolation,
 }
 
 #[derive(Debug)] pub(super) struct PropertyTrack {
-    // `slot` indexes LinearAnimation::components, avoiding a component-sized table per frame.
-    pub component: u32, pub slot: u32, pub prop_id: u32,
+    pub component: u32, pub prop_id: u32,
+    pub binding: Option<TrackBinding>,
     keyframes: Vec<Keyframe>,
 }
 
 impl PropertyTrack {
-    pub fn kind(&self) -> TrackKind { match self.keyframes[0].value {
-        TrackValue::Scalar(_) => TrackKind::Scalar,
-        TrackValue::Color(_) => TrackKind::Color,
-        TrackValue::Bool(_) => TrackKind::Bool,
-        TrackValue::Uint(_) => TrackKind::Uint,
-    } }
+    pub fn value_type(&self) -> TrackValue { self.keyframes[0].value }
 }
 
 #[derive(Debug)] pub(super) struct LinearAnimation {
     pub name: Vec<u8>, pub duration: u32, pub fps: u32,
     pub speed: f32, pub loop_mode: u32,
-    pub tracks: Vec<PropertyTrack>, pub components: Vec<u32>,
+    pub tracks: Vec<PropertyTrack>,
+    pub geometries: Vec<u32>, pub gradients: Vec<u32>,
 }
 
 pub(super) fn build_animations(file: &RiveFile, context_start: usize, context_end: usize,
@@ -58,7 +50,8 @@ pub(super) fn build_animations(file: &RiveFile, context_start: usize, context_en
                 fps: uint(object, property_ids::FPS)?,
                 speed: float(object, property_ids::LINEARANIMATION_SPEED)?,
                 loop_mode: uint(object, property_ids::LOOPVALUE)?,
-                tracks: Vec::new(), components: Vec::new(),
+                tracks: Vec::new(),
+                geometries: Vec::new(), gradients: Vec::new(),
             });
             current_animation = Some(animations.len() - 1);
             current_component = None; current_track = None;
@@ -76,7 +69,7 @@ pub(super) fn build_animations(file: &RiveFile, context_start: usize, context_en
             current_track = match (current_animation, current_component) {
                 (Some(animation), Some(component)) => {
                     animations[animation].tracks.push(PropertyTrack {
-                        component, slot: 0,
+                        component, binding: None,
                         prop_id: uint(object, property_ids::KEYEDPROPERTY_PROPERTYKEY)?,
                         keyframes: Vec::new(),
                     });
@@ -136,11 +129,6 @@ pub(super) fn build_animations(file: &RiveFile, context_start: usize, context_en
         animation.tracks.retain(|track| !track.keyframes.is_empty());
         for track in &mut animation.tracks {
             track.keyframes.sort_by_key(|keyframe| keyframe.frame);
-            track.slot = animation.components.iter().position(|&component|
-                component == track.component).unwrap_or_else(|| {
-                    animation.components.push(track.component);
-                    animation.components.len() - 1
-                }) as u32;
         }
     }   Ok(animations)
 }
@@ -234,7 +222,8 @@ fn lerp_color(from: u32, to: u32, factor: f32) -> u32 {
 #[cfg(test)] mod tests { use super::*;
 
     fn track(interp: Interpolation) -> PropertyTrack {
-        PropertyTrack { component: 0, slot: 0, prop_id: 0, keyframes: vec![
+        PropertyTrack { component: 0, prop_id: 0, binding: None,
+            keyframes: vec![
             Keyframe { frame: 0, value: TrackValue::Scalar(2.0), interp },
             Keyframe { frame: 10, value: TrackValue::Scalar(12.0),
                 interp: Interpolation::Linear },
@@ -257,7 +246,8 @@ fn lerp_color(from: u32, to: u32, factor: f32) -> u32 {
     }
 
     #[test] fn interpolates_argb_channels() {
-        let track = PropertyTrack { component: 0, slot: 0, prop_id: 0,
+        let track = PropertyTrack { component: 0, prop_id: 0,
+            binding: None,
             keyframes: vec![
                 Keyframe { frame: 0, value: TrackValue::Color(0x0010_80ff),
                     interp: Interpolation::Linear },

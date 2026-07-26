@@ -3,7 +3,7 @@
 
 use std::{error::Error as StdError, fmt, f32};
 
-use super::{animation::{LinearAnimation, TrackKind, TrackValue,
+use super::{animation::{LinearAnimation, TrackValue,
         build_animations, evaluate_track},
     display_list::{Affine2, Brush, DashSegment, DisplayList, FillRule,
         Geometry, GradientStop, Paint, PathEffect, Point, Shape,
@@ -17,7 +17,8 @@ use super::{animation::{LinearAnimation, TrackKind, TrackValue,
 
 #[path = "draw.rs"] mod draw;
 #[path = "shape.rs"] mod shape;
-use shape::{set_effect_bool, set_paint_bool, set_paint_uint, set_paint_value};
+use shape::{set_effect_bool, set_effect_uint, set_effect_value,
+    set_paint_bool, set_paint_uint, set_paint_value};
 
 pub type Result<T> = std::result::Result<T, RuntimeError>;
 
@@ -129,9 +130,17 @@ impl ComponentGeom {
 
 #[derive(Debug)] struct ComponentPaint { value: Paint, visible: bool }
 
+#[derive(Debug, Default)] enum ComponentData {
+    #[default] None,
+    Geometry(ComponentGeom),
+    Vertex(VertexParams),
+    Gradient(GradientState),
+    Paint(ComponentPaint),
+}
+
 #[derive(Debug)] struct GradientState {
     start: Point, end: Point, opacity: f32, radial: bool,
-    stops: Vec<GradientStop>, stops_dirty: bool,
+    stops: Vec<GradientStop>, stops_dirty: bool, paint: Option<u32>,
 }
 
 impl GradientState {
@@ -141,7 +150,7 @@ impl GradientState {
             object_ids::RADIAL_GRADIENT => true,
             _ => return Ok(None),
         };
-        Ok(Some(Self { radial, stops: Vec::new(), stops_dirty: false,
+        Ok(Some(Self { radial, stops: Vec::new(), stops_dirty: false, paint: None,
             start: Point { x: float(object, property_ids::STARTX)?,
                 y: float(object, property_ids::STARTY)? },
               end: Point { x: float(object, property_ids::ENDX)?,
@@ -188,15 +197,38 @@ impl GradientState {
 #[derive(Debug)] struct Component {
     // Runtime indices are dense and stable; object indices continue to refer into RiveFile.
     obj_idx: u32, parent: Option<u32>,
-    geom: Option<ComponentGeom>,
-    vertex: Option<VertexParams>,
-    gradient: Option<GradientState>,
-    paint: Option<ComponentPaint>,
-    local_opacity: f32,
+    data: ComponentData,
+    transform: TransformValues,
     world_opacity: f32,
-    local: Affine2,
     world: Affine2,
     is_hole: bool,
+}
+
+impl Component {
+    fn geom(&self) -> Option<&ComponentGeom> {
+        if let ComponentData::Geometry(value) = &self.data { Some(value) } else { None }
+    }
+    fn geom_mut(&mut self) -> Option<&mut ComponentGeom> {
+        if let ComponentData::Geometry(value) = &mut self.data { Some(value) } else { None }
+    }
+    fn vertex(&self) -> Option<&VertexParams> {
+        if let ComponentData::Vertex(value) = &self.data { Some(value) } else { None }
+    }
+    fn vertex_mut(&mut self) -> Option<&mut VertexParams> {
+        if let ComponentData::Vertex(value) = &mut self.data { Some(value) } else { None }
+    }
+    fn gradient(&self) -> Option<&GradientState> {
+        if let ComponentData::Gradient(value) = &self.data { Some(value) } else { None }
+    }
+    fn gradient_mut(&mut self) -> Option<&mut GradientState> {
+        if let ComponentData::Gradient(value) = &mut self.data { Some(value) } else { None }
+    }
+    fn paint(&self) -> Option<&ComponentPaint> {
+        if let ComponentData::Paint(value) = &self.data { Some(value) } else { None }
+    }
+    fn paint_mut(&mut self) -> Option<&mut ComponentPaint> {
+        if let ComponentData::Paint(value) = &mut self.data { Some(value) } else { None }
+    }
 }
 
 #[derive(Debug)] struct DrawGroup {
@@ -206,13 +238,37 @@ impl GradientState {
     paints: Vec<u32>,
 }
 
-#[derive(Debug, Clone, Copy)] enum ColorTarget {
+#[derive(Debug, Clone, Copy)] pub(super) enum ColorTarget {
     Solid(u32), Stop { gradient: u32, stop: u32 },
 }
 
-#[derive(Debug, Clone, Copy)] enum EffectTarget {
+#[derive(Debug, Clone, Copy)] pub(super) enum EffectTarget {
     DashSegment { paint: u32, effect: u32, segment: u32 },
     Effect { paint: u32, effect: u32 },
+}
+
+#[derive(Debug, Clone, Copy, Default)] pub(super) enum ComponentTarget {
+    #[default] None,
+    Color(ColorTarget),
+    Effect(EffectTarget),
+    Vertex { path: u32, slot: u32 },
+}
+
+#[derive(Debug, Clone, Copy)] pub(super) enum TrackTarget {
+    Transform { component: u32, prop_id: u32 },
+    Geometry { component: u32, prop_id: u32 },
+    Vertex { component: u32, path: u32, slot: u32, prop_id: u32 },
+    Gradient { component: u32, prop_id: u32 },
+    GradientStopPos { component: u32, stop: u32 },
+    GradientStopColor { component: u32, stop: u32 },
+    SolidColor { component: u32 },
+    Paint { component: u32, prop_id: u32 },
+    Effect { target: EffectTarget, prop_id: u32 },
+    Visibility { component: u32 },
+}
+
+#[derive(Debug, Clone, Copy)] pub(super) struct TrackBinding {
+    target: TrackTarget, default: TrackValue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)] pub struct AnimationInfo<'a> {
@@ -220,29 +276,39 @@ impl GradientState {
     pub speed: f32, pub loop_mode: u32,
 }
 
-#[derive(Clone, Copy)] struct TransformValues {
+#[derive(Debug, Clone, Copy)] pub(super) struct TransformValues {
     x: f32, y: f32, rotation: f32, scale_x: f32, scale_y: f32, opacity: f32,
 }
 
 impl TransformValues {
-    fn from_object(object: &Object) -> Self { Self {
-        x: float(object, property_ids::NODE_X).unwrap_or(0.0),
-        y: float(object, property_ids::NODE_Y).unwrap_or(0.0),
-        rotation: float(object, property_ids::TRANSFORMCOMPONENT_ROTATION).unwrap_or(0.0),
-         scale_x: float(object, property_ids::TRANSFORMCOMPONENT_SCALEX).unwrap_or(1.0),
-         scale_y: float(object, property_ids::TRANSFORMCOMPONENT_SCALEY).unwrap_or(1.0),
-         opacity: float(object, property_ids::WORLDTRANSFORMCOMPONENT_OPACITY).unwrap_or(1.0),
-    } }
+    fn from_object(object: &Object) -> decode::Result<Self> {
+        if !core_is_transform_component(object.type_id.0) {
+            return Ok(Self { x: 0.0, y: 0.0, rotation: 0.0,
+                scale_x: 1.0, scale_y: 1.0, opacity: 1.0 })
+        }
+        Ok(Self {
+            x: float(object, property_ids::NODE_X)?,
+            y: float(object, property_ids::NODE_Y)?,
+            rotation: float(object, property_ids::TRANSFORMCOMPONENT_ROTATION)?,
+            scale_x: float(object, property_ids::TRANSFORMCOMPONENT_SCALEX)?,
+            scale_y: float(object, property_ids::TRANSFORMCOMPONENT_SCALEY)?,
+            opacity: float(object, property_ids::WORLDTRANSFORMCOMPONENT_OPACITY)?,
+        })
+    }
 
     fn set(&mut self, prop_id: u32, value: f32) -> bool { match prop_id {
-        property_ids::NODE_X => self.x = value,
-        property_ids::NODE_Y => self.y = value,
-        property_ids::TRANSFORMCOMPONENT_ROTATION => self.rotation = value,
-        property_ids::TRANSFORMCOMPONENT_SCALEX => self.scale_x = value,
-        property_ids::TRANSFORMCOMPONENT_SCALEY => self.scale_y = value,
-        property_ids::WORLDTRANSFORMCOMPONENT_OPACITY => self.opacity = value,
-        _ => return false,
-    }   true }
+        property_ids::NODE_X => replace_changed(&mut self.x, value),
+        property_ids::NODE_Y => replace_changed(&mut self.y, value),
+        property_ids::TRANSFORMCOMPONENT_ROTATION =>
+            replace_changed(&mut self.rotation, value),
+        property_ids::TRANSFORMCOMPONENT_SCALEX =>
+            replace_changed(&mut self.scale_x, value),
+        property_ids::TRANSFORMCOMPONENT_SCALEY =>
+            replace_changed(&mut self.scale_y, value),
+        property_ids::WORLDTRANSFORMCOMPONENT_OPACITY =>
+            replace_changed(&mut self.opacity, value),
+        _ => false,
+    } }
 
     fn affine(self) -> Affine2 {
         Affine2::from_transform(self.x, self.y, self.rotation, self.scale_x, self.scale_y)
@@ -260,11 +326,8 @@ impl TransformValues {
     file: RiveFile, artboard_obj: u32, elapsed: f32,
     components: Vec<Component>,
     update_order: Vec<u32>,
+    gradients: Vec<u32>,
     draw_groups: Vec<DrawGroup>,
-     color_targets: Vec<Option<ColorTarget>>,
-    effect_targets: Vec<Option<EffectTarget>>,
-    vertex_targets: Vec<Option<(u32, u32)>>,
-    gradient_targets: Vec<Option<u32>>,
     animations: Vec<LinearAnimation>,
     active_animation: Option<u32>,
 }
@@ -291,15 +354,18 @@ impl Runtime {
             if  obj_idx == u32::MAX { return Err(RuntimeError::TooManyObjects) }
 
             let parent_id = uint(object, property_ids::COMPONENT_PARENTID)?;
-            let geom = GeomParams::from_object(object)?.map(ComponentGeom::parametric);
-            let vertex = VertexParams::from_object(object)?;
-            let gradient = GradientState::from_object(object)?;
+            let data = if let Some(value) = GeomParams::from_object(object)? {
+                ComponentData::Geometry(ComponentGeom::parametric(value))
+            } else if let Some(value) = VertexParams::from_object(object)? {
+                ComponentData::Vertex(value)
+            } else if let Some(value) = GradientState::from_object(object)? {
+                ComponentData::Gradient(value)
+            } else { ComponentData::None };
             obj_comps[obj_idx as usize] = Some(components.len() as u32);
             components.push(Component {
                 is_hole: boolean(object, property_ids::ISHOLE)?, obj_idx, parent: None,
-                paint: None, world_opacity: 1.0, geom, vertex, gradient,
-                local_opacity: float(object, property_ids::WORLDTRANSFORMCOMPONENT_OPACITY)?,
-                local: local_transform(object)?, world: Affine2::default(),
+                data, world_opacity: 1.0,
+                transform: TransformValues::from_object(object)?, world: Affine2::default(),
             });
             parent_objs.push(if obj_idx as usize == context_start { None } else {
                 Some((context_start.checked_add(parent_id as usize)
@@ -317,21 +383,21 @@ impl Runtime {
             components[index].parent = Some(parent);
         }
 
-        let effect_targets = vec![None; components.len()];
-        let  color_targets = vec![None; components.len()];
-        let vertex_targets = vec![None; components.len()];
-        let gradient_targets = vec![None; components.len()];
         let animations = build_animations(&file, context_start, context_end, &obj_comps)?;
         let mut runtime = Self { file, artboard_obj: context_start as u32, components,
-            update_order: Vec::new(), draw_groups: Vec::new(),
-            effect_targets, color_targets, vertex_targets, gradient_targets,
+            update_order: Vec::new(), gradients: Vec::new(),
+            draw_groups: Vec::new(),
             animations, active_animation: None, elapsed: 0.0
         };
         // Construction order matters: world transforms feed gradients, then shape content feeds
         // draw grouping and finally draw rules reorder those completed groups.
         runtime.validate_hierarchy()?;
         runtime.update_world_state();
-        runtime.build_shape_content()?;
+        let targets = runtime.build_shape_content()?;
+        runtime.gradients = runtime.components.iter().enumerate()
+            .filter_map(|(index, component)|
+                component.gradient().is_some().then_some(index as u32)).collect();
+        runtime.bind_animations(&targets);
         runtime.build_draw_groups();
         runtime.apply_draw_rules()?;
         Ok(runtime)
@@ -369,6 +435,48 @@ impl Runtime {
         self.apply_animation();     true
     }
 
+    fn bind_animations(&mut self, bindings: &[ComponentTarget]) {
+        for animation in &mut self.animations {
+            for track in &mut animation.tracks {
+                let component = track.component;
+                let object = &self.file.ocoll[
+                    self.components[component as usize].obj_idx as usize];
+                let default = match track.value_type() {
+                    TrackValue::Scalar(_) => TrackValue::Scalar(
+                        float(object, track.prop_id)
+                            .unwrap_or_else(|_| core_float_default(track.prop_id))),
+                    TrackValue::Color(_) => TrackValue::Color(
+                        object.color(track.prop_id).ok().flatten()
+                            .unwrap_or_else(|| core_color_default(track.prop_id))),
+                    TrackValue::Bool(_) => TrackValue::Bool(
+                        object.boolean(track.prop_id).ok().flatten()
+                            .unwrap_or_else(|| core_boolean_default(track.prop_id))),
+                    TrackValue::Uint(_) => TrackValue::Uint(
+                        object.varuint(track.prop_id).ok().flatten()
+                            .unwrap_or_else(|| core_varuint_default(track.prop_id))),
+                };
+                let target = resolve_track_target(&self.components, bindings,
+                    component, track.prop_id, track.value_type(),
+                    core_is_transform_component(object.type_id.0));
+                let Some(target) = target else { continue };
+                track.binding = Some(TrackBinding { target, default });
+                match target {
+                    TrackTarget::Transform { .. } => {}
+                    TrackTarget::Geometry { component, .. } =>
+                        push_unique(&mut animation.geometries, component),
+                    TrackTarget::Vertex { path, .. } =>
+                        push_unique(&mut animation.geometries, path),
+                    TrackTarget::Gradient { component, .. } |
+                    TrackTarget::GradientStopPos { component, .. } |
+                    TrackTarget::GradientStopColor { component, .. } =>
+                        push_unique(&mut animation.gradients, component),
+                    _ => {}
+                }
+            }
+            animation.tracks.retain(|track| track.binding.is_some());
+        }
+    }
+
     fn apply_animation(&mut self) {
         let Some(animation) = self.active_animation
             .and_then(|index| self.animations.get(index as usize)) else { return };
@@ -377,161 +485,43 @@ impl Runtime {
         if 0.0 < duration { match animation.loop_mode {
             1 => frame = frame.rem_euclid(duration),
             2 => {
-                 frame = frame.rem_euclid(duration * 2.0);
+                frame = frame.rem_euclid(duration * 2.0);
                 if duration < frame { frame = duration * 2.0 - frame }
             }
             _ => frame = frame.min(duration),
         }}
-
-        // Reset only this animation's targets to file defaults before applying evaluated tracks.
-        // This keeps seeks and loop boundaries deterministic without scanning every component.
-        let mut values: Vec<_> = animation.components.iter().map(|&index| {
-            let component = &self.components[index as usize];
-            TransformValues::from_object(&self.file.ocoll[component.obj_idx as usize])
-        }).collect();
-        for &component in &animation.components {
-            let state  = &self.components[component as usize];
-            let object = &self.file.ocoll[state.obj_idx as usize];
-            match object.type_id.0 {
-                object_ids::STROKE => set_paint_value(&mut self.components,
-                    &self.effect_targets, component, property_ids::THICKNESS,
-                    float(object, property_ids::THICKNESS).unwrap_or(0.0)),
-                object_ids::TRIM_PATH => {
-                    for prop_id in [property_ids::TRIMPATH_START,
-                        property_ids::TRIMPATH_END, property_ids::TRIMPATH_OFFSET] {
-                        set_paint_value(&mut self.components, &self.effect_targets,
-                            component, prop_id, float(object, prop_id).unwrap_or(0.0));
-                    }
-                }   _ => {}
-            }
-        }
+        let mut transform_dirty = false;
         for track in &animation.tracks {
-            let Some(value) = evaluate_track(track, frame) else { continue };
-            match value {
-                TrackValue::Scalar(value) => {
-                    let target = &mut values[track.slot as usize];
-                    if !target.set(track.prop_id, value) &&
-                        !set_gradient_value(&mut self.components, track.component,
-                            track.prop_id, value) &&
-                        !set_gradient_stop_value(&mut self.components, &self.color_targets,
-                            track.component, track.prop_id, value) &&
-                        !set_vertex_value(&mut self.components, &self.vertex_targets,
-                            track.component, track.prop_id, value) &&
-                        !set_geometry_value(&mut self.components, track.component,
-                            track.prop_id, value) {
-                        set_paint_value(&mut self.components, &self.effect_targets,
-                            track.component, track.prop_id, value);
-                    }
-                }
-                TrackValue::Color(value) => set_color_value(&mut self.components,
-                    &self.color_targets, track.component, value),
-                TrackValue::Bool(value) => {
-                    if !set_geometry_bool(&mut self.components,
-                            track.component, track.prop_id, value) &&
-                        !set_effect_bool(&mut self.components, &self.effect_targets,
-                            track.component, track.prop_id, value) &&
-                        !set_paint_bool(&mut self.components,
-                            track.component, track.prop_id, value) &&
-                        track.prop_id == property_ids::SHAPEPAINT_ISVISIBLE {
-                        if let Some(paint) =
-                            &mut self.components[track.component as usize].paint {
-                            paint.visible = value;
-                        }
-                    }
-                }
-                TrackValue::Uint(value) => {
-                    if !set_geometry_uint(&mut self.components, track.component,
-                        track.prop_id, value) {
-                        set_paint_uint(&mut self.components, &self.effect_targets,
-                            track.component, track.prop_id, value);
-                    }
-                }
+            if let (Some(binding), Some(value)) =
+                (track.binding, evaluate_track(track, frame)) {
+                transform_dirty |= apply_track(&mut self.components, binding.target, value);
             }
         }
-        for (&component, value) in animation.components.iter().zip(values) {
-             self.components[component as usize].local = value.affine();
-             self.components[component as usize].local_opacity = value.opacity;
+        let (geometries, gradients) = (&animation.geometries, &animation.gradients);
+        refresh_geometry(&mut self.components, geometries);
+        if transform_dirty {
+            update_world_state(&mut self.components, &self.update_order);
         }
-        refresh_geometry(&mut self.components, &self.vertex_targets,
-            &animation.components);
-        self.update_world_state();
-        sync_gradients(&mut self.components, &self.gradient_targets);
+        let gradients = if transform_dirty { &self.gradients } else { gradients };
+        sync_gradients(&mut self.components, gradients);
     }
 
     fn reset_animation(&mut self, animation: u32) {
-        for &index in &self.animations[animation as usize].components {
-            let component = &mut self.components[index as usize];
-            let object = &self.file.ocoll[component.obj_idx as usize];
-            component.local = local_transform(object).unwrap_or_default();
-            component.local_opacity =
-                float(object, property_ids::WORLDTRANSFORMCOMPONENT_OPACITY).unwrap_or(1.0);
-            match object.type_id.0 {
-                object_ids::STROKE => set_paint_value(&mut self.components,
-                    &self.effect_targets, index, property_ids::THICKNESS,
-                    float(object, property_ids::THICKNESS).unwrap_or(0.0)),
-                object_ids::TRIM_PATH => for prop_id in [property_ids::TRIMPATH_START,
-                    property_ids::TRIMPATH_END, property_ids::TRIMPATH_OFFSET] {
-                    set_paint_value(&mut self.components, &self.effect_targets,
-                        index, prop_id, float(object, prop_id).unwrap_or(0.0));
-                }   _ => {}
+        let animation = &self.animations[animation as usize];
+        let mut transform_dirty = false;
+        for track in &animation.tracks {
+            if let Some(binding) = track.binding {
+                transform_dirty |= apply_track(
+                    &mut self.components, binding.target, binding.default);
             }
         }
-        for track in &self.animations[animation as usize].tracks {
-            let component = &self.components[track.component as usize];
-            let object = &self.file.ocoll[component.obj_idx as usize];
-            match track.kind() {
-                TrackKind::Color => {
-                    let value = object.color(track.prop_id).ok().flatten()
-                        .unwrap_or_else(|| core_color_default(track.prop_id));
-                    set_color_value(&mut self.components, &self.color_targets,
-                        track.component, value);
-                }
-                TrackKind::Bool => {
-                    let value = object.boolean(track.prop_id).ok().flatten()
-                        .unwrap_or_else(|| core_boolean_default(track.prop_id));
-                    if !set_geometry_bool(&mut self.components,
-                            track.component, track.prop_id, value) &&
-                        !set_effect_bool(&mut self.components, &self.effect_targets,
-                            track.component, track.prop_id, value) &&
-                        !set_paint_bool(&mut self.components,
-                            track.component, track.prop_id, value) &&
-                        track.prop_id == property_ids::SHAPEPAINT_ISVISIBLE {
-                        if let Some(paint) =
-                            &mut self.components[track.component as usize].paint {
-                            paint.visible = value;
-                        }
-                    }
-                }
-                TrackKind::Uint => {
-                    let value = object.varuint(track.prop_id).ok().flatten()
-                        .unwrap_or_else(|| core_varuint_default(track.prop_id));
-                    if !set_geometry_uint(&mut self.components, track.component,
-                        track.prop_id, value) {
-                        set_paint_uint(&mut self.components, &self.effect_targets,
-                            track.component, track.prop_id, value);
-                    }
-                }
-                TrackKind::Scalar => {
-                    let value = float(object, track.prop_id).unwrap_or_else(|_|
-                        core_float_default(track.prop_id));
-                    if !set_gradient_value(&mut self.components, track.component,
-                        track.prop_id, value) &&
-                        !set_gradient_stop_value(&mut self.components, &self.color_targets,
-                            track.component, track.prop_id, value) &&
-                        !set_vertex_value(&mut self.components, &self.vertex_targets,
-                        track.component, track.prop_id, value) &&
-                        !set_geometry_value(&mut self.components, track.component,
-                            track.prop_id, value) {
-                        set_paint_value(&mut self.components, &self.effect_targets,
-                            track.component, track.prop_id, value);
-                    }
-                }
-            }
+        let (geometries, gradients) = (&animation.geometries, &animation.gradients);
+        refresh_geometry(&mut self.components, geometries);
+        if transform_dirty {
+            update_world_state(&mut self.components, &self.update_order);
         }
-        let components = &self.animations[animation as usize].components;
-        refresh_geometry(&mut self.components, &self.vertex_targets, components);
-        self.update_world_state();
-        sync_gradients(&mut self.components, &self.gradient_targets);
+        let gradients = if transform_dirty { &self.gradients } else { gradients };
+        sync_gradients(&mut self.components, gradients);
     }
 
     fn validate_hierarchy(&mut self) -> Result<()> {
@@ -555,99 +545,171 @@ impl Runtime {
     }
 
     fn update_world_state(&mut self) {
-        // update_order guarantees every parent world value is ready before its children.
-        for &index in &self.update_order {
-            let index = index as usize;
-            let component = &self.components[index];
-            let world = component.parent.map_or(component.local, |parent|
-                    self.components[parent as usize].world.then(component.local));
-            let world_opacity = component.parent.map_or(component.local_opacity, |parent|
-                self.components[parent as usize].world_opacity * component.local_opacity);
-            self.components[index].world_opacity = world_opacity;
-            self.components[index].world = world;
-        }
+        update_world_state(&mut self.components, &self.update_order);
     }
 }
 
-fn set_geometry_value(components: &mut [Component], component: u32,
-    prop_id: u32, value: f32) -> bool {
-    components[component as usize].geom.as_mut()
-        .is_some_and(|geom| geom.set_float(prop_id, value))
+fn update_world_state(components: &mut [Component], order: &[u32]) {
+    // The validated order guarantees every parent world value is ready before its children.
+    for &index in order {
+        let index = index as usize;
+        let component = &components[index];
+        let local = component.transform.affine();
+        let world = component.parent.map_or(local, |parent|
+            components[parent as usize].world.then(local));
+        let opacity = component.parent.map_or(component.transform.opacity, |parent|
+            components[parent as usize].world_opacity * component.transform.opacity);
+        components[index].world_opacity = opacity;
+        components[index].world = world;
+    }
 }
 
-fn set_gradient_value(components: &mut [Component], component: u32,
-    prop_id: u32, value: f32) -> bool {
-    components[component as usize].gradient.as_mut()
-        .is_some_and(|gradient| gradient.set(prop_id, value))
+fn replace_changed<T: PartialEq>(target: &mut T, value: T) -> bool {
+    let changed = *target != value;
+    *target = value;   changed
 }
 
-fn set_gradient_stop_value(components: &mut [Component], targets: &[Option<ColorTarget>],
-    component: u32, prop_id: u32, value: f32) -> bool {
-    if prop_id != property_ids::POSITION { return false }
-    let Some(ColorTarget::Stop { gradient, stop }) =
-        targets[component as usize] else { return false };
-    if let Some(state) = &mut components[gradient as usize].gradient {
-        state.set_stop_pos(stop, value);
-    }   true
+fn push_unique(values: &mut Vec<u32>, value: u32) {
+    if !values.contains(&value) { values.push(value) }
 }
 
-fn set_geometry_bool(components: &mut [Component], component: u32,
-    prop_id: u32, value: bool) -> bool {
-    components[component as usize].geom.as_mut()
-        .is_some_and(|geom| geom.set_bool(prop_id, value))
+fn transform_prop(prop_id: u32) -> bool {
+    matches!(prop_id, property_ids::NODE_X | property_ids::NODE_Y |
+        property_ids::TRANSFORMCOMPONENT_ROTATION |
+        property_ids::TRANSFORMCOMPONENT_SCALEX |
+        property_ids::TRANSFORMCOMPONENT_SCALEY |
+        property_ids::WORLDTRANSFORMCOMPONENT_OPACITY)
 }
 
-fn set_geometry_uint(components: &mut [Component], component: u32,
-    prop_id: u32, value: u32) -> bool {
-    components[component as usize].geom.as_mut()
-        .is_some_and(|geom| geom.set_uint(prop_id, value))
+fn resolve_track_target(components: &[Component], bindings: &[ComponentTarget],
+    component: u32, prop_id: u32, value: TrackValue,
+    transformable: bool) -> Option<TrackTarget> {
+    let state = &components[component as usize];
+    if transformable && matches!(value, TrackValue::Scalar(_)) && transform_prop(prop_id) {
+        return Some(TrackTarget::Transform { component, prop_id })
+    }
+    match (bindings[component as usize], value) {
+        (ComponentTarget::Color(ColorTarget::Solid(paint)), TrackValue::Color(_)) =>
+            return Some(TrackTarget::SolidColor { component: paint }),
+        (ComponentTarget::Color(ColorTarget::Stop { gradient, stop }),
+            TrackValue::Color(_)) =>
+            return Some(TrackTarget::GradientStopColor { component: gradient, stop }),
+        (ComponentTarget::Color(ColorTarget::Stop { gradient, stop }),
+            TrackValue::Scalar(_)) if prop_id == property_ids::POSITION =>
+            return Some(TrackTarget::GradientStopPos { component: gradient, stop }),
+        (ComponentTarget::Effect(target), _) =>
+            return Some(TrackTarget::Effect { target, prop_id }),
+        (ComponentTarget::Vertex { path, slot }, TrackValue::Scalar(_)) =>
+            return Some(TrackTarget::Vertex { component, path, slot, prop_id }),
+        _ => {}
+    }
+    match value {
+        TrackValue::Scalar(_) if state.gradient().is_some() =>
+            Some(TrackTarget::Gradient { component, prop_id }),
+        TrackValue::Scalar(_) | TrackValue::Bool(_) | TrackValue::Uint(_)
+            if state.geom().is_some() => Some(TrackTarget::Geometry { component, prop_id }),
+        TrackValue::Bool(_) if prop_id == property_ids::SHAPEPAINT_ISVISIBLE &&
+            state.paint().is_some() => Some(TrackTarget::Visibility { component }),
+        TrackValue::Scalar(_) | TrackValue::Bool(_) | TrackValue::Uint(_)
+            if state.paint().is_some() => Some(TrackTarget::Paint { component, prop_id }),
+        _ => None,
+    }
 }
 
-fn set_vertex_value(components: &mut [Component],
-    targets: &[Option<(u32, u32)>], component: u32,
-    prop_id: u32, value: f32) -> bool {
-    let Some(params) = &mut components[component as usize].vertex else { return false };
-    let Some(changed) = params.set(prop_id, value) else { return false };
-    if changed {
-        let Some((path, slot)) = targets[component as usize] else { return true };
-        let vertex = params.vertex();
-        if let Some(geom) = &mut components[path as usize].geom {
-            geom.set_vertex(slot, vertex);
+fn apply_track(components: &mut [Component], target: TrackTarget, value: TrackValue) -> bool {
+    match (target, value) {
+        (TrackTarget::Transform { component, prop_id }, TrackValue::Scalar(value)) => {
+            return components[component as usize].transform.set(prop_id, value);
         }
-    }   true
+        (TrackTarget::Geometry { component, prop_id }, TrackValue::Scalar(value)) => {
+            if let Some(geom) = components[component as usize].geom_mut() {
+                geom.set_float(prop_id, value);
+            }
+        }
+        (TrackTarget::Geometry { component, prop_id }, TrackValue::Bool(value)) => {
+            if let Some(geom) = components[component as usize].geom_mut() {
+                geom.set_bool(prop_id, value);
+            }
+        }
+        (TrackTarget::Geometry { component, prop_id }, TrackValue::Uint(value)) => {
+            if let Some(geom) = components[component as usize].geom_mut() {
+                geom.set_uint(prop_id, value);
+            }
+        }
+        (TrackTarget::Vertex { component, path, slot, prop_id },
+            TrackValue::Scalar(value)) => {
+            let Some(params) = components[component as usize].vertex_mut()
+                else { return false };
+            if params.set(prop_id, value) == Some(true) {
+                let vertex = params.vertex();
+                if let Some(geom) = components[path as usize].geom_mut() {
+                    geom.set_vertex(slot, vertex);
+                }
+            }
+        }
+        (TrackTarget::Gradient { component, prop_id }, TrackValue::Scalar(value)) => {
+            if let Some(gradient) = components[component as usize].gradient_mut() {
+                gradient.set(prop_id, value);
+            }
+        }
+        (TrackTarget::GradientStopPos { component: gradient, stop },
+            TrackValue::Scalar(value)) => {
+            if let Some(gradient) = components[gradient as usize].gradient_mut() {
+                gradient.set_stop_pos(stop, value);
+            }
+        }
+        (TrackTarget::GradientStopColor { component: gradient, stop },
+            TrackValue::Color(value)) => {
+            if let Some(gradient) = components[gradient as usize].gradient_mut() {
+                gradient.set_stop_color(stop, value);
+            }
+        }
+        (TrackTarget::SolidColor { component: paint }, TrackValue::Color(value)) => {
+            let Some(Paint::Fill { brush, .. } | Paint::Stroke { brush, .. }) =
+                components[paint as usize].paint_mut()
+                    .map(|paint| &mut paint.value) else { return false };
+            if let Brush::Solid(color) = brush { *color = value }
+        }
+        (TrackTarget::Paint { component, prop_id }, TrackValue::Scalar(value)) => {
+            set_paint_value(components, component, prop_id, value);
+        }
+        (TrackTarget::Paint { component, prop_id }, TrackValue::Bool(value)) => {
+            set_paint_bool(components, component, prop_id, value);
+        }
+        (TrackTarget::Paint { component, prop_id }, TrackValue::Uint(value)) => {
+            set_paint_uint(components, component, prop_id, value);
+        }
+        (TrackTarget::Effect { target, prop_id }, TrackValue::Scalar(value)) => {
+            set_effect_value(components, target, prop_id, value);
+        }
+        (TrackTarget::Effect { target, prop_id }, TrackValue::Bool(value)) => {
+            set_effect_bool(components, target, prop_id, value);
+        }
+        (TrackTarget::Effect { target, prop_id }, TrackValue::Uint(value)) => {
+            set_effect_uint(components, target, prop_id, value);
+        }
+        (TrackTarget::Visibility { component }, TrackValue::Bool(value)) => {
+            if let Some(paint) = components[component as usize].paint_mut() {
+                paint.visible = value;
+            }
+        }
+        _ => {}
+    }   false
 }
 
-fn refresh_geometry(components: &mut [Component],
-    vertex_targets: &[Option<(u32, u32)>], targets: &[u32]) {
+fn refresh_geometry(components: &mut [Component], targets: &[u32]) {
     for &index in targets {
-        if let Some(geom) = &mut components[index as usize].geom { geom.refresh() }
-        if let Some((path, _)) = vertex_targets[index as usize] {
-            if let Some(geom) = &mut components[path as usize].geom { geom.refresh() }
-        }
+        if let Some(geom) = components[index as usize].geom_mut() { geom.refresh() }
     }
 }
 
-fn set_color_value(components: &mut [Component], targets: &[Option<ColorTarget>],
-    component: u32, value: u32) {
-    let Some(target) = targets[component as usize] else { return };
-    let paint = match target {
-        ColorTarget::Solid(paint) => paint,
-        ColorTarget::Stop { gradient, stop } => {
-            if let Some(state) = &mut components[gradient as usize].gradient {
-                state.set_stop_color(stop, value);
-            }   return
-        }
-    };
-    let Some(Paint::Fill { brush, .. } | Paint::Stroke { brush, .. }) =
-        components[paint as usize].paint.as_mut()
-            .map(|paint| &mut paint.value) else { return };
-    if let Brush::Solid(color) = brush { *color = value }
+fn sync_gradients(components: &mut [Component], targets: &[u32]) {
+    for &index in targets { sync_gradient(components, index as usize); }
 }
 
-fn sync_gradients(components: &mut [Component], targets: &[Option<u32>]) {
-    for (index, &target) in targets.iter().enumerate() {
-        let Some(paint) = target else { continue };
-        let Some(gradient) = &mut components[index].gradient else { continue };
+fn sync_gradient(components: &mut [Component], index: usize) {
+        let Some(gradient) = components[index].gradient_mut() else { return };
+        let Some(paint) = gradient.paint else { return };
         let stops = gradient.stops_dirty.then(|| {
             gradient.stops_dirty = false;
             gradient.sorted_stops()
@@ -656,7 +718,7 @@ fn sync_gradients(components: &mut [Component], targets: &[Option<u32>]) {
             (gradient.start, gradient.end, gradient.opacity, gradient.radial);
         let transform = components[index].world;
         let Some(ComponentPaint { value, .. }) =
-            &mut components[paint as usize].paint else { continue };
+            components[paint as usize].paint_mut() else { return };
         match value {
             Paint::Fill { brush: Brush::LinearGradient {
                 start: brush_start, end: brush_end, trfm, opacity: brush_opacity,
@@ -686,7 +748,6 @@ fn sync_gradients(components: &mut [Component], targets: &[Option<u32>]) {
                 if let Some(stops) = stops { *brush_stops = stops }
             }   _ => {}
         }
-    }
 }
 
 pub(super) fn float(object: &Object, prop_id: u32) -> decode::Result<f32> {
@@ -699,17 +760,6 @@ pub(super) fn uint(object: &Object, prop_id: u32) -> decode::Result<u32> {
 
 pub(super) fn boolean(object: &Object, prop_id: u32) -> decode::Result<bool> {
     Ok(object.boolean(prop_id)?.unwrap_or_else(|| core_boolean_default(prop_id)))
-}
-
-fn local_transform(object: &Object) -> decode::Result<Affine2> {
-    if !core_is_transform_component(object.type_id.0) { return Ok(Affine2::default()) }
-    Ok(Affine2::from_transform(
-        float(object, property_ids::NODE_X)?,
-        float(object, property_ids::NODE_Y)?,
-        float(object, property_ids::TRANSFORMCOMPONENT_ROTATION)?,
-        float(object, property_ids::TRANSFORMCOMPONENT_SCALEX)?,
-        float(object, property_ids::TRANSFORMCOMPONENT_SCALEY)?,
-    ))
 }
 
 #[cfg(test)] #[path = "rt_tests.rs"] mod tests;
