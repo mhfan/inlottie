@@ -17,19 +17,14 @@ use crate::core::{helpers::{RGBA, IntBool},
 #[derive(Clone, Copy, Debug, Eq, PartialEq)] enum Parent { Root, Layer(u32), Invalid }
 enum WorldState<MC: MatrixConv> { Pending, Invalid, Ready(TM2DwO<MC>) }
 
-struct CompositionState<MC: MatrixConv> {
-    parents: Vec<Parent>,
-    worlds: Vec<WorldState<MC>>,
-    stack: Vec<usize>,
-    precomps: Vec<Option<PrecompState<MC>>>,
+struct CompositionState {
+     parents: Vec<Parent>, stack: Vec<usize>,
+    precomps: Vec<Option<PrecompState>>,
 }
 
-struct PrecompState<MC: MatrixConv> {
-    composition: Box<CompositionState<MC>>,
-    asset: usize,
-}
+struct PrecompState { asset: usize, composition: Box<CompositionState> }
 
-impl<MC: MatrixConv> CompositionState<MC> {
+impl CompositionState {
     fn new(layers: &[LayerItem]) -> Self {
         let _: u32 = layers.len().try_into().expect("too many composition layers");
         let mut indices = HashMap::<u32, Option<u32>>::with_capacity(layers.len());
@@ -61,8 +56,6 @@ impl<MC: MatrixConv> CompositionState<MC> {
                 states[index] = if resolved { 2 } else { 3 };
             }
         }
-        let mut worlds = Vec::with_capacity(layers.len());
-        worlds.resize_with(layers.len(), || WorldState::Pending);
         let mut precomps = Vec::with_capacity(layers.len());
         precomps.resize_with(layers.len(), || None);
 
@@ -70,7 +63,7 @@ impl<MC: MatrixConv> CompositionState<MC> {
             if state != 2 { Parent::Invalid }
             else { parent.map_or(Parent::Root, Parent::Layer) }
         }).collect();
-        Self { parents, worlds, stack, precomps }
+        Self { parents, stack, precomps }
     }
 
     fn with_precomps<'a>(layers: &[LayerItem], animation: &'a Animation,
@@ -92,55 +85,59 @@ impl<MC: MatrixConv> CompositionState<MC> {
         runtime
     }
 
-    fn evaluate(&mut self, layers: &[LayerItem], global: f32,
-        mut required: impl FnMut(&LayerItem) -> bool) {
-        debug_assert_eq!(layers.len(), self.worlds.len());
-        self.worlds.iter_mut().for_each(|world| *world = WorldState::Pending);
+    fn evaluate<MC: MatrixConv>(&mut self, layers: &[LayerItem], global: f32,
+        mut required: impl FnMut(&LayerItem) -> bool) -> Vec<WorldState<MC>> {
+        debug_assert_eq!(layers.len(), self.parents.len());
+        let mut worlds = Vec::with_capacity(layers.len());
+        worlds.resize_with(layers.len(), || WorldState::Pending);
         for (index, layer) in layers.iter().enumerate() {
             if  self.parents[index] != Parent::Invalid && required(layer) {
-                self.resolve(index, layers, global);
+                Self::resolve(&self.parents, index, layers, global,
+                    &mut worlds, &mut self.stack);
             }
-        }
+        }   worlds
     }
 
-    fn resolve(&mut self, root: usize, layers: &[LayerItem], global: f32) {
-        if !matches!(self.worlds[root], WorldState::Pending) { return }
+    fn resolve<MC: MatrixConv>(parents: &[Parent], root: usize,
+        layers: &[LayerItem], global: f32,
+        worlds: &mut [WorldState<MC>], stack: &mut Vec<usize>) {
+        if !matches!(worlds[root], WorldState::Pending) { return }
 
-        self.stack.clear();
+        stack.clear();
         let mut index = root;
-        while matches!(self.worlds[index], WorldState::Pending) {
-            self.stack.push(index);
-            match self.parents[index] {
+        while matches!(worlds[index], WorldState::Pending) {
+            stack.push(index);
+            match parents[index] {
                 Parent::Layer(parent) => index = parent as usize,
                 Parent::Invalid => unreachable!(),
                 Parent::Root => break,
             }
         }
 
-        while let Some(index) = self.stack.pop() {
+        while let Some(index) = stack.pop() {
             let Some(vl) = layers[index].visual_layer() else { unreachable!() };
             let Some(local) = vl.base.local_frame(global) else {
-                self.worlds[index] = WorldState::Invalid; continue
+                worlds[index] = WorldState::Invalid; continue
             };
             let mut world = vl.ks.to_matrix(local, vl.ao);
-            if let Parent::Layer(parent) = self.parents[index] {
-                let WorldState::Ready(parent) = &self.worlds[parent as usize] else {
-                    self.worlds[index] = WorldState::Invalid; continue
+            if let Parent::Layer(parent) = parents[index] {
+                let WorldState::Ready(parent) = &worlds[parent as usize] else {
+                    worlds[index] = WorldState::Invalid; continue
                 };
                 world = world.compose_matrix(&parent.0);
             }
-            self.worlds[index] = WorldState::Ready(world);
+            worlds[index] = WorldState::Ready(world);
         }
     }
 }
 
-pub struct LottieRuntime<MC: MatrixConv + Clone> {
+pub struct LottieRuntime {
     elapsed: f32, fnth: f32,
     animation: Animation,
-    root: CompositionState<MC>,
+    root: CompositionState,
 }
 
-impl<MC: MatrixConv + Clone> LottieRuntime<MC> {
+impl LottieRuntime {
     pub fn from_reader<R: std::io::Read>(reader: R) -> Result<Self, serde_json::Error> {
         let animation = Animation::from_reader(reader)?;
         let root = {
@@ -161,7 +158,7 @@ impl<MC: MatrixConv + Clone> LottieRuntime<MC> {
     pub fn frame(&self) -> f32 { self.fnth }
 
     /// `clear` selects a frame background; `None` preserves the current render target.
-    pub fn render_next_frame<RC: RenderContext<TM2D = MC>>(&mut self,
+    pub fn render_next_frame<RC: RenderContext>(&mut self,
         rctx: &mut RC, elapsed: f32, clear: Option<RGBA>) -> bool {
         //debug_assert!(0. < self.fr && 0. <= self.ip && 1. < self.op - self.ip);
         let animation = &self.animation;
@@ -193,11 +190,11 @@ impl<MC: MatrixConv + Clone> LottieRuntime<MC> {
 
     /// The render order goes from the last element to the first,
     /// items in list coming first will be rendered on top.
-    fn render_layers<RC: RenderContext<TM2D = MC>>(animation: &Animation, rctx: &mut RC,
+    fn render_layers<RC: RenderContext>(animation: &Animation, rctx: &mut RC,
         ptm: &TM2DwO<RC::TM2D>, layers: &[LayerItem], fnth: f32,
-        runtime: &mut CompositionState<RC::TM2D>) {
+        runtime: &mut CompositionState) {
         let mut matte = None;
-        runtime.evaluate(layers, fnth, |layer| match layer {
+        let worlds = runtime.evaluate(layers, fnth, |layer| match layer {
             LayerItem::Shape(layer) => !layer.vl.should_hide(fnth),
             LayerItem::PrecompLayer(layer) => !layer.vl.should_hide(fnth),
             LayerItem::SolidColor(layer) => !layer.vl.should_hide(fnth),
@@ -206,7 +203,7 @@ impl<MC: MatrixConv + Clone> LottieRuntime<MC> {
 
         for (index, layer) in layers.iter().enumerate().rev() { match layer {
             LayerItem::Shape(shpl) =>
-            if let WorldState::Ready(ltm) = &runtime.worlds[index] {
+            if let WorldState::Ready(ltm) = &worlds[index] {
                 let Some(local) = shpl.vl.base.local_frame(fnth) else { continue };
                 let (draws, ctm) = convert_shapes(&shpl.shapes, local, shpl.vl.ao);
                 let ltm = ltm.clone().compose(ptm);
@@ -216,7 +213,7 @@ impl<MC: MatrixConv + Clone> LottieRuntime<MC> {
                 rctx.compose_matte(&shpl.vl, &mut matte, &ltm, fnth);
             }
             LayerItem::PrecompLayer(pcl) =>
-            if let WorldState::Ready(ltm) = &runtime.worlds[index] {
+            if let WorldState::Ready(ltm) = &worlds[index] {
                 if let Some(child) = &mut runtime.precomps[index] {
                     let AssetItem::Precomp(pcomp) =
                         &animation.assets[child.asset] else { unreachable!() };
@@ -232,7 +229,7 @@ impl<MC: MatrixConv + Clone> LottieRuntime<MC> {
                 }   // XXX: clipping(pcl.w, pcl.h)?
             }
             LayerItem::SolidColor(scl) =>
-            if let WorldState::Ready(ltm) = &runtime.worlds[index] {
+            if let WorldState::Ready(ltm) = &worlds[index] {
                 let ltm = ltm.clone().compose(ptm);
                 let mut path = RC::VGPath::new(5);
                 path.rect(0., 0., scl.sw, scl.sh);
@@ -509,9 +506,8 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
     fn layer_world_matrices<MC: MatrixConv>(
         layers: &[LayerItem], global: f32,
         required: impl FnMut(&LayerItem) -> bool) -> Vec<Option<TM2DwO<MC>>> {
-        let mut runtime = CompositionState::new(layers);
-        runtime.evaluate(layers, global, required);
-        runtime.worlds.into_iter().map(|world| match world {
+        CompositionState::new(layers).evaluate(layers, global, required)
+            .into_iter().map(|world| match world {
             WorldState::Ready(world) => Some(world),
             WorldState::Pending | WorldState::Invalid => None,
         }).collect()
@@ -602,13 +598,14 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
             {"ty":3,"ind":4,"st":0,"ip":0,"op":10,"ks":{"p":{"k":[5,6]}}}
         ] }"#).unwrap();
 
-        let mut runtime = CompositionState::<kurbo::Affine>::new(&animation.layers);
+        let mut runtime = CompositionState::new(&animation.layers);
         assert_eq!(runtime.parents,
             [Parent::Invalid, Parent::Invalid, Parent::Invalid, Parent::Root]);
-        runtime.evaluate(&animation.layers, 0., |_| true);
-        assert!(runtime.worlds[..3].iter()
+        let worlds: Vec<WorldState<kurbo::Affine>> =
+            runtime.evaluate(&animation.layers, 0., |_| true);
+        assert!(worlds[..3].iter()
             .all(|world| matches!(world, WorldState::Pending)));
-        let WorldState::Ready(world) = &runtime.worlds[3] else { panic!() };
+        let WorldState::Ready(world) = &worlds[3] else { panic!() };
         assert_eq!(world.0.as_coeffs(), [1., 0., 0., 1., 5., 6.]);
     }
 
@@ -649,7 +646,7 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
     }
 
     #[test] fn playback_starts_and_wraps_at_the_in_point() {
-        let mut runtime = LottieRuntime::<kurbo::Affine>::from_reader(
+        let mut runtime = LottieRuntime::from_reader(
             &br#"{"ip":10,"op":12,"fr":1,"layers":[]}"#[..]).unwrap();
         let mut context = TestContext::default();
 
@@ -665,26 +662,8 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
         assert_eq!(runtime.frame(), 10.);
     }
 
-    #[test] fn lottie_runtime_reuses_layer_graph_and_frame_buffers() {
-        let mut runtime = LottieRuntime::<kurbo::Affine>::from_reader(&br##"{
-            "ip":0,"op":10,"fr":1,"layers":[
-                {"ty":3,"ind":1,"st":0,"ip":0,"op":10,"ks":{}},
-                {"ty":1,"ind":2,"parent":1,"st":0,"ip":0,"op":10,
-                    "sw":1,"sh":1,"sc":"#000000","ks":{}}
-            ]
-        }"##[..]).unwrap();
-        let mut context = TestContext::default();
-
-        assert!(runtime.render_next_frame(&mut context, 1., None));
-        let buffers = (runtime.root.worlds.as_ptr(), runtime.root.stack.as_ptr(),
-            runtime.root.parents.as_ptr());
-        assert!(runtime.render_next_frame(&mut context, 1., None));
-        assert_eq!(buffers, (runtime.root.worlds.as_ptr(), runtime.root.stack.as_ptr(),
-            runtime.root.parents.as_ptr()));
-    }
-
-    #[test] fn lottie_runtime_builds_and_reuses_precomp_runtimes() {
-        let mut runtime = LottieRuntime::<kurbo::Affine>::from_reader(&br##"{
+    #[test] fn lottie_runtime_reuses_layer_graph_and_precomp_state() {
+        let mut runtime = LottieRuntime::from_reader(&br##"{
             "ip":0,"op":10,"fr":1,
             "assets":[{"id":"nested","layers":[
                 {"ty":1,"st":0,"ip":0,"op":10,
@@ -693,14 +672,16 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
             "layers":[{"ty":0,"refId":"nested","w":1,"h":1,
                 "st":0,"ip":0,"op":10,"ks":{}}]
         }"##[..]).unwrap();
-        let child = runtime.root.precomps[0].as_ref().unwrap();
-        let buffers = (child.composition.worlds.as_ptr(), child.composition.stack.as_ptr());
+        let graph = runtime.root.parents.as_ptr();
+        let child_graph = runtime.root.precomps[0].as_ref().unwrap()
+            .composition.parents.as_ptr();
         let mut context = TestContext::default();
 
         assert!(runtime.render_next_frame(&mut context, 1., None));
-        let child = runtime.root.precomps[0].as_ref().unwrap();
-        assert_eq!(buffers,
-            (child.composition.worlds.as_ptr(), child.composition.stack.as_ptr()));
+        assert!(runtime.render_next_frame(&mut context, 1., None));
+        assert_eq!(graph, runtime.root.parents.as_ptr());
+        assert_eq!(child_graph, runtime.root.precomps[0].as_ref().unwrap()
+            .composition.parents.as_ptr());
     }
 
     #[test] fn precomp_time_remap_uses_root_fps_after_layer_time_mapping() {
@@ -718,7 +699,7 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
                 "st":4,"sr":2,"ip":0,"op":40,"ks":{},
                 "tm":{"k":[{"t":0,"s":[0]},{"t":12,"s":[1]}]}}]
         }"##;
-        let mut runtime = LottieRuntime::<kurbo::Affine>::from_reader(&json[..]).unwrap();
+        let mut runtime = LottieRuntime::from_reader(&json[..]).unwrap();
         let mut context = TestContext::default();
 
         assert!(runtime.render_next_frame(&mut context, 1. / 24., None));
@@ -730,7 +711,7 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
     }
 
     #[test] fn lottie_runtime_skips_recursive_precomp_references() {
-        let runtime = LottieRuntime::<kurbo::Affine>::from_reader(&br#"{
+        let runtime = LottieRuntime::from_reader(&br#"{
             "assets":[
                 {"id":"a","layers":[{"ty":0,"refId":"b","w":1,"h":1,
                     "ip":0,"op":1,"ks":{}}]},
@@ -746,7 +727,7 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
     }
 
     #[test] fn frame_clear_supports_transparent_color_and_preserve_modes() {
-        let mut runtime = LottieRuntime::<kurbo::Affine>::from_reader(
+        let mut runtime = LottieRuntime::from_reader(
             &br#"{"ip":0,"op":10,"fr":1,"layers":[]}"#[..]).unwrap();
         let mut context = TestContext::default();
 

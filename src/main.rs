@@ -146,7 +146,7 @@ struct WinitApp {
 #[cfg(feature = "rive-rs")] use inlottie::rive_nvg::RiveNVG;
 
 enum AnimGraph {
-    #[cfg(feature =  "lottie")] Lottie(Box<LottieRuntime<femtovg::Transform2D>>),
+    #[cfg(feature =  "lottie")] Lottie(Box<LottieRuntime>),
     #[cfg(feature = "rive-rs")]
     Rive((Box<dyn rive_rs::Scene<RiveNVG<OpenGl>>>, rive_rs::Viewport)),
     #[allow(clippy::upper_case_acronyms)] SVG(Box<usvg::Tree>),
