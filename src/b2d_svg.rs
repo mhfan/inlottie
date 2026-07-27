@@ -128,7 +128,7 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
 
             if  matches!(fpath.hit_test(mouse.into(),
                 BLFillRule::BL_FILL_RULE_NON_ZERO), BLHitTest::BL_HIT_TEST_IN) {
-                blctx.set_stroke_width(2. / blctx.get_transform(1).get_scaling().0);
+                blctx.set_stroke_width(2. / blctx.user_transform().get_scaling().0);
                 blctx.stroke_geometry_rgba32(&fpath, (32, 240, 32, 128).into())?;
             }
         }

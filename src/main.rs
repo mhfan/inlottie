@@ -559,7 +559,7 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
         let (rw, rh, mut path) = (100., 20., BLPath::new());
         path.add_rect(&(0., 0., rw, rh).into());
 
-        let last_trfm = blctx.get_transform(1);
+        let last_trfm = blctx.user_transform();
         blctx.translate(pos.into());
         blctx.fill_geometry_rgba32(&path, (0, 0, 0, 99).into())
             .expect("failed to clear Blend2D performance graph");
