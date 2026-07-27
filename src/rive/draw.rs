@@ -7,11 +7,6 @@ use super::{ComponentPaint, DrawGroup, Result, Runtime, RuntimeError, uint,
 };
 
 impl Runtime {
-    pub fn display_list(&self) -> DisplayList {
-        let mut list = DisplayList::default();
-        self.write_display_list(&mut list);     list
-    }
-
     pub fn write_display_list(&self, list: &mut DisplayList) {
         list.clear();
         let primitive_count = self.draw_groups.iter().filter(|group|
@@ -19,7 +14,7 @@ impl Runtime {
             .map(|group| group.paints.iter().filter_map(|&index|
                 self.components[index as usize].paint())
                 .filter(|paint| visible_paint(paint)).count().max(1)).sum();
-        list.items.reserve(primitive_count);
+        list.reserve(primitive_count);
         let clip_paths: Vec<_> = self.components.iter().map(|component| {
             let clip = component.clip()?;
             clip.visible.then(|| Clip { rule: clip.rule,
@@ -35,11 +30,11 @@ impl Runtime {
             let clips: Arc<[_]> = group.clips.iter()
                 .filter_map(|&index| clip_paths[index as usize].clone()).collect();
             if group.paints.is_empty() {
-                list.items.push(DrawItem {
+                list.push(DrawItem {
                     obj_idx: group.obj_idx, opacity, clips, shapes, paint: None });
             } else {
-                let start = list.items.len();
-                list.items.extend(group.paints.iter().filter_map(|&index| {
+                let start = list.len();
+                list.extend(group.paints.iter().filter_map(|&index| {
                     let paint = self.components[index as usize].paint()?;
                     visible_paint(paint).then(|| DrawItem {
                         obj_idx: group.obj_idx, opacity,
@@ -47,8 +42,8 @@ impl Runtime {
                         paint: Some(paint.value.clone()),
                     })
                 }));
-                if  list.items.len() == start {
-                    list.items.push(DrawItem {
+                if  list.len() == start {
+                    list.push(DrawItem {
                         obj_idx: group.obj_idx, opacity, clips, shapes, paint: None });
                 }
             }

@@ -12,6 +12,11 @@ fn file(objects: Vec<Object>) -> RiveFile { RiveFile {
         },  ocoll: objects,
 } }
 
+fn display_list(runtime: &Runtime) -> DisplayList {
+    let mut list = DisplayList::default();
+    runtime.write_display_list(&mut list);  list
+}
+
 fn prop(object: &mut Object, id: u32, value: f32) {
     object.add_prop(VarUInt(id), FieldValue::Float32(value));
 }
@@ -111,14 +116,14 @@ fn clipped_scene() -> Vec<Object> {
 
 #[test] fn emits_clipping_path_for_owner_subtree() {
     let runtime = Runtime::from_file(file(clipped_scene())).unwrap();
-    let list = runtime.display_list();
-    let target = list.items.iter().find(|item| item.obj_idx == 5).unwrap();
+    let list = display_list(&runtime);
+    let target = list.iter().find(|item| item.obj_idx == 5).unwrap();
     assert_eq!(target.clips.len(), 1);
     assert_eq!(target.clips[0].rule, FillRule::EvenOdd);
     assert_eq!(target.clips[0].shapes.len(), 1);
     assert_eq!(target.clips[0].shapes[0].obj_idx, 2);
     assert_eq!(target.clips[0].shapes[0].trfm.tx, 12.0);
-    assert!(list.items.iter().find(|item| item.obj_idx == 1).unwrap().clips.is_empty());
+    assert!(list.iter().find(|item| item.obj_idx == 1).unwrap().clips.is_empty());
 }
 
 #[test] fn animates_clipping_visibility() {
@@ -128,10 +133,10 @@ fn clipped_scene() -> Vec<Object> {
         bool_keyframe(0, true), bool_keyframe(10, false)]);
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
-    assert_eq!(runtime.display_list().items.iter()
+    assert_eq!(display_list(&runtime).iter()
         .find(|item| item.obj_idx == 5).unwrap().clips.len(), 1);
     runtime.advance(1.0);
-    assert!(runtime.display_list().items.iter()
+    assert!(display_list(&runtime).iter()
         .find(|item| item.obj_idx == 5).unwrap().clips.is_empty());
 }
 
@@ -153,12 +158,12 @@ fn clipped_scene() -> Vec<Object> {
     prop(&mut ellipse, property_ids::PARAMETRICPATH_HEIGHT, 20.0);
 
     let runtime = Runtime::from_file(file(vec![artboard(), parent, ellipse])).unwrap();
-    let list = runtime.display_list();
+    let list = display_list(&runtime);
     assert_eq!(runtime.component_count(), 3);
-    assert_eq!(list.items.len(), 1);
-    assert_eq!(list.items[0].shapes[0].trfm.tx, 15.0);
-    assert_eq!(list.items[0].shapes[0].trfm.ty, 20.0);
-    assert_eq!(list.items[0].shapes[0].geom,
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].shapes[0].trfm.tx, 15.0);
+    assert_eq!(list[0].shapes[0].trfm.ty, 20.0);
+    assert_eq!(list[0].shapes[0].geom,
         Geometry::Ellipse(Rect { x: -20.0, y: -10.0, w: 40.0, h: 20.0 }));
 }
 
@@ -179,10 +184,10 @@ fn clipped_scene() -> Vec<Object> {
 
     assert!(runtime.advance(0.5));
     assert_eq!(runtime.elapsed(), 0.5);
-    assert!((runtime.display_list().items[0].shapes[0].trfm.tx - 10.0)
+    assert!((display_list(&runtime)[0].shapes[0].trfm.tx - 10.0)
         .abs() < 1e-6);
     assert!(runtime.advance(1.0));
-    assert!((runtime.display_list().items[0].shapes[0].trfm.tx - 10.0)
+    assert!((display_list(&runtime)[0].shapes[0].trfm.tx - 10.0)
         .abs() < 1e-6);
     assert!(!runtime.advance(0.0));
     assert!(matches!(runtime.set_animation(1), Err(RuntimeError::AnimationNotFound(1))));
@@ -200,7 +205,7 @@ fn clipped_scene() -> Vec<Object> {
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
     runtime.advance(0.5);
-    let x = runtime.display_list().items[0].shapes[0].trfm.tx;
+    let x = display_list(&runtime)[0].shapes[0].trfm.tx;
     assert!((6.0..6.4).contains(&x), "{x}");
 }
 
@@ -232,7 +237,7 @@ fn clipped_scene() -> Vec<Object> {
     runtime.set_animation(0).unwrap();
     runtime.advance(0.5);
     let Some(Paint::Stroke { width, effects, .. }) =
-        &runtime.display_list().items[0].paint else { panic!() };
+        &display_list(&runtime)[0].paint else { panic!() };
     assert!((*width - 4.0).abs() < 1e-6);
     let PathEffect::Trim { start, end, offset, .. } = effects[0] else { panic!() };
     assert!((start - 0.4).abs() < 1e-6);
@@ -258,13 +263,13 @@ fn clipped_scene() -> Vec<Object> {
     runtime.set_animation(0).unwrap();
     runtime.advance(0.5);
     let Geometry::RoundedRect { rect, radii } =
-        runtime.display_list().items[0].shapes[0].geom else { panic!() };
+        display_list(&runtime)[0].shapes[0].geom else { panic!() };
     assert_eq!(rect, Rect { x: -10.0, y: -10.0, w: 20.0, h: 20.0 });
     assert_eq!(radii, CornerRadii { tl: 3.0, tr: 3.0, br: 3.0, bl: 3.0 });
 
     runtime.set_animation(0).unwrap();
     let Geometry::RoundedRect { rect, radii } =
-        runtime.display_list().items[0].shapes[0].geom else { panic!() };
+        display_list(&runtime)[0].shapes[0].geom else { panic!() };
     assert_eq!(rect.w, 10.0);
     assert_eq!(radii, CornerRadii { tl: 1.0, tr: 1.0, br: 1.0, bl: 1.0 });
 }
@@ -303,20 +308,20 @@ fn clipped_scene() -> Vec<Object> {
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
     runtime.advance(0.5);
-    let list = runtime.display_list();
-    assert!(matches!(&list.items[0].paint,
+    let list = display_list(&runtime);
+    assert!(matches!(&list[0].paint,
         Some(Paint::Fill { brush: Brush::Solid(0x8080_4080), .. })));
     let Some(Paint::Fill { brush: Brush::LinearGradient { stops, .. }, .. }) =
-        &list.items[1].paint else { panic!() };
+        &list[1].paint else { panic!() };
     assert_eq!(stops[0], GradientStop { pos: 0.0, color: 0xff80_8080 });
     assert_eq!(stops[1], GradientStop { pos: 0.0, color: 0xff12_3456 });
 
     runtime.set_animation(1).unwrap();
-    let list = runtime.display_list();
-    assert!(matches!(&list.items[0].paint,
+    let list = display_list(&runtime);
+    assert!(matches!(&list[0].paint,
         Some(Paint::Fill { brush: Brush::Solid(0x0010_80ff), .. })));
     let Some(Paint::Fill { brush: Brush::LinearGradient { stops, .. }, .. }) =
-        &list.items[1].paint else { panic!() };
+        &list[1].paint else { panic!() };
     assert_eq!(stops[0], GradientStop { pos: 0.0, color: 0xff12_3456 });
     assert_eq!(stops[1], GradientStop { pos: 1.0, color: 0xff00_0000 });
 }
@@ -345,19 +350,19 @@ fn clipped_scene() -> Vec<Object> {
 
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
-    let list = runtime.display_list();
-    assert!(list.items[0].paint.is_none());
-    let Geometry::Path(path) = &list.items[0].shapes[0].geom else { panic!() };
+    let list = display_list(&runtime);
+    assert!(list[0].paint.is_none());
+    let Geometry::Path(path) = &list[0].shapes[0].geom else { panic!() };
     assert!(!matches!(path.cmd.last(), Some(PathCommand::Close)));
-    let Geometry::Path(polygon) = &list.items[1].shapes[0].geom else { panic!() };
+    let Geometry::Path(polygon) = &list[1].shapes[0].geom else { panic!() };
     assert_eq!(polygon.cmd.len(), 4);
 
     runtime.advance(0.6);
-    let list = runtime.display_list();
-    assert!(matches!(list.items[0].paint, Some(Paint::Fill { .. })));
-    let Geometry::Path(path) = &list.items[0].shapes[0].geom else { panic!() };
+    let list = display_list(&runtime);
+    assert!(matches!(list[0].paint, Some(Paint::Fill { .. })));
+    let Geometry::Path(path) = &list[0].shapes[0].geom else { panic!() };
     assert!(matches!(path.cmd.last(), Some(PathCommand::Close)));
-    let Geometry::Path(polygon) = &list.items[1].shapes[0].geom else { panic!() };
+    let Geometry::Path(polygon) = &list[1].shapes[0].geom else { panic!() };
     assert_eq!(polygon.cmd.len(), 6);
 }
 
@@ -377,13 +382,13 @@ fn clipped_scene() -> Vec<Object> {
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
     runtime.advance(0.5);
-    let list = runtime.display_list();
-    let Geometry::Path(path) = &list.items[0].shapes[0].geom else { panic!() };
+    let list = display_list(&runtime);
+    let Geometry::Path(path) = &list[0].shapes[0].geom else { panic!() };
     assert_eq!(path.cmd[0], PathCommand::MoveTo(Point { x: 2.0, y: 0.0 }));
 
     runtime.set_animation(1).unwrap();
-    let list = runtime.display_list();
-    let Geometry::Path(path) = &list.items[0].shapes[0].geom else { panic!() };
+    let list = display_list(&runtime);
+    let Geometry::Path(path) = &list[0].shapes[0].geom else { panic!() };
     assert_eq!(path.cmd[0], PathCommand::MoveTo(Point { x: 0.0, y: 0.0 }));
 }
 
@@ -396,9 +401,9 @@ fn clipped_scene() -> Vec<Object> {
         keyed_property(property_ids::NODE_Y), double_keyframe(0, 30.0, 1)];
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
-    assert_eq!(runtime.display_list().items[0].shapes[0].trfm.tx, 20.0);
+    assert_eq!(display_list(&runtime)[0].shapes[0].trfm.tx, 20.0);
     runtime.set_animation(1).unwrap();
-    let transform = runtime.display_list().items[0].shapes[0].trfm;
+    let transform = display_list(&runtime)[0].shapes[0].trfm;
     assert_eq!((transform.tx, transform.ty), (0.0, 30.0));
 }
 
@@ -432,9 +437,9 @@ fn clipped_scene() -> Vec<Object> {
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
     runtime.advance(0.25);
-    assert_eq!(runtime.display_list().items[0].opacity, 1.0);
+    assert_eq!(display_list(&runtime)[0].opacity, 1.0);
     runtime.advance(0.5);
-    assert_eq!(runtime.display_list().items[0].opacity, 0.25);
+    assert_eq!(display_list(&runtime)[0].opacity, 0.25);
 }
 
 #[test] fn selects_one_artboard_without_crossing_contexts() {
@@ -453,7 +458,7 @@ fn clipped_scene() -> Vec<Object> {
     assert_eq!(second.artboard_object_index(), 2);
     assert_eq!(second.component_count(), 2);
     assert!(matches!(
-        second.display_list().items[0].shapes[0].geom,
+        display_list(&second)[0].shapes[0].geom,
         Geometry::Ellipse(Rect { w: 20.0, .. })));
     assert!(matches!(Runtime::from_artboard(file(objects()), 2),
         Err(RuntimeError::ArtboardNotFound(2))));
@@ -467,7 +472,7 @@ fn clipped_scene() -> Vec<Object> {
 
     let runtime = Runtime::from_file(file(vec![artboard(), rectangle])).unwrap();
     let Geometry::RoundedRect { radii, .. } =
-        &runtime.display_list().items[0].shapes[0].geom else { panic!() };
+        &display_list(&runtime)[0].shapes[0].geom else { panic!() };
     assert_eq!(*radii, CornerRadii {
         tl: 3.0, tr: 3.0, br: 3.0, bl: 3.0,
     });
@@ -492,8 +497,8 @@ fn clipped_scene() -> Vec<Object> {
 
     let runtime = Runtime::from_file(file(vec![artboard(),
         triangle, polygon, star])).unwrap();
-    let list = runtime.display_list();
-    let paths: Vec<_> = list.items.iter().map(|item| {
+    let list = display_list(&runtime);
+    let paths: Vec<_> = list.iter().map(|item| {
         let Geometry::Path(path) = &item.shapes[0].geom else { panic!() };
         path
     }).collect();
@@ -519,7 +524,7 @@ fn clipped_scene() -> Vec<Object> {
 
     let runtime =
         Runtime::from_file(file(vec![artboard(), ignored, parent, ellipse])).unwrap();
-    assert_eq!(runtime.display_list().items[0].shapes[0].trfm.tx, 15.0);
+    assert_eq!(display_list(&runtime)[0].shapes[0].trfm.tx, 15.0);
 }
 
 #[test] fn rejects_invalid_geometry_during_construction() {
@@ -573,24 +578,24 @@ fn clipped_scene() -> Vec<Object> {
 
     let runtime = Runtime::from_file(file(vec![artboard(), shape, path, first, second,
         fill, fill_color, stroke, stroke_color])).unwrap();
-    let list = runtime.display_list();
-    assert_eq!(list.items.len(), 2);
-    assert_eq!(list.items[0].paint, Some(Paint::Fill {
+    let list = display_list(&runtime);
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].paint, Some(Paint::Fill {
         brush: Brush::Solid(0xff11_2233), rule: FillRule::EvenOdd,
         effects: [].into(),
     }));
-    assert_eq!(list.items[1].paint, Some(Paint::Stroke {
+    assert_eq!(list[1].paint, Some(Paint::Stroke {
         brush: Brush::Solid(0xff44_5566), width: 3.0,
         cap: StrokeCap::Butt, join: StrokeJoin::Miter,
         trfm_scale: true, effects: [].into(),
     }));
     assert!(std::sync::Arc::ptr_eq(
-        &list.items[0].shapes, &list.items[1].shapes));
+        &list[0].shapes, &list[1].shapes));
     let (Geometry::Path(fill_path), Geometry::Path(stroke_path)) =
-        (&list.items[0].shapes[0].geom,
-         &list.items[1].shapes[0].geom) else { panic!() };
+        (&list[0].shapes[0].geom,
+         &list[1].shapes[0].geom) else { panic!() };
     assert!(std::sync::Arc::ptr_eq(&fill_path.cmd, &stroke_path.cmd));
-    assert_eq!(list.items[0].shapes[0].geom,
+    assert_eq!(list[0].shapes[0].geom,
         Geometry::Path(Path { cmd: vec![
         PathCommand::MoveTo(Point { x: 10.0, y:  0.0 }),
         PathCommand::LineTo(Point { x:  0.0, y: 20.0 }),
@@ -625,7 +630,7 @@ fn clipped_scene() -> Vec<Object> {
     let runtime = Runtime::from_file(file(vec![artboard(), shape, path, first, second,
         stroke, trim, dash_path, dash, gap])).unwrap();
     let Some(Paint::Stroke { width, trfm_scale: transform_affects, effects, .. }) =
-        &runtime.display_list().items[0].paint else { panic!() };
+        &display_list(&runtime)[0].paint else { panic!() };
     assert_eq!((*width, *transform_affects), (2.0, false));
     assert_eq!(&**effects, &[
         PathEffect::Trim { start: 0.2, end: 0.8, offset: -0.1,
@@ -663,15 +668,15 @@ fn clipped_scene() -> Vec<Object> {
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
     runtime.advance(0.5);
-    let list = runtime.display_list();
-    let Some(Paint::Stroke { effects, .. }) = &list.items[0].paint else { panic!() };
+    let list = display_list(&runtime);
+    let Some(Paint::Stroke { effects, .. }) = &list[0].paint else { panic!() };
     let PathEffect::Dash { offset, relative, segments } = &effects[0] else { panic!() };
     assert_eq!((*offset, *relative, segments[0]), (0.5, false,
         DashSegment { len: 6.0, relative: true }));
 
     runtime.set_animation(1).unwrap();
-    let list = runtime.display_list();
-    let Some(Paint::Stroke { effects, .. }) = &list.items[0].paint else { panic!() };
+    let list = display_list(&runtime);
+    let Some(Paint::Stroke { effects, .. }) = &list[0].paint else { panic!() };
     let PathEffect::Dash { offset, relative, segments } = &effects[0] else { panic!() };
     assert_eq!((*offset, *relative, segments[0]), (0.25, true,
         DashSegment { len: 4.0, relative: false }));
@@ -703,22 +708,22 @@ fn clipped_scene() -> Vec<Object> {
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
     runtime.advance(0.5);
-    let list = runtime.display_list();
-    assert!(matches!(&list.items[0].paint,
+    let list = display_list(&runtime);
+    assert!(matches!(&list[0].paint,
         Some(Paint::Fill { rule: FillRule::EvenOdd, .. })));
     let Some(Paint::Stroke { cap, join, trfm_scale, effects, .. }) =
-        &list.items[1].paint else { panic!() };
+        &list[1].paint else { panic!() };
     assert_eq!((*cap, *join, *trfm_scale),
         (StrokeCap::Round, StrokeJoin::Bevel, false));
     assert!(matches!(effects[0],
         PathEffect::Trim { mode: TrimMode::Synchronized, .. }));
 
     runtime.set_animation(1).unwrap();
-    let list = runtime.display_list();
-    assert!(matches!(&list.items[0].paint,
+    let list = display_list(&runtime);
+    assert!(matches!(&list[0].paint,
         Some(Paint::Fill { rule: FillRule::NonZero, .. })));
     let Some(Paint::Stroke { cap, join, trfm_scale, effects, .. }) =
-        &list.items[1].paint else { panic!() };
+        &list[1].paint else { panic!() };
     assert_eq!((*cap, *join, *trfm_scale),
         (StrokeCap::Butt, StrokeJoin::Miter, true));
     assert!(matches!(effects[0],
@@ -731,7 +736,7 @@ fn clipped_scene() -> Vec<Object> {
     let mut stroke = parented(object_ids::STROKE, 1);
     prop(&mut stroke, property_ids::THICKNESS, 0.0);
     let runtime = Runtime::from_file(file(vec![artboard(), shape, path, stroke])).unwrap();
-    assert!(runtime.display_list().items[0].paint.is_none());
+    assert!(display_list(&runtime)[0].paint.is_none());
 }
 
 #[test] fn rejects_invalid_trim_modes() {
@@ -778,12 +783,12 @@ fn clipped_scene() -> Vec<Object> {
 
     let runtime = Runtime::from_file(file(vec![artboard(), shape,
         path1, vertex1, vertex2, path2, vertex3, vertex4, fill, color])).unwrap();
-    let list = runtime.display_list();
-    assert_eq!(list.items.len(), 1);
-    assert_eq!(list.items[0].shapes.len(), 2);
-    assert!(!list.items[0].shapes[0].is_hole);
-    assert!( list.items[0].shapes[1].is_hole);
-    assert!(matches!(list.items[0].paint, Some(Paint::Fill { .. })));
+    let list = display_list(&runtime);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].shapes.len(), 2);
+    assert!(!list[0].shapes[0].is_hole);
+    assert!( list[0].shapes[1].is_hole);
+    assert!(matches!(list[0].paint, Some(Paint::Fill { .. })));
 }
 
 #[test] fn draw_rules_move_shape_after_target() {
@@ -800,7 +805,7 @@ fn clipped_scene() -> Vec<Object> {
 
     let runtime = Runtime::from_file(file(vec![artboard(), owner, moved, moved_geometry,
         rules, target, target_shape, target_geometry])).unwrap();
-    assert_eq!(runtime.display_list().items.iter()
+    assert_eq!(display_list(&runtime).iter()
         .map(|item| item.obj_idx).collect::<Vec<_>>(), [6, 2]);
 }
 
@@ -829,7 +834,7 @@ fn clipped_scene() -> Vec<Object> {
         owner_a, shape_a, geometry_a, rules_a, target_a,
         owner_b, shape_b, geometry_b, rules_b, target_b,
         shape_c, geometry_c])).unwrap();
-    assert_eq!(runtime.display_list().items.iter()
+    assert_eq!(display_list(&runtime).iter()
         .map(|item| item.obj_idx).collect::<Vec<_>>(), [11, 7, 2]);
 }
 
@@ -869,7 +874,7 @@ fn clipped_scene() -> Vec<Object> {
 
     let runtime = Runtime::from_file(file(vec![
         artboard(), parent, shape, ellipse, fill, color])).unwrap();
-    let item = &runtime.display_list().items[0];
+    let item = &display_list(&runtime)[0];
     assert!((item.opacity - 0.2).abs() < f32::EPSILON);
     assert!(matches!(&item.paint,
         Some(Paint::Fill { brush: Brush::Solid(0x8011_2233), .. })));
@@ -900,7 +905,7 @@ fn clipped_scene() -> Vec<Object> {
         artboard(), shape, ellipse, fill, gradient, last, first])).unwrap();
     let Some(Paint::Fill { brush: Brush::LinearGradient {
         start, end, trfm: transform, opacity, stops }, ..
-    }) = &runtime.display_list().items[0].paint else { panic!() };
+    }) = &display_list(&runtime)[0].paint else { panic!() };
     assert_eq!((*start, *end), (Point { x: 1.0, y: 2.0 }, Point { x: 8.0, y: 9.0 }));
     assert_eq!((transform.tx, transform.ty), (12.0, 34.0));
     assert_eq!(*opacity, 0.5);
@@ -920,7 +925,7 @@ fn clipped_scene() -> Vec<Object> {
 
     let runtime = Runtime::from_file(file(vec![
         artboard(), shape, ellipse, fill, gradient])).unwrap();
-    assert!(matches!(&runtime.display_list().items[0].paint,
+    assert!(matches!(&display_list(&runtime)[0].paint,
         Some(Paint::Fill { brush: Brush::RadialGradient {
             center: Point { x: 2.0, y: 3.0 }, radius: 5.0, ..
         }, .. })));
@@ -949,18 +954,18 @@ fn clipped_scene() -> Vec<Object> {
     let mut runtime = Runtime::from_file(file(objects)).unwrap();
     runtime.set_animation(0).unwrap();
     runtime.advance(0.5);
-    let list = runtime.display_list();
+    let list = display_list(&runtime);
     let Some(Paint::Fill { brush: Brush::RadialGradient {
         center, radius, trfm, opacity, .. }, .. }) =
-        &list.items[0].paint else { panic!() };
+        &list[0].paint else { panic!() };
     assert_eq!((*center, *radius, trfm.tx, *opacity),
         (Point { x: 1.0, y: 0.0 }, 5.0, 5.0, 0.75));
 
     runtime.set_animation(1).unwrap();
-    let list = runtime.display_list();
+    let list = display_list(&runtime);
     let Some(Paint::Fill { brush: Brush::RadialGradient {
         center, radius, trfm, opacity, .. }, .. }) =
-        &list.items[0].paint else { panic!() };
+        &list[0].paint else { panic!() };
     assert_eq!((*center, *radius, trfm.tx, *opacity),
         (Point { x: 0.0, y: 0.0 }, 4.0, 0.0, 1.0));
 }
@@ -971,7 +976,7 @@ fn clipped_scene() -> Vec<Object> {
     let ellipse = parented(object_ids::ELLIPSE, 1);
 
     let runtime = Runtime::from_file(file(vec![artboard(), shape, ellipse])).unwrap();
-    assert!(runtime.display_list().items.is_empty());
+    assert!(display_list(&runtime).is_empty());
 }
 
 #[test] fn imports_repository_sample() {
@@ -982,8 +987,8 @@ fn clipped_scene() -> Vec<Object> {
     assert!(0 < runtime.animation_count());
     runtime.set_animation(0).unwrap();
     assert!(runtime.advance(1.0 / 60.0));
-    let list =  runtime.display_list();
-    assert!(list.items.iter().flat_map(|item| item.shapes.iter())
+    let list =  display_list(&runtime);
+    assert!(list.iter().flat_map(|item| item.shapes.iter())
         .any(|geometry| matches!(&geometry.geom, Geometry::Path(_))));
-    assert!(list.items.iter().any(|item| item.paint.is_some()));
+    assert!(list.iter().any(|item| item.paint.is_some()));
 }

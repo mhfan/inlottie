@@ -117,13 +117,23 @@ pub enum FillRule { NonZero, EvenOdd, Clockwise }
     pub  clips: Arc<[Clip]>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
 /// A frame snapshot; backends may consume it after the Runtime advances again.
-pub struct DisplayList { pub items: Vec<DrawItem> }
+#[derive(Debug, Clone, Default, PartialEq)] pub struct DisplayList(Vec<DrawItem>);
 
 impl DisplayList {
-    pub fn clear(&mut self) { self.items.clear() }
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &DrawItem> {
-        self.items.iter()
+    pub fn as_slice(&self) -> &[DrawItem] { &self.0 }
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &DrawItem> { self.0.iter() }
+    pub(crate) fn clear(&mut self) { self.0.clear() }
+    pub(crate) fn push(&mut self, item: DrawItem) { self.0.push(item) }
+    pub(crate) fn reserve(&mut self, additional: usize) { self.0.reserve(additional) }
+    pub(crate) fn extend(&mut self, items: impl IntoIterator<Item = DrawItem>) {
+        self.0.extend(items)
     }
+}
+
+impl AsRef<[DrawItem]> for DisplayList { fn as_ref(&self) -> &[DrawItem] { &self.0 } }
+
+impl std::ops::Deref for DisplayList {
+    fn deref(&self) -> &Self::Target { &self.0 }
+    type Target = [DrawItem];
 }
