@@ -5,7 +5,7 @@
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::core::{helpers::{Vec2D, RGBA, IntBool, math},
+use super::{helpers::{Vec2D, RGBA, IntBool, math},
     schema::{Transform, Translation, TransRotation,
         FillStrokeGrad, ColorGrad, FillStroke, FillRule, GradientType, GradientColors,
         Repeater, Composite, LineJoin, LineCap, StrokeDashType}

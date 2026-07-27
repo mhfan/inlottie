@@ -1,10 +1,10 @@
 
 use serde::{Deserialize, Serialize};
 use serde_repr::{Serialize_repr, Deserialize_repr}; // for the underlying repr of a C-like enum
-use crate::core::helpers::{IntBool, RGBA, Vec2D, AnyAsset, defaults,
+use super::helpers::{IntBool, RGBA, Vec2D, AnyAsset, defaults,
     str_to_rgba, str_from_rgba,
 };
-use crate::core::schema_impl::{des_nonempty_vec, des_strarray, des_static_value};
+use super::schema_impl::{des_nonempty_vec, des_strarray, des_static_value};
 
 /// Top level object, describing the animation.
 ///

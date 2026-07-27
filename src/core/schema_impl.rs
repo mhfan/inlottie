@@ -1,7 +1,7 @@
 
 use std::borrow::Cow;
 use serde::{de::Error, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
-use crate::core::{helpers::{math, IntBool}, schema::*};
+use super::{helpers::{math, IntBool}, schema::*};
 
 pub(crate) fn des_static_value<'de, D, T>(d: D) -> Result<T, D::Error>
 where D: Deserializer<'de>, T: Deserialize<'de> {
@@ -634,6 +634,8 @@ impl LayerInfo {
     #[test] fn text_grouping_accepts_integral_float_encoding() {
         assert!(serde_json::from_str::<TextAlignmentOptions>(r#"{"g":1.0}"#).is_ok());
         assert!(serde_json::from_str::<TextAlignmentOptions>(r#"{"g":1.5}"#).is_err());
+        assert!(serde_json::from_str::<TextAlignmentOptions>(
+            r#"{"g":1.00000001}"#).is_err());
     }
 
     #[test] fn animation_from_reader_resolves_slots_and_preserves_the_dictionary() {

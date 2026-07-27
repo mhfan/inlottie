@@ -7,11 +7,11 @@
 
 use core::cell::RefCell;
 use std::{collections::HashMap, rc::Rc};
-use crate::core::{helpers::{RGBA, IntBool},
+use super::{helpers::{RGBA, IntBool}, style::{StyleConv, MatrixConv, TM2DwO, FSOpts},
+    path_ops::MeasuredPath,
     schema::{Animation, AssetItem, LayerItem, ShapeItem, VisualLayer,
         TrimPath, TrimMultiple, MatteMode, FillRule},
-    style::{StyleConv, MatrixConv, TM2DwO, FSOpts},
-    pathm::{MeasuredPath, PathBuilder, PathFactory}
+    pathm::{PathBuilder, PathFactory}
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)] enum Parent { Root, Layer(u32), Invalid }
@@ -404,7 +404,7 @@ fn for_each_path_mut<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
 
 fn duplicate_draws<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone>(
     draws: &[DrawItem<VGPath, VGPaint, TM2D>],
-    paths: &mut HashMap<usize, crate::core::pathm::BezPath>) ->
+    paths: &mut HashMap<usize, super::pathm::BezPath>) ->
     Vec<DrawItem<VGPath, VGPaint, TM2D>> {
     draws.iter().map(|draw| match draw {
         DrawItem::Shape(path) => {
@@ -447,16 +447,12 @@ fn expand_repeats<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Cl
 
 fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone>(
     mdfr: &TrimPath, draws: &mut [DrawItem<VGPath, VGPaint, TM2D>], fnth: f32) {
-    let (start, trim) = normalize_trim(
-        mdfr.start .get_value(fnth) as f64 / 100.,
-        mdfr.end   .get_value(fnth) as f64 / 100.,
-        mdfr.offset.get_value(fnth) as f64 / 360.,
-    );
-    if trim <= 0. {
-        for_each_path_mut(draws, &mut |path| *path = VGPath::new(0));
-        return
-    }
-    if 1. <= trim { return }
+    let (start, trim) = normalize_trim(mdfr.start .get_value(fnth) / 100.,
+                                       mdfr.end   .get_value(fnth) / 100.,
+                                       mdfr.offset.get_value(fnth) / 360.);
+    if  trim <= 0. {
+        for_each_path_mut(draws, &mut |path| *path = VGPath::new(0)); return
+    } else if 1. <= trim { return }
 
     if mdfr.multiple.is_some_and(|ml| matches!(ml, TrimMultiple::Simultaneously)) {
         for_each_path_mut(draws, &mut |path| path.trim_path(start, trim));
@@ -477,9 +473,10 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone
 
         let end = start + trim;
         let ranges = if end <= 1. {
-            [(start * total, end * total), (0., 0.)]
+            [(f64::from(start) * total, f64::from(end) * total), (0., 0.)]
         } else {
-            [(start * total, total), (0., (end - 1.) * total)]
+            [(f64::from(start) * total, total),
+             (0., f64::from(end - 1.) * total)]
         };
         let mut path_start = 0.;
         for_each_path_mut(draws, &mut |path| {
@@ -503,7 +500,7 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone
     }
 }
 
-fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
+fn normalize_trim(start: f32, end: f32, offset: f32) -> (f32, f32) {
     let (start, end) = (start.clamp(0., 1.), end.clamp(0., 1.));
     ((start.min(end) + offset).rem_euclid(1.), (end - start).abs())
 }
@@ -558,7 +555,7 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
         }
     }
 
-    fn line(length: f64, y: f64) -> BezPath {
+    fn line(length: f32, y: f32) -> BezPath {
         let mut path = BezPath::new();
         path.move_to((0., y)); path.line_to((length, y)); path
     }
@@ -570,8 +567,8 @@ fn normalize_trim(start: f64, end: f64, offset: f64) -> (f64, f64) {
         }}"#)).unwrap()
     }
 
-    fn path_length(path: &BezPath) -> f64 {
-        path.segments().map(|segment| segment.arclen(0.1)).sum()
+    fn path_length(path: &BezPath) -> f32 {
+        path.segments().map(|segment| segment.arclen(0.1)).sum::<f64>() as _
     }
 
     fn fill_style() -> DrawItem<BezPath, TestStyle, kurbo::Affine> {

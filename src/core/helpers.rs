@@ -96,7 +96,7 @@ impl Serialize for Vec2D {
         Result<S::Ok, S::Error> { [self.x, self.y].serialize(serializer) }
 }
 
-use crate::core::schema::*;
+use super::schema::*;
 
 pub(crate) mod defaults { #![allow(unused)]
     pub fn time_stretch() -> f32 { 1.0 }
@@ -119,7 +119,7 @@ pub(crate) mod defaults { #![allow(unused)]
     pub fn is_default<T: Default + PartialEq>(v: &T) -> bool { *v == T::default() }
 }
 
-pub use crate::core::schema_impl::{AnyAsset, AnyValue, UnresolvedSlot};
+pub use super::schema_impl::{AnyAsset, AnyValue, UnresolvedSlot};
 
 #[cfg(test)] mod test { use super::*;
     #[test] fn rgba_text_roundtrip_and_validation() {
