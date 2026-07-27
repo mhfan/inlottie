@@ -1,9 +1,9 @@
 //! Draw grouping, Rive draw-rule ordering, and immutable display-list emission.
 
-use std::mem;
+use std::{mem, sync::Arc};
 
 use super::{ComponentPaint, DrawGroup, Result, Runtime, RuntimeError, uint,
-    object_ids, property_ids, DisplayList, DrawItem, Paint, Shape,
+    object_ids, property_ids, Clip, DisplayList, DrawItem, Paint, Shape,
 };
 
 impl Runtime {
@@ -20,36 +20,48 @@ impl Runtime {
                 self.components[index as usize].paint())
                 .filter(|paint| visible_paint(paint)).count().max(1)).sum();
         list.items.reserve(primitive_count);
+        let clip_paths: Vec<_> = self.components.iter().map(|component| {
+            let clip = component.clip()?;
+            clip.visible.then(|| Clip { rule: clip.rule,
+                shapes: self.snapshot_shapes(&clip.shapes) })
+        }).collect();
 
         // A DrawItem is a snapshot: cloning Paint and Shape data keeps an emitted list valid
         // while the retained Runtime advances to another animation frame.
         for group in &self.draw_groups {
             let opacity = self.components[group.opacity_component as usize].world_opacity;
             if  opacity <= 0.0 { continue }
-            let shapes: std::sync::Arc<[_]> = group.components.iter().map(|&index| {
-                let component = &self.components[index as usize];
-                Shape { obj_idx: component.obj_idx, is_hole: component.is_hole,
-                    trfm: component.world,
-                    geom: component.geom().unwrap().geometry().clone() }
-            }).collect();
+            let shapes = self.snapshot_shapes(&group.components);
+            let clips: Arc<[_]> = group.clips.iter()
+                .filter_map(|&index| clip_paths[index as usize].clone()).collect();
             if group.paints.is_empty() {
                 list.items.push(DrawItem {
-                    obj_idx: group.obj_idx, opacity, shapes, paint: None });
+                    obj_idx: group.obj_idx, opacity, clips, shapes, paint: None });
             } else {
                 let start = list.items.len();
                 list.items.extend(group.paints.iter().filter_map(|&index| {
                     let paint = self.components[index as usize].paint()?;
                     visible_paint(paint).then(|| DrawItem {
                         obj_idx: group.obj_idx, opacity,
-                        shapes: shapes.clone(), paint: Some(paint.value.clone()),
+                        clips: clips.clone(), shapes: shapes.clone(),
+                        paint: Some(paint.value.clone()),
                     })
                 }));
                 if  list.items.len() == start {
                     list.items.push(DrawItem {
-                        obj_idx: group.obj_idx, opacity, shapes, paint: None });
+                        obj_idx: group.obj_idx, opacity, clips, shapes, paint: None });
                 }
             }
         }
+    }
+
+    fn snapshot_shapes(&self, indices: &[u32]) -> Arc<[Shape]> {
+        indices.iter().map(|&index| {
+                let component = &self.components[index as usize];
+                Shape { obj_idx: component.obj_idx, is_hole: component.is_hole,
+                    trfm: component.world,
+                    geom: component.geom().unwrap().geometry().clone() }
+        }).collect()
     }
 
     fn ancestor_of_type(&self, mut component: Option<u32>, type_id: u32) -> Option<u32> {
@@ -73,12 +85,12 @@ impl Runtime {
                 shape_groups[index] = Some(self.draw_groups.len());
                 self.draw_groups.push(DrawGroup {
                     obj_idx: component.obj_idx, opacity_component: index as u32,
-                    components: Vec::new(), paints: Vec::new()
+                    components: Vec::new(), paints: Vec::new(), clips: Vec::new(),
                 });
             } else if component.geom().is_some() && shapes[index].is_none() {
                 self.draw_groups.push(DrawGroup {
                     obj_idx: component.obj_idx, opacity_component: index as u32,
-                    components: vec![index as u32], paints: Vec::new(),
+                    components: vec![index as u32], paints: Vec::new(), clips: Vec::new(),
                 });
             }
         }
@@ -88,6 +100,30 @@ impl Runtime {
             if component.geom().is_some() { group.components.push(index as u32) }
             if component.paint().is_some() { group.paints.push(index as u32) }
         }   self.draw_groups.retain(|group| !group.components.is_empty());
+    }
+
+    pub(super) fn attach_clips(&mut self) {
+        // Cache source membership; only geometry values and transforms change per frame.
+        for clip in 0..self.components.len() {
+            let Some(source) = self.components[clip].clip().map(|value| value.source) else {
+                continue
+            };
+            let shapes = self.components.iter().enumerate().filter_map(|(index, component)|
+                (component.geom().is_some() &&
+                    is_descendant(&self.components, index as u32, source))
+                    .then_some(index as u32)).collect();
+            self.components[clip].clip_mut().unwrap().shapes = shapes;
+        }
+        // A clipping component affects every drawable in its parent's subtree.
+        for (clip, component) in self.components.iter().enumerate() {
+            if component.clip().is_none() { continue }
+            let Some(owner) = component.parent else { continue };
+            for group in &mut self.draw_groups {
+                if is_descendant(&self.components, group.opacity_component, owner) {
+                    group.clips.push(clip as u32);
+                }
+            }
+        }
     }
 
     pub(super) fn apply_draw_rules(&mut self, obj_comps: &[Option<u32>]) -> Result<()> {
@@ -180,6 +216,14 @@ impl Runtime {
         if let Some(index) = state.iter().position(|&value| value == 0) {
             emit(index, &mut groups, &before, &after, &mut state, &mut output)?;
         }   self.draw_groups = output;  Ok(())
+    }
+}
+
+fn is_descendant(components: &[super::Component], mut component: u32, ancestor: u32) -> bool {
+    loop {
+        if component == ancestor { return true }
+        let Some(parent) = components[component as usize].parent else { return false };
+        component = parent;
     }
 }
 

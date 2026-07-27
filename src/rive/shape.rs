@@ -185,7 +185,7 @@ fn materialize_effects(mut entries: Vec<EffectEntry>, targets: &mut [ComponentTa
     }).collect()
 }
 
-fn fill_rule(value: u32) -> FillRule { match value {
+pub(super) fn fill_rule(value: u32) -> FillRule { match value {
     1 => FillRule::EvenOdd, 2 => FillRule::Clockwise, _ => FillRule::NonZero,
 } }
 

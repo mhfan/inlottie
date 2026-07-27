@@ -19,6 +19,7 @@ use crate::rive::animation::{Animation, LinearAnimation, RawAnimation, evaluate_
     Paint { component: u32, prop_id: u32 },
     Effect { target: EffectTarget, prop_id: u32 },
     Visibility { component: u32 },
+    ClipVisibility { component: u32 },
 }
 
 #[derive(Debug, Clone, Copy)] pub(in crate::rive) struct TrackBinding {
@@ -150,6 +151,8 @@ fn resolve_target(components: &[Component], bindings: &[ComponentTarget],
             if state.geom().is_some() => Some(TrackTarget::Geometry { component, prop_id }),
         TrackValue::Bool(_) if prop_id == property_ids::SHAPEPAINT_ISVISIBLE &&
             state.paint().is_some() => Some(TrackTarget::Visibility { component }),
+        TrackValue::Bool(_) if prop_id == property_ids::CLIPPINGSHAPE_ISVISIBLE &&
+            state.clip().is_some() => Some(TrackTarget::ClipVisibility { component }),
         TrackValue::Scalar(_) | TrackValue::Bool(_) | TrackValue::Uint(_)
             if state.paint().is_some() => Some(TrackTarget::Paint { component, prop_id }),
         _ => None,
@@ -204,6 +207,11 @@ fn apply_track(components: &mut [Component], target: TrackTarget, value: TrackVa
         (TrackTarget::Visibility { component }, TrackValue::Bool(value)) => {
             if let Some(paint) = components[component as usize].paint_mut() {
                 paint.visible = value;
+            }
+        }
+        (TrackTarget::ClipVisibility { component }, TrackValue::Bool(value)) => {
+            if let Some(clip) = components[component as usize].clip_mut() {
+                clip.visible = value;
             }
         }   _ => {}
     }   false

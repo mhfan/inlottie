@@ -93,6 +93,55 @@ fn cubic_keyframe(frame: u32, value: f32, interpolator_id: u32) -> Object {
         interpolator_id);   keyframe
 }
 
+fn clipped_scene() -> Vec<Object> {
+    let source = parented(object_ids::SHAPE, 0);
+    let mut source_path = parented(object_ids::ELLIPSE, 1);
+    prop(&mut source_path, property_ids::NODE_X, 12.0);
+    prop(&mut source_path, property_ids::PARAMETRICPATH_WIDTH, 20.0);
+    prop(&mut source_path, property_ids::PARAMETRICPATH_HEIGHT, 10.0);
+    let owner = parented(object_ids::NODE, 0);
+    let mut clip = parented(object_ids::CLIPPING_SHAPE, 3);
+    uint_prop(&mut clip, property_ids::SOURCEID, 1);
+    uint_prop(&mut clip, property_ids::CLIPPINGSHAPE_FILLRULE, 1);
+    let target = parented(object_ids::SHAPE, 3);
+    let target_path = parented(object_ids::RECTANGLE, 5);
+    let fill = parented(object_ids::FILL, 5);
+    vec![artboard(), source, source_path, owner, clip, target, target_path, fill]
+}
+
+#[test] fn emits_clipping_path_for_owner_subtree() {
+    let runtime = Runtime::from_file(file(clipped_scene())).unwrap();
+    let list = runtime.display_list();
+    let target = list.items.iter().find(|item| item.obj_idx == 5).unwrap();
+    assert_eq!(target.clips.len(), 1);
+    assert_eq!(target.clips[0].rule, FillRule::EvenOdd);
+    assert_eq!(target.clips[0].shapes.len(), 1);
+    assert_eq!(target.clips[0].shapes[0].obj_idx, 2);
+    assert_eq!(target.clips[0].shapes[0].trfm.tx, 12.0);
+    assert!(list.items.iter().find(|item| item.obj_idx == 1).unwrap().clips.is_empty());
+}
+
+#[test] fn animates_clipping_visibility() {
+    let mut objects = clipped_scene();
+    objects.extend([linear_animation(b"clip", 10, 10, 0), keyed_object(4),
+        keyed_property(property_ids::CLIPPINGSHAPE_ISVISIBLE),
+        bool_keyframe(0, true), bool_keyframe(10, false)]);
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    assert_eq!(runtime.display_list().items.iter()
+        .find(|item| item.obj_idx == 5).unwrap().clips.len(), 1);
+    runtime.advance(1.0);
+    assert!(runtime.display_list().items.iter()
+        .find(|item| item.obj_idx == 5).unwrap().clips.is_empty());
+}
+
+#[test] fn rejects_missing_clipping_source() {
+    let mut clip = parented(object_ids::CLIPPING_SHAPE, 0);
+    uint_prop(&mut clip, property_ids::SOURCEID, 99);
+    assert!(matches!(Runtime::from_file(file(vec![artboard(), clip])),
+        Err(RuntimeError::InvalidClipSource { source_id: 99, .. })));
+}
+
 #[test] fn emits_static_geometry_with_retained_parent_transforms() {
     let mut parent = parented(object_ids::NODE, 0);
     prop(&mut parent, property_ids::NODE_X, 10.0);

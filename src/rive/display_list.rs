@@ -103,10 +103,18 @@ pub enum FillRule { NonZero, EvenOdd, Clockwise }
     pub geom: Geometry,
 }
 
+#[derive(Debug, Clone, PartialEq)] pub struct Clip {
+    /// All contours form one clip path under this fill rule.
+    pub rule: FillRule, pub shapes: Arc<[Shape]>,
+}
+
 #[derive(Debug, Clone, PartialEq)] pub struct DrawItem {
     /// One paint application over a combined, ordered set of shape contours.
-    pub obj_idx: u32, pub opacity: f32, pub paint: Option<Paint>,
+    pub obj_idx: u32, pub opacity: f32,
+    pub paint: Option<Paint>,
     pub shapes: Arc<[Shape]>,
+    /// Outer-to-inner clips; backends intersect them before drawing the item.
+    pub  clips: Arc<[Clip]>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

@@ -428,9 +428,6 @@ impl RiveFile {
     }
 }
 
-// TODO: A complete Rive runtime still needs object/reference and scene-tree resolution,
-// asset and text loading, constraint/animation/state-machine evaluation, and rendering.
-
 //include!(concat!(env!("OUT_DIR"), "/rive_defs.rs"));
 include!("../../target/rive_defs.rs");
 //include!(env!("RIVE_DEFS_RS"));

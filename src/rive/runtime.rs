@@ -4,7 +4,7 @@
 use std::{error::Error as StdError, fmt, f32};
 
 use super::{animation::{LinearAnimation, TrackValue, build_animations},
-    display_list::{Affine2, Brush, DashSegment, DisplayList, FillRule,
+    display_list::{Affine2, Brush, Clip, DashSegment, DisplayList, FillRule,
         Geometry, GradientStop, Paint, PathEffect, Point, Shape,
         DrawItem, StrokeCap, StrokeJoin, TrimMode
     },
@@ -17,6 +17,7 @@ use super::{animation::{LinearAnimation, TrackValue, build_animations},
 #[path = "draw.rs"] mod draw;
 #[path = "shape.rs"] mod shape;
 #[path = "track.rs"] pub(super) mod track;
+use shape::fill_rule;
 
 pub type Result<T> = std::result::Result<T, RuntimeError>;
 
@@ -24,6 +25,7 @@ pub type Result<T> = std::result::Result<T, RuntimeError>;
     Decode(DecodeError), AnimationNameNotFound, AnimationNotFound(u32), ArtboardNotFound(u32),
     DrawOrderCycle(u32), InvalidInterpolation(u32), InvalidInterpolator(u32),
     InvalidTrimMode(u32), ParentCycle(u32), TooManyObjects, TooManyVertices(u32),
+    InvalidClipSource { comp_id: u32, source_id: u32 },
     InvalidParent { comp_id: u32, parent_id: u32 },
 }
 
@@ -45,6 +47,8 @@ impl fmt::Display for RuntimeError {
             write!(f, "Rive parametric path has too many vertices: {count}"),
         Self::InvalidParent { comp_id, parent_id } =>
             write!(f, "component {comp_id} references missing parent {parent_id}"),
+        Self::InvalidClipSource { comp_id, source_id } =>
+            write!(f, "clipping component {comp_id} references invalid source {source_id}"),
         Self::ParentCycle(comp_id) => write!(f, "component parent cycle at {comp_id}"),
     } }
 }
@@ -120,12 +124,17 @@ impl ComponentGeom {
 
 #[derive(Debug)] struct ComponentPaint { value: Paint, visible: bool }
 
+#[derive(Debug)] struct ComponentClip {
+    source: u32, rule: FillRule, visible: bool, shapes: Vec<u32>,
+}
+
 #[derive(Debug, Default)] enum ComponentData {
     #[default] None,
     Geometry(ComponentGeom),
     Vertex(VertexParams),
     Gradient(GradientState),
     Paint(ComponentPaint),
+    Clip(ComponentClip),
 }
 
 #[derive(Debug)] struct GradientState {
@@ -219,6 +228,12 @@ impl Component {
     fn paint_mut(&mut self) -> Option<&mut ComponentPaint> {
         if let ComponentData::Paint(value) = &mut self.data { Some(value) } else { None }
     }
+    fn clip(&self) -> Option<&ComponentClip> {
+        if let ComponentData::Clip(value) = &self.data { Some(value) } else { None }
+    }
+    fn clip_mut(&mut self) -> Option<&mut ComponentClip> {
+        if let ComponentData::Clip(value) = &mut self.data { Some(value) } else { None }
+    }
 }
 
 #[derive(Debug)] struct DrawGroup {
@@ -226,6 +241,7 @@ impl Component {
     opacity_component: u32,
     components: Vec<u32>,
     paints: Vec<u32>,
+    clips: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Copy)] pub(super) enum ColorTarget {
@@ -291,10 +307,10 @@ impl TransformValues {
 /// Retained Rive scene state.
 ///
 /// The first implementation resolves component transforms and emits static parametric and
-/// points-path geometry with solid or gradient paint. Animation, constraints, clipping,
+/// points-path geometry with solid or gradient paint. Animation, constraints,
 /// text and state machines can update this retained state without changing the display-list API.
 ///
-/// TODO: Add constraints, clipping, text, state machines, skins/deformers, and nested artboards.
+/// TODO: Add constraints, text, state machines, skins/deformers, and nested artboards.
 #[derive(Debug)] pub struct Runtime {
     file: RiveFile, artboard_obj: u32, elapsed: f32,
     components: Vec<Component>,
@@ -327,7 +343,14 @@ impl Runtime {
             if  obj_idx == u32::MAX { return Err(RuntimeError::TooManyObjects) }
 
             let parent_id = uint(object, property_ids::COMPONENT_PARENTID)?;
-            let data = if let Some(value) = GeomParams::from_object(object)? {
+            let data = if object.type_id.0 == object_ids::CLIPPING_SHAPE {
+                ComponentData::Clip(ComponentClip {
+                    source: uint(object, property_ids::SOURCEID)?,
+                    rule: fill_rule(uint(object, property_ids::CLIPPINGSHAPE_FILLRULE)?),
+                    visible: boolean(object, property_ids::CLIPPINGSHAPE_ISVISIBLE)?,
+                    shapes: Vec::new(),
+                })
+            } else if let Some(value) = GeomParams::from_object(object)? {
                 ComponentData::Geometry(ComponentGeom::parametric(value))
             } else if let Some(value) = VertexParams::from_object(object)? {
                 ComponentData::Vertex(value)
@@ -355,6 +378,22 @@ impl Runtime {
             };
             components[index].parent = Some(parent);
         }
+        for index in 0..components.len() {
+            let Some(source_id) = components[index].clip().map(|clip| clip.source) else {
+                continue
+            };
+            let source_obj = context_start.checked_add(source_id as usize)
+                .unwrap_or(file.ocoll.len());
+            let Some(source) = obj_comps.get(source_obj).copied().flatten() else {
+                return Err(RuntimeError::InvalidClipSource {
+                    comp_id: components[index].obj_idx, source_id })
+            };
+            let source_type = file.ocoll[components[source as usize].obj_idx as usize].type_id.0;
+            if !core_is_transform_component(source_type) {
+                return Err(RuntimeError::InvalidClipSource {
+                    comp_id: components[index].obj_idx, source_id })
+            }   components[index].clip_mut().unwrap().source = source;
+        }
 
         let animations = build_animations(&file, context_start, context_end, &obj_comps)?;
         let mut runtime = Self { file, artboard_obj: context_start as u32, components,
@@ -372,6 +411,7 @@ impl Runtime {
                 component.gradient().is_some().then_some(index as u32)).collect();
         runtime.animations = runtime.bind_animations(animations, &targets);
         runtime.build_draw_groups();
+        runtime.attach_clips();
         runtime.apply_draw_rules(&obj_comps)?;
         Ok(runtime)
     }
