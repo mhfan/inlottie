@@ -7,19 +7,25 @@
 
 use crate::core::helpers::Vec2D;
 use rive_rs::{path as rpath, Scene, Instantiate, File, Artboard, Handle,
-    renderer::{self, PaintStyle, BlendMode, BufferType, BufferFlags}};
-use femtovg::{renderer::SurfacelessRenderer as Renderer, FillRule, CompositeOperation as CompOp,
+    renderer::{self, PaintStyle, BlendMode, BufferType, BufferFlags}
+};
+use femtovg::{renderer::SurfacelessRenderer as Renderer, FillRule,
     Transform2D as TM2D, Path as VGPath, Paint as VGPaint};
 
-pub struct RiveNVG<T: Renderer + 'static>(&'static mut femtovg::Canvas<T>);
+pub struct RiveNVG<T: Renderer + 'static> {
+    canvas: &'static mut femtovg::Canvas<T>,
+    opacity: Vec<f32>,
+}
 
 impl<T: Renderer> RiveNVG<T> {  /// # Safety
     /// The returned adapter must not outlive `canvas`, and no other code may access the
     /// canvas while the adapter is in use. `rive-rs::Renderer` currently requires `'static`,
     /// so this invariant cannot be expressed in the type.
     pub unsafe fn new(canvas: &mut femtovg::Canvas<T>) -> Self {
-        #[allow(clippy::missing_transmute_annotations)]
-        Self(unsafe { std::mem::transmute(canvas) }) // force pretend to be 'static
+        #[allow(clippy::missing_transmute_annotations)] Self {
+            canvas: unsafe { std::mem::transmute(canvas) }, // force pretend to be 'static
+            opacity: vec![1.],
+        }
     }
 
     pub fn new_scene(file: &[u8]) -> Option<Box<dyn Scene<Self>>> {
@@ -38,14 +44,24 @@ impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
     type Buffer = Buffer;
     type Image  = Image;
 
-    fn state_push(&mut self) { self.0.save(); }
-    fn state_pop (&mut self) { self.0.restore(); }
+    fn state_push(&mut self) { self.canvas.save();
+        self.opacity.push(*self.opacity.last().unwrap_or(&1.));
+    }
+    fn state_pop (&mut self) { self.canvas.restore();
+        if 1 < self.opacity.len() { self.opacity.pop(); }
+    }
     fn set_clip  (&mut self, _path: &Self::Path) { }  // XXX: not capable
 
     fn transform(&mut self, trfm: &[f32; 6]) {
         //let trfm = unsafe { &*(trfm.as_ptr() as *const TM2D) };
-        self.0.set_transform(&TM2D::new(
-            trfm[0], trfm[1], trfm[2], trfm[3], trfm[4], trfm[5]));
+        self.canvas.set_transform(
+            &TM2D::new(trfm[0], trfm[1], trfm[2], trfm[3], trfm[4], trfm[5]));
+    }
+
+    fn modulate_opacity(&mut self, opacity: f32) {
+        let value = (self.opacity.last().copied().unwrap_or(1.) * opacity).max(0.);
+        *self.opacity.last_mut().unwrap() = value;
+        self.canvas.set_global_alpha(value);
     }
 
     fn draw_path(&mut self, path: &Self::Path, paint: &Self::Paint) {
@@ -54,37 +70,32 @@ impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
         //if paint.bm != BlendMode::SrcOver { }     // XXX: not capable
 
         match paint.style {
-            PaintStyle::Fill   => self.0.  fill_path(&path.0,
-                                    inner.as_ref(). unwrap_or(&paint.inner)),
-            PaintStyle::Stroke => self.0.stroke_path(&path.0, &paint.inner),
+            PaintStyle::Fill   => self.canvas.fill_path(&path.0,
+                                          inner.as_ref().unwrap_or(&paint.inner)),
+            PaintStyle::Stroke => self.canvas.stroke_path(&path.0, &paint.inner),
         }
     }
 
     fn draw_image(&mut self, img: &Self::Image, _bm: BlendMode, opacity: f32) {
         //if bm != BlendMode::SrcOver { }   // XXX: not capable
-        let canvas = &mut self.0;
+        let canvas = &mut self.canvas;
 
-        //let data = unsafe { from_raw_parts(img.0, img.1 as _) };
-        let imgid = canvas.load_image_mem(&img.0, femtovg::ImageFlags::FLIP_Y).unwrap();
-        let (w, h) = canvas.image_size(imgid).unwrap();
-        let (w, h) = (w as _, h as _);  // XXX: need to test and check
+        let Ok(imgid) = canvas.load_image_mem(&img.0,
+            femtovg::ImageFlags::FLIP_Y) else { return };
+        let Ok((w, h)) = canvas.image_size(imgid) else {
+            canvas.delete_image(imgid); return
+        };  let (w, h) = (w as _, h as _);
 
         let paint = VGPaint::image(imgid, 0., 0., w, h, 0., opacity);
         let mut path = VGPath::new();    path.rect(w / -2., h / -2., w, h);
-        canvas.fill_path(&path, &paint);    canvas.flush();     canvas.delete_image(imgid);
+        canvas.fill_path(&path, &paint); canvas.flush();
+        canvas.delete_image(imgid);
     }
 
     fn draw_image_mesh(&mut self, img: &Self::Image, vertices: &Self::Buffer,
         uvs: &Self::Buffer, indices: &Self::Buffer, _bm: BlendMode, opacity: f32) {
-        //debug_assert!(vertices.0.len() % 8 == 0 && uvs.0.len() % 8 == 0 &&
-        //              vertices.0.len() == uvs.0.len() && indices.0.len() % 6 == 0);
-
-        /* let vtx = unsafe { from_raw_parts(
-            vertices.0.as_ptr() as *const (f32, f32), vertices.0.len() / 8) };
-        let uvs = unsafe { from_raw_parts(
-            uvs.0.as_ptr() as *const (f32, f32), uvs.0.len() / 8) };
-        let indices = unsafe { from_raw_parts(
-            indices.0.as_ptr() as *const u16, indices.0.len() / 2) }; */
+        if vertices.0.len() % 8 != 0 || vertices.0.len() != uvs.0.len() ||
+            indices.0.len() % 6 != 0 { return }
         let decode_points = |data: &[u8]| data.chunks_exact(8).map(|chunk| (
             f32::from_ne_bytes(chunk[0..4].try_into().unwrap()),
             f32::from_ne_bytes(chunk[4..8].try_into().unwrap()),
@@ -95,9 +106,12 @@ impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
         if  indices.iter().any(|&idx| vtx.len() <= idx as usize ||
                                       uvs.len() <= idx as usize) { return; }
 
-        let canvas = &mut self.0;
-        let imgid = canvas.load_image_mem(&img.0, femtovg::ImageFlags::FLIP_Y).unwrap();
-        let (w, h) = canvas.image_size(imgid).unwrap();
+        let canvas = &mut self.canvas;
+        let Ok(imgid) = canvas.load_image_mem(&img.0,
+            femtovg::ImageFlags::FLIP_Y) else { return };
+        let Ok((w, h)) = canvas.image_size(imgid) else {
+            canvas.delete_image(imgid); return
+        };
         let (w, h) = (w as _, h as _);
 
         let paint = VGPaint::image(imgid, 0., 0., w, h, 0., opacity);
@@ -105,9 +119,7 @@ impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
         //if bm != BlendMode::SrcOver { }   // XXX: not capable
 
         for idx in indices.chunks_exact(3) {
-            //let mut ltrb = (0f32, 0f32, 0f32, 0f32);
             let mut path = VGPath::new();
-            //let mut center = (0f32, 0f32);
 
             let pt = vtx[idx[2] as usize];    path.move_to(pt.0, pt.1); // start from last point
             let mesh = idx.iter().map(|idx| {
@@ -115,20 +127,16 @@ impl<T: Renderer + 'static> renderer::Renderer for RiveNVG<T> { // aka Femtovg
                 let (pt, tp) = (vtx[idx], uvs[idx]);
                 let tp = (tp.0 * w, tp.1 * h);
 
-                //ltrb.0 = ltrb.0.min(tp.0); ltrb.1 = ltrb.1.min(tp.1);
-                //ltrb.2 = ltrb.2.max(tp.0); ltrb.3 = ltrb.3.max(tp.1);
-                //center.0 += pt.0; center.1 += pt.1;
                 path.line_to(pt.0, pt.1);
 
                 (Vec2D { x: pt.0, y: pt.1 }, Vec2D { x: tp.0, y: tp.1 })
-            }).collect::<Vec<_>>(); //path.close();
+            }).collect::<Vec<_>>();
 
-            //center.0 /= 3.; center.1 /= 3.;
-            // canvas.translate(center)/scale(1.03)/translate(-center)?
-            canvas.set_transform(&simplex_affine_mapping(&mesh));  // XXX:
-            canvas.fill_path(&path, &paint);    //canvas.path_bbox(&path);
-            canvas.reset_transform();   canvas.set_transform(&last_trfm);   canvas.flush();
-        }   canvas.delete_image(imgid); //canvas.restore();
+            let Some(mapping) = simplex_affine_mapping(&mesh) else { continue };
+            canvas.set_transform(&mapping);     canvas.fill_path(&path, &paint);
+            canvas.reset_transform();           canvas.set_transform(&last_trfm);
+        }
+        canvas.flush();     canvas.delete_image(imgid);
     }
 }
 
@@ -208,24 +216,12 @@ fn to_femtovg_color(color: renderer::Color) -> femtovg::Color {
     femtovg::Color::rgba(color.r, color.g, color.b, color.a)
 }
 
-fn _to_femtovg_composite_op(bm: BlendMode) -> CompOp {
-    match bm {  // TODO:
-        BlendMode::SrcOver => CompOp::SourceOver,
-        BlendMode::Screen  | BlendMode::Darken  | BlendMode::Overlay | BlendMode::Lighten |
-        BlendMode::Difference | BlendMode::Saturation |
-        BlendMode::Luminosity | BlendMode::ColorDodge |
-        BlendMode::ColorBurn | BlendMode::HardLight |
-        BlendMode::SoftLight | BlendMode::Exclusion |
-        BlendMode::Multiply  | BlendMode::Color |
-        BlendMode::Hue => unimplemented!(),
-    }
-}
-
 impl renderer::Paint for Paint {    type Gradient = Gradient;
     fn set_style(&mut self, style: PaintStyle) { self.style = style; }
     fn set_thickness(&mut self, thick: f32) { self.inner.set_line_width(thick); }
 
     fn set_join(&mut self, join: renderer::StrokeJoin) {  use femtovg::LineJoin;
+        self.inner.set_miter_limit(4.0);
         self.inner.set_line_join(match join {
             renderer::StrokeJoin::Miter => LineJoin::Miter,
             renderer::StrokeJoin::Round => LineJoin::Round,
@@ -252,12 +248,13 @@ impl renderer::Paint for Paint {    type Gradient = Gradient;
             GradientBase::Linear { sx, sy, ex, ey } =>
                 VGPaint::linear_gradient_stops(sx, sy, ex, ey, stops),
             GradientBase::Radial { cx, cy, radius } =>
-                VGPaint::radial_gradient_stops(cx, cy, 1., radius, stops),
+                VGPaint::radial_gradient_stops(cx, cy, 0., radius, stops),
         };
 
         // XXX: in case set_gradient was not called at first?
         paint.set_line_width(self.inner.line_width());
         paint.set_line_join (self.inner.line_join());
+        paint.set_miter_limit(self.inner.miter_limit());
         //paint.set_fill_rule (self.inner.fill_rule());     // never called
         paint.set_line_cap  (self.inner.line_cap_start());  self.inner = paint;
     }
@@ -300,24 +297,25 @@ impl renderer::Buffer for Buffer {
 }
 
 impl renderer::Image for Image {
-    fn decode(data: &[u8]) -> Option<Self> { Some(Self(data.to_vec()))
-            //Some(Self(data.as_ptr(), data.len() as _)
-            //image::io::Reader::new(std::io::Cursor::new(data))
-            //.with_guessed_format().ok()?.decode().ok()?.into_rgba8()
+    fn decode(data: &[u8]) -> Option<Self> {
+        image::load_from_memory(data).ok()?;
+        Some(Self(data.to_vec()))
     }
 }
 
-/// Finds the affine transform that maps triangle `from` to triangle `to`. The algorithm
-/// is based on the [Simplex Affine Mapping] method which has a [Swift implementation].
+/// Finds the affine transform that maps triangle `from` to triangle `to`, or `None` for
+/// a degenerate source triangle. The algorithm is based on the [Simplex Affine Mapping]
+/// method which has a [Swift implementation].
 ///
 /// [Simplex Affine Mapping]: https://www.researchgate.net/publication/332410209_Beginner%27s_guide_to_mapping_simplexes_affinely
 /// [Swift implementation]: https://rethunk.medium.com/finding-an-affine-transform-using-three-2d-point-correspondences-using-simplex-affine-mapping-255aeb4e8055
-fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
-    //debug_assert!(mesh.len() == 3);
+fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> Option<TM2D> {
     let ((a, d), (b, e), (c, f)) = (mesh[0], mesh[1], mesh[2]);
 
-    let det_recip = (a.x * b.y + b.x * c.y + c.x * a.y -
-                     a.x * c.y - b.x * a.y - c.x * b.y).recip();
+    let det = a.x * b.y + b.x * c.y + c.x * a.y -
+              a.x * c.y - b.x * a.y - c.x * b.y;
+    if !det.is_finite() || det.abs() <= f32::EPSILON { return None }
+    let det_recip = det.recip();
 
     let p = (d * (b.y - c.y) - e * (a.y - c.y) + f * (a.y - b.y)) * det_recip;
     let q = (e * (a.x - c.x) - d * (b.x - c.x) - f * (a.x - b.x)) * det_recip;
@@ -325,5 +323,5 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
     let t = (d * (b.x * c.y - b.y * c.x) - e * (a.x * c.y - a.y * c.x) +
                     f * (a.x * b.y - a.y * b.x)) * det_recip;
 
-    TM2D::new(p.x, p.y, q.x, q.y, t.x, t.y)
+    Some(TM2D::new(p.x, p.y, q.x, q.y, t.x, t.y))
 }
