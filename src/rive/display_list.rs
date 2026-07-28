@@ -105,7 +105,7 @@ pub enum FillRule { NonZero, EvenOdd, Clockwise }
 
 #[derive(Debug, Clone, PartialEq)] pub struct Clip {
     /// All contours form one clip path under this fill rule.
-    pub rule: FillRule, pub shapes: Arc<[Shape]>,
+    pub obj_idx: u32, pub rule: FillRule, pub shapes: Arc<[Shape]>,
 }
 
 #[derive(Debug, Clone, PartialEq)] pub struct DrawItem {

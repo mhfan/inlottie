@@ -2,7 +2,6 @@
 //! Rive vertex decoding and backend-neutral path construction.
 
 use std::f32;
-
 use super::{decode::{self, Object, object_ids, property_ids},
     display_list::{CornerRadii, Geometry, Path, PathCommand, Point, Rect},
     runtime::{Result, RuntimeError, boolean, float, uint},
@@ -385,8 +384,7 @@ fn parametric(type_id: u32, rect: Rect, points: u16,
     for index in 0..vertex_count {
         let angle = -f32::consts::FRAC_PI_2 +
                      f32::consts::TAU * index as f32 / vertex_count as f32;
-        let scale = if type_id == object_ids::STAR && index % 2 == 1 {
-            inner_radius
+        let scale = if type_id == object_ids::STAR && index % 2 == 1 { inner_radius
         } else { 1.0 };
         vertices.push(straight_vertex(
             center.x + angle.cos() * half_width  * scale,
@@ -402,12 +400,11 @@ pub(super) fn rectangle_radii(object: &Object) -> decode::Result<CornerRadii> {
     let top_left = float(object, property_ids::RECTANGLE_CORNERRADIUSTL)?;
     let linked = boolean(object, property_ids::RECTANGLE_LINKCORNERRADIUS)?;
     let radius = |prop_id| float(object, prop_id);
-    Ok(if linked { CornerRadii { tl: top_left, tr: top_left,
-            br: top_left, bl: top_left,
-    } } else { CornerRadii { tl: top_left,
-               tr: radius(property_ids::RECTANGLE_CORNERRADIUSTR)?,
-            br: radius(property_ids::RECTANGLE_CORNERRADIUSBR)?,
-            bl:  radius(property_ids::RECTANGLE_CORNERRADIUSBL)?,
+    Ok(if linked {  CornerRadii { tl: top_left, tr: top_left, br: top_left, bl: top_left }
+    } else {        CornerRadii { tl: top_left,
+        tr: radius(property_ids::RECTANGLE_CORNERRADIUSTR)?,
+        br: radius(property_ids::RECTANGLE_CORNERRADIUSBR)?,
+        bl: radius(property_ids::RECTANGLE_CORNERRADIUSBL)?,
     } })
 }
 

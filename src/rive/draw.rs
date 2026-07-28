@@ -17,7 +17,7 @@ impl Runtime {
         list.reserve(primitive_count);
         let clip_paths: Vec<_> = self.components.iter().map(|component| {
             let clip = component.clip()?;
-            clip.visible.then(|| Clip { rule: clip.rule,
+            clip.visible.then(|| Clip { obj_idx: component.obj_idx, rule: clip.rule,
                 shapes: self.snapshot_shapes(&clip.shapes) })
         }).collect();
 
