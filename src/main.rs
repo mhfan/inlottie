@@ -143,7 +143,7 @@ struct WinitApp {
 }
 
 #[cfg(feature =  "lottie")] use inlottie::core::{helpers::RGBA, render::LottieRuntime};
-#[cfg(feature = "rive-rs")] use inlottie::rive_nvg::RiveNVG;
+#[cfg(feature = "rive-rs")] use inlottie::rive::rscpp_nvg::RiveNVG;
 
 enum AnimGraph {
     #[cfg(feature =  "lottie")] Lottie(Box<LottieRuntime>),
@@ -511,7 +511,7 @@ impl WinitApp {
 
 pub struct PerfGraph {
     que: VecDeque<f32>, max: f32, sum: f32/*, time: Instant*/,
-    #[cfg(feature = "b2d")] font: Option<BLFont>,
+    #[cfg(feature = "b2d")] font: Option<BLFont<'static>>,
 }
 
 impl PerfGraph { #[allow(clippy::new_without_default)]
@@ -557,7 +557,7 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
 
     #[cfg(feature = "b2d")] pub fn render_b2d(&self, blctx: &mut BLContext, pos: (f32, f32)) {
         let (rw, rh, mut path) = (100., 20., BLPath::new());
-        path.add_rect(&(0., 0., rw, rh).into());
+        path.add_rect(&(0., 0., rw, rh).into(), None);
 
         let last_trfm = blctx.user_transform();
         blctx.translate(pos.into());

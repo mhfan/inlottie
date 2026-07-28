@@ -317,7 +317,7 @@ fn simplex_affine_mapping(mesh: &[(Vec2D, Vec2D)]) -> TM2D {
     let ((a, d), (b, e), (c, f)) = (mesh[0], mesh[1], mesh[2]);
 
     let det_recip = (a.x * b.y + b.x * c.y + c.x * a.y -
-                          a.x * c.y - b.x * a.y - c.x * b.y).recip();
+                     a.x * c.y - b.x * a.y - c.x * b.y).recip();
 
     let p = (d * (b.y - c.y) - e * (a.y - c.y) + f * (a.y - b.y)) * det_recip;
     let q = (e * (a.x - c.x) - d * (b.x - c.x) - f * (a.x - b.x)) * det_recip;

@@ -6,6 +6,8 @@ pub mod display_list;
 #[cfg(feature = "b2d")]
 pub mod render_b2d;
 pub mod render_nvg;
+#[cfg(feature = "rive-rs")]
+pub mod rscpp_nvg;
 mod path;
 pub mod runtime;
 
