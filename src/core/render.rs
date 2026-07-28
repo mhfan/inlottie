@@ -5,13 +5,13 @@
  * Copyright (c) 2024 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use core::cell::RefCell;
+use core::{mem, cell::RefCell};
 use std::{collections::HashMap, rc::Rc};
-use super::{helpers::{RGBA, IntBool}, style::{StyleConv, MatrixConv, TM2DwO, FSOpts},
+use super::{helpers::{Vec2D, RGBA, IntBool}, style::{StyleConv, MatrixConv, TM2DwO, FSOpts},
     path_ops::MeasuredPath,
     schema::{Animation, AssetItem, LayerItem, ShapeItem, VisualLayer,
         TrimPath, TrimMultiple, MatteMode, FillRule},
-    pathm::{PathBuilder, PathFactory}
+    pathm::{BezPath, PathBuilder, PathFactory, trim_kurbo, round_kurbo, offset_kurbo}
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)] enum Parent { Root, Layer(u32), Invalid }
@@ -20,6 +20,7 @@ enum WorldState<MC: MatrixConv> { Pending, Invalid, Ready(TM2DwO<MC>) }
 struct CompositionState {
      parents: Vec<Parent>, stack: Vec<usize>,
     precomps: Vec<Option<PrecompState>>,
+    path_mod: Vec<bool>,
 }
 
 struct PrecompState { asset: usize, composition: Box<CompositionState> }
@@ -58,12 +59,16 @@ impl CompositionState {
         }
         let mut precomps = Vec::with_capacity(layers.len());
         precomps.resize_with(layers.len(), || None);
+        let path_mod = layers.iter().map(|layer| match layer {
+            LayerItem::Shape(layer) => has_path_modifier(&layer.shapes),
+            _ => false,
+        }).collect();
 
         let parents = parents.into_iter().zip(states).map(|(parent, state)| {
             if state != 2 { Parent::Invalid }
             else { parent.map_or(Parent::Root, Parent::Layer) }
         }).collect();
-        Self { parents, stack, precomps }
+        Self { parents, stack, precomps, path_mod }
     }
 
     fn with_precomps<'a>(layers: &[LayerItem], animation: &'a Animation,
@@ -209,7 +214,8 @@ impl LottieRuntime {
             LayerItem::Shape(shpl) =>
             if let WorldState::Ready(ltm) = &worlds[index] {
                 let Some(local) = shpl.vl.base.local_frame(fnth) else { continue };
-                let (draws, ctm) = convert_shapes(&shpl.shapes, local, shpl.vl.ao);
+                let (draws, ctm) = convert_shapes_known(&shpl.shapes, local,
+                    shpl.vl.ao, runtime.path_mod[index]);
                 let ltm = ltm.clone().compose(ptm);
 
                 rctx.prepare_matte(&shpl.vl, &mut matte);
@@ -319,12 +325,99 @@ pub struct TrackMatte<T> {
     pub mode: MatteMode, pub mlid: Option<u32>, pub imgid: T, pub mskid: Option<T>
 }
 
+enum PendingPath<P: PathBuilder> { Native(P), Kurbo(BezPath) }
+
+impl<P: PathBuilder> PendingPath<P> {
+    // Shape commands are complete before a modifier can switch the path to Kurbo.
+    fn native(&mut self) -> &mut P {
+        let Self::Native(path) = self else { unreachable!() }; path
+    }
+
+    fn kurbo_mut(&mut self) -> &mut BezPath {
+        if let Self::Native(path) = self {
+            *self = Self::Kurbo(mem::replace(path, P::new(0)).into_kurbo());
+        }
+        let Self::Kurbo(path) = self else { unreachable!() }; path
+    }
+
+    fn into_native(self) -> P { match self {
+        Self::Kurbo(path) => P::from_kurbo(path),
+        Self::Native(path) => path,
+    }}
+}
+
+impl<P: PathBuilder> PathBuilder for PendingPath<P> {
+    fn new(capacity: u32) -> Self { Self::Native(P::new(capacity)) }
+    fn close(&mut self) { self.native().close() }
+    fn current_pos(&self) -> Option<Vec2D> {
+        let Self::Native(path) = self else { unreachable!() }; path.current_pos()
+    }
+    fn move_to(&mut self, end: Vec2D) { self.native().move_to(end) }
+    fn line_to(&mut self, end: Vec2D) { self.native().line_to(end) }
+    fn quad_to(&mut self, cp: Vec2D, end: Vec2D) {
+        self.native().quad_to(cp, end)
+    }
+    fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
+        self.native().cubic_to(ocp, icp, end)
+    }
+    fn from_kurbo(path: BezPath) -> Self { Self::Kurbo(path) }
+    fn to_kurbo(&self) -> BezPath { match self {
+        Self::Native(path) => path.to_kurbo(),
+        Self::Kurbo (path) => path.clone(),
+    }}
+    fn into_kurbo(self) -> BezPath { match self {
+        Self::Native(path) => path.into_kurbo(),
+        Self::Kurbo (path) => path,
+    }}
+    fn trim_path(&mut self, start: f32, trim: f32) {
+        if trim <= 0. { *self = Self::new(0); return }
+        if 1. <= trim { return }
+        trim_kurbo(self.kurbo_mut(), start, trim)
+    }
+    fn round_corners(&mut self, radius: f32) {
+        if radius <= 0. { return }
+        round_kurbo(self.kurbo_mut(), radius)
+    }
+    fn offset_path(&mut self, amount: f32,
+        join: super::schema::LineJoin, miter_limit: f32) {
+        if amount != 0. { offset_kurbo(self.kurbo_mut(), amount, join, miter_limit) }
+    }
+}
+
 /// calculate transform matrix, convert shapes to paths, modify/change the paths,
 /// and convert style(fill/stroke/gradient) to draw items, recursively
 pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone>(
     shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
     (Vec<DrawItem<VGPath, VGPaint, TM2D>>, TM2DwO<TM2D>) {
-    let mut draws: Vec<DrawItem<VGPath, VGPaint, TM2D>> = Vec::with_capacity(shapes.len());
+    convert_shapes_known(shapes, fnth, ao, has_path_modifier(shapes))
+}
+
+fn convert_shapes_known<VGPath: PathBuilder, VGPaint: StyleConv,
+    TM2D: MatrixConv + Clone>(shapes: &[ShapeItem], fnth: f32, ao: IntBool,
+    has_modifier: bool) -> (Vec<DrawItem<VGPath, VGPaint, TM2D>>, TM2DwO<TM2D>) {
+    if has_modifier {
+        let (draws, ctm) =
+            convert_shapes_inner::<PendingPath<VGPath>, VGPaint, TM2D>(shapes, fnth, ao);
+        (materialize_draws(draws), ctm)
+    } else {
+        convert_shapes_inner::<VGPath, VGPaint, TM2D>(shapes, fnth, ao)
+    }
+}
+
+fn has_path_modifier(shapes: &[ShapeItem]) -> bool {
+    shapes.iter().any(|shape| match shape {
+        ShapeItem::Trim(modifier) => !modifier.elem.hd,
+        ShapeItem::RoundedCorners(modifier) => !modifier.elem.hd,
+        ShapeItem::OffsetPath(modifier) => !modifier.elem.hd,
+        ShapeItem::Group(group) => !group.elem.hd && has_path_modifier(&group.shapes),
+        _ => false,
+    })
+}
+
+fn convert_shapes_inner<Path: PathBuilder, VGPaint: StyleConv,
+    TM2D: MatrixConv + Clone>(shapes: &[ShapeItem], fnth: f32, ao: IntBool) ->
+    (Vec<DrawItem<Path, VGPaint, TM2D>>, TM2DwO<TM2D>) {
+    let mut draws = Vec::with_capacity(shapes.len());
     let mut ctm = Default::default();
 
     for shape in shapes.iter() { match shape {
@@ -349,12 +442,13 @@ pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv 
         ShapeItem::NoStyle(_) => eprintln!("Nothing to do here?"),
 
         ShapeItem::Group(group) if !group.elem.hd => {
-            let (grp, ctm) = convert_shapes(&group.shapes, fnth, ao);
+            let (grp, ctm) =
+                convert_shapes_inner::<Path, VGPaint, TM2D>(&group.shapes, fnth, ao);
             draws.push(DrawItem::Group(grp, vec![ctm]));
         }
 
         ShapeItem::Repeater(mdfr) if !mdfr.elem.hd => {
-            let grp = core::mem::take(&mut draws);
+            let grp = mem::take(&mut draws);
             draws.push(DrawItem::Group(grp, mdfr.get_matrix(fnth)));
         }
 
@@ -378,6 +472,19 @@ pub fn convert_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv 
 
         _ => (),
     } }     (draws, ctm)
+}
+
+fn materialize_draws<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv>(
+    draws: Vec<DrawItem<PendingPath<VGPath>, VGPaint, TM2D>>) ->
+    Vec<DrawItem<VGPath, VGPaint, TM2D>> {
+    draws.into_iter().map(|draw| match draw {
+        DrawItem::Shape(path) => DrawItem::Shape(path.into_native()),
+        DrawItem::Style(style) => DrawItem::Style(style),
+        DrawItem::Group(group, transforms) =>
+            DrawItem::Group(materialize_draws(group), transforms),
+        DrawItem::Copies(copies) => DrawItem::Copies(copies.into_iter()
+            .map(|(group, transform)| (materialize_draws(group), transform)).collect()),
+    }).collect()
 }
 
 //  https://lottie.github.io/lottie-spec/latest/specs/shapes/#graphic-element
@@ -425,13 +532,12 @@ fn expand_repeats<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Cl
             expand_repeats(group);
             if transforms.len() == 1 { continue }
 
-            let mut source = core::mem::take(group);
-            let transforms = core::mem::take(transforms);
+            let mut source = mem::take(group);
+            let transforms = mem::take(transforms);
             let last = transforms.len().saturating_sub(1);
             let mut paths = HashMap::new();
             let copies = transforms.into_iter().enumerate().map(|(index, transform)| {
-                let group = if index == last {
-                    core::mem::take(&mut source)
+                let group = if index == last { mem::take(&mut source)
                 } else { duplicate_draws(&source, &mut paths) };
                 (group, transform)
             }).collect();
@@ -460,7 +566,7 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone
         let mut paths = Vec::new();
 
         for_each_path_mut(draws, &mut |path| {
-            let path = MeasuredPath::new(path.to_kurbo());
+            let path = MeasuredPath::new(mem::replace(path, VGPath::new(0)).into_kurbo());
             total += path.length;
             paths.push(path);
         });
@@ -471,10 +577,9 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone
 
         let end = start + trim;
         let ranges = if end <= 1. {
-            [(f64::from(start) * total, f64::from(end) * total), (0., 0.)]
+            [(start as f64 * total, end as f64 * total), (0., 0.)]
         } else {
-            [(f64::from(start) * total, total),
-             (0., f64::from(end - 1.) * total)]
+            [(start as f64 * total, total), (0., (end - 1.) as f64 * total)]
         };
         let mut path_start = 0.;
         for_each_path_mut(draws, &mut |path| {
@@ -504,7 +609,6 @@ fn normalize_trim(start: f32, end: f32, offset: f32) -> (f32, f32) {
 }
 
 #[cfg(test)] mod tests { use super::*;
-    use crate::core::{helpers::Vec2D, pathm::BezPath};
     use kurbo::ParamCurveArclen;
 
     fn layer_world_matrices<MC: MatrixConv>(
@@ -790,6 +894,18 @@ fn normalize_trim(start: f32, end: f32, offset: f32) -> (f32, f32) {
         assert_eq!(normalize_trim(0., 1.5,  0.25), (0.25, 1.0));
         assert_eq!(normalize_trim(-0.5, 0.5, 0.), (0., 0.5));
         assert_eq!(normalize_trim(1.5, 2., 0.), (0., 0.));
+    }
+
+    #[test] fn modifiers_keep_the_lazy_path_in_kurbo_form() {
+        let mut path = PendingPath::<BezPath>::new(5);
+        path.rect(0., 0., 10., 10.);
+        assert!(matches!(path, PendingPath::Native(_)));
+
+        path.round_corners(2.);
+        assert!(matches!(path, PendingPath::Kurbo(_)));
+        path.offset_path(1., super::super::schema::LineJoin::Round, 4.);
+        assert!(matches!(path, PendingPath::Kurbo(_)));
+        assert!(!path.into_native().is_empty());
     }
 
     #[test] fn sequential_trim_keeps_both_wrapped_parts_of_one_shape() {

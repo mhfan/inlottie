@@ -5,7 +5,7 @@
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use core::f32::consts::PI;
+use core::{mem, f32::consts::PI};
 use super::{helpers::{Vec2D, ACCURACY_TOLERANCE},
     path_ops::{MeasuredPath, flatten_contour, for_each_contour, offset_contour, round_contour},
     schema::{Rectangle, Polystar, Ellipse, FreePath, ShapeProperty, StarType, LineJoin}
@@ -23,32 +23,34 @@ impl PathBuilder for BezPath {
         self.current_position().map(|p| Vec2D::from((p.x as _, p.y as _)))
     }
 
-    fn move_to(&mut self, end: Vec2D) { self.move_to(end) }
-    fn line_to(&mut self, end: Vec2D) { self.line_to(end) }
+    fn move_to (&mut self, end: Vec2D) { self.move_to(end) }
+    fn line_to (&mut self, end: Vec2D) { self.line_to(end) }
     fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
         self.curve_to(ocp, icp, end)
     }
     fn quad_to(&mut self, cp: Vec2D, end: Vec2D) { self.quad_to(cp, end) }
 
-    fn from_kurbo(path: BezPath) -> Self { path }
-    fn to_kurbo(&self) -> BezPath { self.clone() }    // XXX: how to avoid clone?
+    fn   to_kurbo(&self) -> BezPath { self.clone() }
+    fn from_kurbo(path: BezPath) ->   Self { path }
+    fn into_kurbo( self) -> BezPath { self }
 }
 
 pub trait PathBuilder {     //type Point; type Path;
     fn new(capacity: u32) -> Self;
     fn close(&mut self);
 
-    fn move_to(&mut self, end: Vec2D);
-    fn line_to(&mut self, end: Vec2D);
-    fn quad_to(&mut self,  cp: Vec2D, end: Vec2D);  // elevating curve order
+    fn move_to (&mut self, end: Vec2D);
+    fn line_to (&mut self, end: Vec2D);
+    fn quad_to (&mut self,  cp: Vec2D, end: Vec2D);  // elevating curve order
         //self.cubic_to(cp + (current_pos - cp) / 3, cp + (end - cp) / 3, end)
     fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D);
-    fn curve_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
+    /* fn curve_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
         self.cubic_to(ocp, icp, end)
-    }
+    } */
 
+    fn   to_kurbo(&self) -> BezPath;
+    fn into_kurbo( self) -> BezPath where Self: Sized { self.to_kurbo() }
     fn current_pos(&self) -> Option<Vec2D>;
-    fn to_kurbo(&self) -> BezPath;
 
     fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.move_to((x + w, y).into());
@@ -59,7 +61,7 @@ pub trait PathBuilder {     //type Point; type Path;
     fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
         kurbo::Arc::new(center, radii, start as _, sweep as _, 0.)  // in radians
             .to_cubic_beziers(ACCURACY_TOLERANCE, |ocp, icp, end|
-                self.curve_to(ocp.into(), icp.into(), end.into()))
+                self.cubic_to(ocp.into(), icp.into(), end.into()))
     }
 
     fn elliptic_arc_to(&mut self, radii: Vec2D,   // x_rot must be in radians
@@ -71,7 +73,7 @@ pub trait PathBuilder {     //type Point; type Path;
         };
         if let Some(arc) = kurbo::Arc::from_svg_arc(&svg_arc) {
             arc.to_cubic_beziers(ACCURACY_TOLERANCE, |ocp, icp, end|
-                 self.curve_to(ocp.into(), icp.into(), end.into()))
+                 self.cubic_to(ocp.into(), icp.into(), end.into()))
         } else { self.line_to(end) }
     }
 
@@ -85,8 +87,7 @@ pub trait PathBuilder {     //type Point; type Path;
         path.iter().for_each(|el| match el {
             MoveTo(pt) => pb.move_to(pt.into()),
             LineTo(pt) => pb.line_to(pt.into()),
-            CurveTo(ot, it, pt) =>
-                pb.cubic_to(ot.into(), it.into(), pt.into()),
+            CurveTo(ot, it, pt) => pb.cubic_to(ot.into(), it.into(), pt.into()),
             QuadTo(ct, pt) => pb.quad_to(ct.into(), pt.into()),
             ClosePath => pb.close(),
         }); pb
@@ -102,42 +103,56 @@ pub trait PathBuilder {     //type Point; type Path;
     fn trim_path(&mut self, start: f32, trim: f32) where Self: Sized {
         if trim <= 0. { *self = Self::new(0); return }
         if 1. <= trim { return }
-
-        let path = MeasuredPath::new(self.to_kurbo());
-        let start = f64::from(start.rem_euclid(1.));
-        let trim  = f64::from(trim);
-        let end = start + trim;
-        let trimmed = if end <= 1. {
-            path.trim_ranges(&[(start, end)])
-        } else {
-            path.trim_ranges(&[(start, 1.), (0., end - 1.)])
-        };  *self = Self::from_kurbo(trimmed);
+        modify_kurbo(self, |path| trim_kurbo(path, start, trim));
     }
 
     fn round_corners(&mut self, radius: f32) where Self: Sized {
-        let radius = f64::from(radius.max(0.));
-        if  radius == 0. { return }
-
-        let (source, mut output, mut points) =
-            (self.to_kurbo(), BezPath::new(), Vec::new());
-        for_each_contour(&source, |elements, closed|
-            round_contour(elements, closed, radius, &mut points, &mut output));
-        *self = Self::from_kurbo(output);
+        if radius <= 0. { return }
+        modify_kurbo(self, |path| round_kurbo(path, radius));
     }
 
-    fn offset_path(&mut self, amount: f32, join: LineJoin, miter_limit: f32)
-        where Self: Sized {
+    fn offset_path(&mut self,
+            amount: f32, join: LineJoin, miter_limit: f32) where Self: Sized {
         if  amount == 0. { return }
-        let (source, mut output, mut points) =
-            (self.to_kurbo(), BezPath::new(), Vec::new());
-        for_each_contour(&source, |elements, closed| {
-            points.clear();
-            flatten_contour(elements, &mut points);
-            offset_contour(&mut points, closed, amount.into(), join,
-                miter_limit.into(), &mut output);
-        });
-        *self = Self::from_kurbo(output);
+        modify_kurbo(self, |path| offset_kurbo(path, amount, join, miter_limit));
     }
+}
+
+fn modify_kurbo<P: PathBuilder>(target: &mut P, f: impl FnOnce(&mut BezPath)) {
+    let mut path = mem::replace(target, P::new(0)).into_kurbo();
+    f(&mut  path);  *target = P::from_kurbo(path);
+}
+
+pub(crate) fn trim_kurbo(path: &mut BezPath, start: f32, trim: f32) {
+    let measured = MeasuredPath::new(mem::take(path));
+    let start = start.rem_euclid(1.) as _;
+    let end   = start + trim as f64;
+    *path = if end <= 1. {
+        measured.trim_ranges(&[(start, end)])
+    } else {
+        measured.trim_ranges(&[(start, 1.), (0., end - 1.)])
+    };
+}
+
+pub(crate) fn round_kurbo(path: &mut BezPath, radius: f32) {
+    let (source, mut output, mut points) =
+        (mem::take(path), BezPath::new(), Vec::new());
+    for_each_contour(&source, |elements, closed|
+        round_contour(elements, closed, radius.into(), &mut points, &mut output));
+    *path = output;
+}
+
+pub(crate) fn offset_kurbo(path: &mut BezPath, amount: f32,
+    join: LineJoin, miter_limit: f32) {
+    let (source, mut output, mut points) =
+        (mem::take(path), BezPath::new(), Vec::new());
+    for_each_contour(&source, |elements, closed| {
+        points.clear();
+        flatten_contour(elements, &mut points);
+        offset_contour(&mut points, closed, amount.into(), join,
+            miter_limit.into(), &mut output);
+    });
+    *path = output;
 }
 
 pub trait PathFactory { fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB; }
@@ -156,6 +171,8 @@ impl PathFactory for Rectangle { #[allow(unreachable_code)]
 
         if radius < ACCURACY_TOLERANCE as _ {
             let mut path = PB::new(5);
+            // This can alternatively use kurbo's `Rect` or Blend2D's native rectangle
+            // operation; explicit commands keep the direction and generic `PathBuilder`.
             //path.rect(elt.x, elt.y, size.x, size.y); 	return path;
             path.move_to((erb.x, elt.y).into());    // from top-right going clockwise
             if self.base.is_ccw() {
@@ -165,6 +182,8 @@ impl PathFactory for Rectangle { #[allow(unreachable_code)]
             }   path.close();   	 return path;
         }   let mut path = PB::new(10);
 
+        // A kurbo `RoundedRect` or Blend2D's native rounded-rectangle operation can also
+        // generate this path; the explicit form preserves Lottie's requested direction.
         //path.rounded_rect(elt.x, elt.y, size.x, size.y, radius); 	return path;
         let (clt, crb) = (elt + radius, erb - radius);
             path.move_to((erb.x, clt.y).into());
@@ -291,6 +310,8 @@ impl PathFactory for Ellipse {
         let mut path = PB::new(6);
         let center = self. pos.get_value(fnth);
         let radii  = self.size.get_value(fnth) / 2.;
+        // This could use kurbo's `Ellipse` or Blend2D's native ellipse operation.
+        // Cubic commands keep the implementation generic and make direction explicit.
         //path.ellipse(center, radii);  return path;
 
         //  Approximate a circle with cubic Bézier curves
@@ -363,9 +384,8 @@ fn bezier_path<PB: PathBuilder>(curve: &super::schema::Bezier, reversed: bool) -
 }
 
 #[cfg(test)] mod tests { use super::*;
-    use kurbo::{ParamCurve, ParamCurveArclen};
+    use kurbo::{Shape, ParamCurve, ParamCurveArclen};
     use crate::core::schema::{AnimatedProperty, Bezier};
-    use kurbo::Shape;
 
     fn square() -> BezPath {
         let mut path = BezPath::new();
