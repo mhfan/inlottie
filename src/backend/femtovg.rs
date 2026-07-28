@@ -87,13 +87,14 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
     type ImageID = femtovg::ImageId;
     type VGStyle = femtovg::Paint;
     type VGPath  = femtovg::Path;
+    type State = ();
 
     fn get_size(&self) -> (u32, u32) { (self.width(), self.height()) }
     fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA) {
         self.clear_rect(x, y, w, h, color.into());
     }
     fn save_state(&mut self) { self.save() }
-    fn restore_state(&mut self) { self.restore() }
+    fn restore_state(&mut self, (): Self::State) { self.restore() }
     fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) {
         if let Some(opacity) = opacity { self.set_global_alpha(opacity) }
         self.set_transform(trfm);
@@ -226,7 +227,7 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
                 self.save_state();
                 self.apply_transform(&ltm.0, Some(ltm.1));
                 self.fill_path(&path, &mpaint);
-                self.restore_state();
+                self.restore_state(());
 
                 let cop = match mask.mode {
                     MaskMode::Add       => Some(CompOp::DestinationIn),

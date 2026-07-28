@@ -19,6 +19,7 @@ impl RenderContext for BLContext {
     type TM2D = BLMatrix2D;
     type VGStyle = BLStyle;
     type VGPath  = BLPath;
+    type State = (Self::TM2D, f64);
 
     fn get_size(&self) -> (u32, u32) {
         let sz = self.get_target_size();
@@ -35,11 +36,13 @@ impl RenderContext for BLContext {
                 .expect("failed to fill Blend2D background");
         }
     }
-    fn save_state(&mut self) {
-        self.save().expect("failed to save Blend2D state");
+    fn save_state(&mut self) -> Self::State {
+        //self.save().expect("failed to save Blend2D state");
+        (self.user_transform(), self.get_global_alpha())
     }
-    fn restore_state(&mut self) {
-        self.restore().expect("failed to restore Blend2D state");
+    fn restore_state(&mut self, (transform, alpha): Self::State) {
+        //self.restore().expect("failed to restore Blend2D state");
+        self.reset_transform(Some(&transform)); self.set_global_alpha(alpha);
     }
     fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) {
         if let Some(opacity) = opacity { self.set_global_alpha(opacity as _) }
@@ -103,7 +106,9 @@ impl RenderContext for BLContext {
 impl PathBuilder for BLPath {
     fn new(capacity: u32) -> Self {
         let mut path = Self::new();
-        if capacity != 0 { path.reserve((2 * capacity) as _); }     path
+        if capacity != 0 {
+            path.reserve((2 * capacity) as _).expect("failed to reserve Blend2D path");
+        }   path
     }   // different commands vary in size for BLPath
     fn close(&mut self) { self.close() }
     fn current_pos(&self) -> Option<Vec2D> {

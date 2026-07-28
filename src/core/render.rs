@@ -177,12 +177,16 @@ impl LottieRuntime {
             }   self.elapsed -= elapsed;
         }
 
+        // Preserve the caller's complete backend state once per rendered frame. Shape traversal
+        // explicitly installs every transform and opacity it uses, so per-layer saves are redundant.
+        let state = rctx.save_state();
         if let Some(color) = clear {
             let (width, height) = rctx.get_size();
             rctx.clear_rect_with(0, 0, width, height, color);
         }
         Self::render_layers(animation, rctx, &TM2DwO::default(),
             &animation.layers, self.fnth, &mut self.root);
+        rctx.restore_state(state);
 
         self.elapsed -= 1.;       self.fnth += 1.;
         if animation.op <= self.fnth { self.fnth = animation.ip; }    true
@@ -254,6 +258,7 @@ pub trait RenderContext {
     type VGStyle: StyleConv;    // (VGBrush/VGPaint, FSOpts)
     type TM2D: MatrixConv + Clone;
     type ImageID;
+    type State;
 
     //fn set_comp_op(&mut self, op: CompOp);
 
@@ -263,8 +268,8 @@ pub trait RenderContext {
         _: &TM2DwO<Self::TM2D>, _: f32) {}
     fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA);
 
-    fn save_state(&mut self);
-    fn restore_state(&mut self);
+    fn save_state(&mut self) -> Self::State;
+    fn restore_state(&mut self, state: Self::State);
     fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>);
     fn fill_stroke(&mut self, path: &Self::VGPath,
         relative: Option<&Self::TM2D>, style: &RefCell<(Self::VGStyle, FSOpts)>);
@@ -298,20 +303,13 @@ pub trait RenderContext {
 
     fn render_shapes(&mut self, ptm: &TM2DwO<Self::TM2D>,
         draws: &[DrawItem<Self::VGPath, Self::VGStyle, Self::TM2D>]) {
-        self.save_state();
-        self.render_shapes_inner(ptm, draws);
-        self.restore_state();
-    }
-
-    fn render_shapes_inner(&mut self, ptm: &TM2DwO<Self::TM2D>,
-        draws: &[DrawItem<Self::VGPath, Self::VGStyle, Self::TM2D>]) {
         draws.iter().enumerate().rev().for_each(|(idx, item)| match item {
             DrawItem::Style(style) =>
                 self.traverse_shapes(ptm, None, &draws[0..idx], style),
             DrawItem::Group(grp, rep) => rep.iter().rev().for_each(|gtm|
-                    self.render_shapes_inner(&gtm.clone().compose(ptm), grp)),
+                    self.render_shapes(&gtm.clone().compose(ptm), grp)),
             DrawItem::Copies(copies) => copies.iter().rev().for_each(|(grp, gtm)|
-                    self.render_shapes_inner(&gtm.clone().compose(ptm), grp)),
+                    self.render_shapes(&gtm.clone().compose(ptm), grp)),
             _ => (), // skip/ignore Shape
         });
     }
@@ -530,20 +528,23 @@ fn normalize_trim(start: f32, end: f32, offset: f32) -> (f32, f32) {
         clear: Option<RGBA>, clear_count: u32, draw_count: u32,
         current: kurbo::Affine, transforms: Vec<kurbo::Affine>,
         fills: Vec<(kurbo::Affine, Option<kurbo::Affine>)>,
-        opacity: f32, stack: Vec<f32>, drawn: Vec<f32>,
+        opacity: f32, drawn: Vec<f32>,
     }
     impl RenderContext for TestContext {
         type VGPath = BezPath;
         type VGStyle = TestStyle;
         type TM2D = kurbo::Affine;
         type ImageID = ();
+        type State = (kurbo::Affine, f32);
 
         fn get_size(&self) -> (u32, u32) { (1, 1) }
         fn clear_rect_with(&mut self, _: u32, _: u32, _: u32, _: u32, color: RGBA) {
             self.clear = Some(color); self.clear_count += 1;
         }
-        fn save_state(&mut self) { self.stack.push(self.opacity) }
-        fn restore_state(&mut self) { self.opacity = self.stack.pop().unwrap() }
+        fn save_state(&mut self) -> Self::State { (self.current, self.opacity) }
+        fn restore_state(&mut self, (transform, opacity): Self::State) {
+            self.current = transform; self.opacity = opacity;
+        }
         fn apply_transform(&mut self, transform: &Self::TM2D, opacity: Option<f32>) {
             self.current = *transform; self.transforms.push(*transform);
             if let Some(opacity) = opacity { self.opacity = opacity }
@@ -751,7 +752,7 @@ fn normalize_trim(start: f32, end: f32, offset: f32) -> (f32, f32) {
         assert_eq!(context.clear_count, 2);
     }
 
-    #[test] fn recursive_render_restores_opacity_between_siblings() {
+    #[test] fn recursive_render_restores_parent_opacity_between_siblings() {
         let path = || DrawItem::Shape(BezPath::new());
         let draws = vec![path(),
             DrawItem::Group(vec![path()],
@@ -762,8 +763,7 @@ fn normalize_trim(start: f32, end: f32, offset: f32) -> (f32, f32) {
 
         context.render_shapes(&TM2DwO(kurbo::Affine::IDENTITY, 0.5), &draws);
         assert_eq!(context.drawn, [0.2, 0.5]);
-        assert_eq!(context.opacity, 1.);
-        assert!(context.stack.is_empty());
+        assert_eq!(context.opacity, 0.5);
     }
 
     #[test] fn outer_styles_keep_their_scope_transform_across_nested_groups() {
