@@ -22,10 +22,37 @@ fn main() -> Result<(), Box<dyn Error>> {
     eprintln!(r"{} v{}-g{}, {}, {} 🦀", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"),
         env!("BUILD_GIT_HASH"), env!("BUILD_TIMESTAMP"), env!("CARGO_PKG_AUTHORS"));
         //build_time::build_time_local!("%H:%M:%S%:z %Y-%m-%d"), //option_env!("ENV_VAR_NAME");
-    println!("Usage: {} [<path-to-file>]", env::args().next().unwrap());
+    let program = env::args().next().unwrap();
+    println!("Usage: {program} [--rive-rs] [--backend nvg|b2d] [<path-to-file>]");
 
-    let mut app = WinitApp::new();
-    app.load_file(env::args().nth(1).unwrap_or("".to_owned()))?;
+    let (mut use_rive_rs, mut backend, mut path) = (false, BackendChoice::Auto, None);
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() { match arg.as_str() {
+        "-h" | "--help" => return Ok(()),
+        "--rive-rs" => use_rive_rs = true,
+        "--backend" => backend = BackendChoice::parse(
+            &args.next().ok_or("missing value after --backend")?)?,
+        _ if arg.starts_with("--backend=") =>
+            backend = BackendChoice::parse(&arg["--backend=".len()..])?,
+        _ if !arg.starts_with('-') && path.is_none() => path = Some(arg),
+        _ => return Err(format!("unexpected argument: {arg}").into()),
+    }}
+    #[cfg(not(feature = "rive-rs"))] if use_rive_rs {
+        return Err("the --rive-rs runtime requires the `rive-rs` feature".into())
+    }
+    if use_rive_rs && backend == BackendChoice::Blend2d {
+        return Err("the rive-rs runtime only supports the femtovg backend".into())
+    }
+    #[cfg(not(feature = "b2d"))] if backend == BackendChoice::Blend2d {
+        return Err("the b2d backend requires the `b2d` feature".into())
+    }
+    let use_b2d = !use_rive_rs && match backend {
+        BackendChoice::Auto => cfg!(feature = "b2d"),
+        BackendChoice::Femtovg => false,
+        BackendChoice::Blend2d => true,
+    };
+    let mut app = WinitApp::new(use_rive_rs, use_b2d);
+    app.load_file(path.unwrap_or_default())?;
     let event_loop = EventLoop::new()?;
     //use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
     //event_loop.set_control_flow(ControlFlow::Poll);
@@ -34,12 +61,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 impl ApplicationHandler for WinitApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        #[cfg(feature = "b2d")] {
-            self.init_blctx(event_loop, "SVG Viewer - Blend2D demo").unwrap(); return
+        #[cfg(feature = "b2d")] if self.use_b2d {
+            self.init_blctx(event_loop, "Lottie/SVG/Rive Viewer - Blend2D").unwrap(); return
         }
         if let Err(err) =
-            self.init_state(event_loop, "Lottie/SVG Viewer - Femtovg") {
-                eprintln!("Failed to initialize: {err:?}"); };
+            self.init_state(event_loop, "Lottie/SVG/Rive Viewer - Femtovg") {
+                eprintln!("Failed to initialize: {err:?}");
+        };
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _wid: WindowId, event: WindowEvent) {
@@ -75,7 +103,7 @@ impl ApplicationHandler for WinitApp {
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
                 self.dragging = matches!(state, ElementState::Pressed);
                 #[cfg(feature = "rive-rs")]
-                if let AnimGraph::Rive((scene, viewport)) = &mut self.graph {
+                if let AnimGraph::RiveRs((scene, viewport)) = &mut self.graph {
                     match state {
                         ElementState::Pressed  =>
                             scene.pointer_down(self.mouse_pos.0, self.mouse_pos.1, viewport),
@@ -104,7 +132,7 @@ impl ApplicationHandler for WinitApp {
                 }   self.mouse_pos = (position.x as _, position.y as _);
 
                 #[cfg(feature = "rive-rs")]
-                if let AnimGraph::Rive((scene, viewport)) = &mut self.graph {
+                if let AnimGraph::RiveRs((scene, viewport)) = &mut self.graph {
                     scene.pointer_move(self.mouse_pos.0, self.mouse_pos.1, viewport);
                 }
             }
@@ -132,6 +160,8 @@ struct WinitApp {
     prevt: Instant,
     perf: PerfGraph,
     graph: AnimGraph,
+    #[cfg(feature = "b2d")] use_b2d: bool,
+    #[cfg(feature = "rive-rs")] use_rive_rs: bool,
 
     #[cfg(feature = "b2d")] blctx: Option<(BLContext, f32)>,
     #[cfg(feature = "b2d")] surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
@@ -144,21 +174,40 @@ struct WinitApp {
 
 #[cfg(feature =  "lottie")] use inlottie::core::{helpers::RGBA, render::LottieRuntime};
 #[cfg(feature = "rive-rs")] use inlottie::rive::rscpp_nvg::RiveNVG;
+use inlottie::rive::{RenderContext as _, decode::RiveFile,
+    display_list::DisplayList, runtime::Runtime as RiveRuntime};
+
+#[derive(Clone, Copy, PartialEq)] enum BackendChoice { Auto, Femtovg, Blend2d }
+
+impl BackendChoice {
+    fn parse(value: &str) -> Result<Self, Box<dyn Error>> { match value {
+        "nvg" | "femtovg" => Ok(Self::Femtovg),
+        "b2d" | "blend2d" => Ok(Self::Blend2d),
+        _ => Err(format!("unknown backend: {value}").into()),
+    } }
+}
+
+struct NativeRive { runtime: RiveRuntime, list: DisplayList }
 
 enum AnimGraph {
     #[cfg(feature =  "lottie")] Lottie(Box<LottieRuntime>),
+    Rive(Box<NativeRive>),
     #[cfg(feature = "rive-rs")]
-    Rive((Box<dyn rive_rs::Scene<RiveNVG<OpenGl>>>, rive_rs::Viewport)),
+    RiveRs((Box<dyn rive_rs::Scene<RiveNVG<OpenGl>>>, rive_rs::Viewport)),
     #[allow(clippy::upper_case_acronyms)] SVG(Box<usvg::Tree>),
     None, // for logo/testcase
 }
 
 impl WinitApp {
-    fn new() -> Self {
+    fn new(_use_rive_rs: bool, _use_b2d: bool) -> Self {
         Self { paused: false, focused: true, dragging: false, //exit: false,
-            #[cfg(feature = "b2d")] surface: None, #[cfg(feature = "b2d")] blctx: None,
+            #[cfg(feature = "b2d")] use_b2d: _use_b2d,
+            #[cfg(feature = "b2d")] surface: None,
+            #[cfg(feature = "b2d")] blctx: None,
             perf: PerfGraph::new(), mouse_pos: Default::default(), prevt: Instant::now(),
-            graph: AnimGraph::None, ctx2d: None, state: None, window: None,
+            graph: AnimGraph::None,
+            #[cfg(feature = "rive-rs")] use_rive_rs: _use_rive_rs,
+            ctx2d: None, state: None, window: None,
         }
     }
 
@@ -195,11 +244,13 @@ impl WinitApp {
         };
 
         let csize = match &self.graph {
+            AnimGraph::Rive(rive) => rive.runtime.artboard_size(),
             AnimGraph::SVG(tree) => (tree.size().width(), tree.size().height()),
             AnimGraph::None => (480., 480.),    // for Blend2D logo
             _ => return,
         };
 
+        if csize.0 <= 0. || csize.1 <= 0. || wsize.0 <= 0. || wsize.1 <= 0. { return }
         let scale = (wsize.0 / csize.0).min(wsize.1 / csize.1) * 0.98;  // XXX:
         let csize = (csize.0 * scale, csize.1 * scale);
 
@@ -231,8 +282,15 @@ impl WinitApp {
         let loff = (wsize.width .saturating_sub(width)  / 2) as usize;
         let topl = (wsize.height.saturating_sub(height) / 2) as usize;
 
-        self.prevt = Instant::now();
+        let _elapsed = self.prevt.elapsed(); self.prevt = Instant::now();
         let result: Result<(), BLErr> = match &mut self.graph {
+            AnimGraph::Rive(rive) => (|| {
+                if  rive.runtime.advance(_elapsed.as_secs_f32()) {
+                    rive.runtime.write_display_list(&mut rive.list);
+                }
+                blctx.fill_all_rgba32((99, 99, 99, 255).into())?;
+                blctx.render_animation(&rive.list)
+            })(),
             AnimGraph::SVG(tree) => (|| {
                 blctx.fill_all_rgba32((99, 99, 99, 255).into())?;
 
@@ -428,11 +486,7 @@ impl WinitApp {
                 AnimGraph::Lottie(Box::new(LottieRuntime::from_reader(fs::File::open(path)?)?))
             }
 
-            #[cfg(feature = "rive-rs")] Some("riv")  =>
-                AnimGraph::Rive((RiveNVG::new_scene(
-                    &fs::read(path)?).ok_or_else(|| std::io::Error::new(
-                        std::io::ErrorKind::InvalidData, "invalid Rive scene"))?,
-                    Default::default())),
+            Some("riv") => self.load_rive(path)?,
 
             Some("svg") => {
                 let mut usvg_opts = usvg::Options::default();
@@ -443,8 +497,23 @@ impl WinitApp {
         };  Ok(())
     }
 
+    fn load_rive(&self, path: &std::path::Path) -> Result<AnimGraph, Box<dyn Error>> {
+        #[cfg(feature = "rive-rs")] if self.use_rive_rs {
+            return Ok(AnimGraph::RiveRs((RiveNVG::new_scene(&fs::read(path)?)
+                    .ok_or_else(|| std::io::Error::new(
+                        std::io::ErrorKind::InvalidData, "invalid Rive scene"))?,
+                Default::default())));
+        }
+        let mut runtime = RiveRuntime::from_file(
+            RiveFile::read(&mut fs::File::open(path)?)?)?;
+        if 0 < runtime.animation_count() { runtime.set_animation(0)?; }
+        let mut list = DisplayList::default();
+        runtime.write_display_list(&mut list);
+        Ok(AnimGraph::Rive(Box::new(NativeRive { runtime, list })))
+    }
+
     fn resize_viewport(&mut self, wsize: Option<(f32, f32)>) {  // maximize & centralize
-        #[cfg(feature = "b2d")] { self.resize_b2d(wsize); return }
+        #[cfg(feature = "b2d")] if self.blctx.is_some() { self.resize_b2d(wsize); return }
         let Some(ctx2d) = &mut self.ctx2d else { return };
 
         let wsize = if let Some(wsize) = wsize {
@@ -457,7 +526,8 @@ impl WinitApp {
                 (animation.w as _, animation.h as _)
             }
 
-            #[cfg(feature = "rive-rs")] AnimGraph::Rive((_, viewport)) => {
+            AnimGraph::Rive(rive) => rive.runtime.artboard_size(),
+            #[cfg(feature = "rive-rs")] AnimGraph::RiveRs((_, viewport)) => {
                 viewport.resize(wsize.0 as _, wsize.1 as _);
                 ctx2d.reset_transform();    return
             }
@@ -487,7 +557,17 @@ impl WinitApp {
                 }
                 // TODO: draw frame time (lottie.frame()) on screen?
 
-            #[cfg(feature = "rive-rs")] AnimGraph::Rive((scene, viewport)) =>
+            AnimGraph::Rive(rive) => {
+                if rive.runtime.advance(_elapsed.as_secs_f32()) {
+                    rive.runtime.write_display_list(&mut rive.list);
+                }
+                ctx2d.clear_rect(0, 0, ctx2d.width(), ctx2d.height(),
+                    femtovg::Color::rgbf(0.4, 0.4, 0.4));
+                if let Err(error) = ctx2d.render_animation(&rive.list) {
+                    eprintln!("Rive rendering failed: {error:?}"); return
+                }
+            }
+            #[cfg(feature = "rive-rs")] AnimGraph::RiveRs((scene, viewport)) =>
                 if !scene.advance_and_maybe_draw(&mut unsafe { RiveNVG::new(ctx2d) },
                     _elapsed, viewport) { return }
 
@@ -520,9 +600,8 @@ pub struct PerfGraph {
 impl PerfGraph { #[allow(clippy::new_without_default)]
     pub fn new() -> Self { Self {
             que: VecDeque::with_capacity(100), max: 0., sum: 0./*, time: Instant::now()*/,
-            #[cfg(feature = "b2d")] font: BLFontFace::from_file(
-                "data/Roboto-Regular.ttf").and_then(|face|
-                    BLFont::new(&face, 14.)).ok()
+            #[cfg(feature = "b2d")] font: BLFontFace::from_file("data/Roboto-Regular.ttf")
+                .and_then(|face| BLFont::new(&face, 14.)).ok()
     } }
 
     pub fn update(&mut self, ft: f32) { //debug_assert!(f32::EPSILON < ft);

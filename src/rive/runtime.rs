@@ -312,7 +312,7 @@ impl TransformValues {
 ///
 /// TODO: Add constraints, text, state machines, skins/deformers, and nested artboards.
 #[derive(Debug)] pub struct Runtime {
-    file: RiveFile, artboard_obj: u32, elapsed: f32,
+    file: RiveFile, artboard_obj: u32, artboard_size: (f32, f32), elapsed: f32,
     components: Vec<Component>,
     update_order: Vec<u32>,
     gradients: Vec<u32>,
@@ -333,6 +333,10 @@ impl Runtime {
         let context_end = file.ocoll[context_start + 1..].iter()
             .position(|object| object.type_id.0 == object_ids::ARTBOARD)
             .map_or(file.ocoll.len(), |offset| context_start + 1 + offset);
+        let artboard_size = (
+            float(&file.ocoll[context_start], property_ids::LAYOUTCOMPONENT_WIDTH)?,
+            float(&file.ocoll[context_start], property_ids::LAYOUTCOMPONENT_HEIGHT)?,
+        );
         let (mut components, mut parent_objs) = (Vec::new(), Vec::new());
         let mut obj_comps = vec![None; file.ocoll.len()];
 
@@ -396,10 +400,9 @@ impl Runtime {
         }
 
         let animations = build_animations(&file, context_start, context_end, &obj_comps)?;
-        let mut runtime = Self { file, artboard_obj: context_start as u32, components,
-            update_order: Vec::new(), gradients: Vec::new(),
-            draw_groups: Vec::new(),
-            animations: Vec::new(), active_animation: None, elapsed: 0.0
+        let mut runtime = Self { file, artboard_obj: context_start as u32, artboard_size,
+            components, update_order: Vec::new(), gradients: Vec::new(), elapsed: 0.0,
+            draw_groups: Vec::new(), animations: Vec::new(), active_animation: None,
         };
         // Construction order matters: world transforms feed gradients, then shape content feeds
         // draw grouping and finally draw rules reorder those completed groups.
@@ -419,6 +422,7 @@ impl Runtime {
     pub fn file(&self) -> &RiveFile { &self.file }
     pub fn elapsed(&self) -> f32 { self.elapsed }
     pub fn artboard_object_index(&self) -> u32 { self.artboard_obj }
+    pub fn artboard_size(&self) -> (f32, f32) { self.artboard_size }
     pub fn component_count(&self) -> usize { self.components.len() }
 
     pub fn animation_count(&self) -> u32 { self.animations.len() as u32 }

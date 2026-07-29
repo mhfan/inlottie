@@ -27,6 +27,14 @@ fn uint_prop(object: &mut Object, id: u32, value: u32) {
 
 fn artboard() -> Object { Object::new_simple(object_ids::ARTBOARD) }
 
+#[test] fn exposes_artboard_size() {
+    let mut artboard = artboard();
+    prop(&mut artboard, property_ids::LAYOUTCOMPONENT_WIDTH, 640.0);
+    prop(&mut artboard, property_ids::LAYOUTCOMPONENT_HEIGHT, 360.0);
+    assert_eq!(Runtime::from_file(file(vec![artboard])).unwrap().artboard_size(),
+        (640.0, 360.0));
+}
+
 fn parented(type_id: u32, parent: u32) -> Object {
     let mut object = Object::new_simple(type_id);
     object.add_prop(VarUInt(property_ids::COMPONENT_PARENTID),

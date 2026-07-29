@@ -26,9 +26,9 @@ impl<T: SurfacelessRenderer> FemtovgRenderer<'_, T> {
     }
 
     fn render(mut self, list: &DisplayList) -> Result<(), ErrorKind> {
-        // Isolate caller state; paths and gradients already contain their world transforms.
+        // Isolate caller state while retaining its viewport transform around Rive world space.
         let canvas = &mut *self.canvas; canvas.save();
-        canvas.set_global_alpha(1.0);   canvas.reset_transform();
+        canvas.set_global_alpha(1.0);
         canvas.global_composite_operation(CompositeOperation::SourceOver);
         let result = self.render_range(list, 0, RenderTarget::Screen);
 
@@ -77,13 +77,16 @@ impl<T: SurfacelessRenderer> FemtovgRenderer<'_, T> {
         let mut viewport = Path::new();
         viewport.rect(0.0, 0.0, width as _, height as _);
 
+        // Offscreen images cover the physical viewport; restore artboard fitting afterwards.
+        let trfm = canvas.transform();  canvas.reset_transform();
         canvas.set_render_target(RenderTarget::Image(content));
         canvas.global_composite_operation(CompositeOperation::DestinationIn);
         canvas.fill_path(&viewport, &image_paint(mask));
 
         canvas.set_render_target(target);
         canvas.global_composite_operation(CompositeOperation::SourceOver);
-        canvas.fill_path(&viewport, &image_paint(content));     Ok(())
+        canvas.fill_path(&viewport, &image_paint(content));
+        canvas.set_transform(&trfm);     Ok(())
     }
 
     fn draw_item(&mut self, item: &DrawItem) {

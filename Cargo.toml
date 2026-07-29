@@ -18,6 +18,7 @@ keywords = [ "Lottie", "Rive", "Animation", "vector-graphic" ]
 lottie  = []
 default = [ "lottie" ] #, "vello", "rive-rs", "b2d"
 b2d = [ "intvg", "softbuffer" ]
+rive-rs = [ "dep:rive-rs", "image" ]
 vello = [ "dep:vello", "skrifa", "image", "anyhow", "pollster" ]  # "wgpu",
 #glutin = [ "dep:glutin", "glutin-winit", "raw-window-handle" ]
 expression = []
@@ -68,6 +69,9 @@ web_sys = { version = "0.3", package = "web-sys", features = [
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
+
+[lints.clippy]
+needless_range_loop = "allow"
 
 [dev-dependencies]
 serde_path_to_error = "0.1"

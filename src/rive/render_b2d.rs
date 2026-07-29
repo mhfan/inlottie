@@ -16,9 +16,9 @@ impl RenderContext for BLContext {
 }
 
 fn render(blctx: &mut BLContext, list: &DisplayList) -> Result<(), BLErr> {
-    // Isolate caller state; generated paths and gradients are already in world space.
+    // Isolate caller state while retaining its viewport transform around Rive world space.
     blctx.save()?;
-    blctx.reset_transform(None); blctx.set_global_alpha(1.0);
+    blctx.set_global_alpha(1.0);
     blctx.set_stroke_alpha(1.0); blctx.set_fill_alpha(1.0);
     blctx.set_comp_op(BLCompOp::BL_COMP_OP_SRC_OVER);
     let result = render_range(blctx, list, 0);
