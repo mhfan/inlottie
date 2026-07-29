@@ -5,26 +5,50 @@
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::core::{helpers::{Vec2D, RGBA}, pathm::{PathBuilder, BezPath, PathFactory},
+use crate::core::{CompositeContext, helpers::{Vec2D, RGBA},
+    pathm::{PathBuilder, BezPath, PathFactory},
     schema::{VisualLayer, MatteMode, MaskMode, FillRule, LineJoin, LineCap},
-    style::{StyleConv, MatrixConv, TM2DwO, FSOpts},
-    render::{RenderContext, TrackMatte}
+    style::{StyleConv, MatrixConv, TM2DwO, FSOpts}, render::RenderContext
 };
-use femtovg::{PixelFormat, ImageFlags, RenderTarget,
-    CompositeOperation as CompOp, Color as VGColor};
+use femtovg::{PixelFormat, ImageId, ImageFlags, RenderTarget, Color as VGColor,
+    CompositeOperation as CompOp, renderer::SurfacelessRenderer};
 const CLEAR_COLOR: VGColor = VGColor::rgbaf(0., 0., 0., 0.);
+const  MASK_COLOR: VGColor = VGColor::rgbaf(1., 1., 1., 1.);
+
+pub struct FemtovgContext<'a, T: SurfacelessRenderer> {
+    canvas: &'a mut femtovg::Canvas<T>, target: RenderTarget,
+}
+pub struct Offscreen { image: ImageId, parent: RenderTarget }
+
+impl<'a, T: SurfacelessRenderer> FemtovgContext<'a, T> {
+    pub fn new(canvas: &'a mut femtovg::Canvas<T>) -> Self {
+        canvas.set_render_target(RenderTarget::Screen);
+        Self { canvas, target:   RenderTarget::Screen }
+    }
+    fn set_target(&mut self, target: RenderTarget) {
+        self.canvas.set_render_target(target);
+        self.target = target;
+    }
+}
+impl<T: SurfacelessRenderer> core::ops::Deref for FemtovgContext<'_, T> {
+    fn deref(&self) -> &Self::Target { self.canvas }
+    type Target = femtovg::Canvas<T>;
+}
+impl<T: SurfacelessRenderer> core::ops::DerefMut for FemtovgContext<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target { self.canvas }
+}
 
 impl PathBuilder for femtovg::Path {
     fn new(_capacity: u32) -> Self { Self::new() }    // XXX: can't make reservation
     fn close(&mut self) { self.close() }
 
-    fn move_to(&mut self, end: Vec2D) { self.move_to(end.x, end.y) }
-    fn line_to(&mut self, end: Vec2D) { self.line_to(end.x, end.y) }
+    fn move_to (&mut self, end: Vec2D) { self.move_to(end.x, end.y) }
+    fn line_to (&mut self, end: Vec2D) { self.line_to(end.x, end.y) }
     fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
         self.bezier_to(ocp.x, ocp.y, icp.x, icp.y, end.x, end.y)
     }
-    fn quad_to(&mut self, cp: Vec2D, end: Vec2D) {
-        self.quad_to(cp.x, cp.y, end.x, end.y)
+    fn quad_to (&mut self, cpt: Vec2D, end: Vec2D) {
+        self.quad_to  (cpt.x, cpt.y, end.x, end.y)
     }
     fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
         self.arc(center.x, center.y, (radii.x + radii.y) / 2.,
@@ -45,8 +69,7 @@ impl PathBuilder for femtovg::Path {
         self.verbs().for_each(|verb| match verb {
             MoveTo(x, y) => pb.move_to((x, y)),
             LineTo(x, y) => pb.line_to((x, y)),
-            BezierTo(ox, oy, ix, iy, x, y) =>
-                pb.curve_to((ox, oy), (ix, iy), (x, y)),
+            BezierTo(ox, oy, ix, iy, x, y) => pb.curve_to((ox, oy), (ix, iy), (x, y)),
             Solid | Hole => unreachable!(),
             Close => pb.close(),
         }); pb
@@ -77,35 +100,62 @@ impl StyleConv for femtovg::Paint {
         Self::radial_gradient_stops(cp.x, cp.y, radii.0, radii.1,
             stops.iter().map(|&(offset, color)| (offset, color.into())))
     }
+    fn configure(&mut self, options: &FSOpts) {
+        use femtovg::{FillRule as FFR, LineCap as FLC, LineJoin as FLJ};
+        match options {
+            FSOpts::Fill(rule) => self.set_fill_rule(match rule {
+                FillRule::NonZero => FFR::NonZero,
+                FillRule::EvenOdd => FFR::EvenOdd,
+            }),
+            FSOpts::Stroke { width, limit, join, cap, dash } => {
+                self.set_line_width(*width);
+                self.set_miter_limit(*limit);
+                self.set_line_join(match join {
+                    LineJoin::Miter => FLJ::Miter,
+                    LineJoin::Round => FLJ::Round,
+                    LineJoin::Bevel => FLJ::Bevel,
+                });
+                self.set_line_cap(match cap {
+                    LineCap::Butt   => FLC::Butt,
+                    LineCap::Round  => FLC::Round,
+                    LineCap::Square => FLC::Square,
+                });
+                self.set_line_dash_offset(dash.0);
+                self.set_line_dash(&dash.1);
+            }
+        }
+    }
 }
 impl From<RGBA> for VGColor {
     fn from(color: RGBA) -> Self { Self::rgba(color.r, color.g, color.b, color.a) }
 }
 
-impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canvas<T> {
+impl<T: SurfacelessRenderer> RenderContext for FemtovgContext<'_, T> {
     type TM2D = femtovg::Transform2D;
-    type ImageID = femtovg::ImageId;
+    type Error = femtovg::ErrorKind;
     type VGStyle = femtovg::Paint;
     type VGPath  = femtovg::Path;
     type State = ();
 
     fn get_size(&self) -> (u32, u32) { (self.width(), self.height()) }
-    fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA) {
-        self.clear_rect(x, y, w, h, color.into());
+    fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32,
+        color: RGBA) -> Result<(), Self::Error> {
+        self.clear_rect(x, y, w, h, color.into()); Ok(())
     }
-    fn save_state(&mut self) { self.save() }
-    fn restore_state(&mut self, (): Self::State) { self.restore() }
-    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) {
+    fn save_state(&mut self) -> Result<Self::State, Self::Error> { self.save(); Ok(()) }
+    fn restore_state(&mut self, (): Self::State) -> Result<(), Self::Error> {
+        self.restore();     Ok(())
+    }
+    fn apply_transform(&mut self, trfm: &Self::TM2D,
+        opacity: Option<f32>) -> Result<(), Self::Error> {
         if let Some(opacity) = opacity { self.set_global_alpha(opacity) }
-        self.set_transform(trfm);
+        self.set_transform(trfm); Ok(())
     }
 
     fn fill_stroke(&mut self, path: &Self::VGPath, relative: Option<&Self::TM2D>,
-        style: &core::cell::RefCell<(Self::VGStyle, FSOpts)>) {
-        use femtovg::{FillRule as FFR, LineCap as FLC, LineJoin as FLJ};
-
+        style: &(Self::VGStyle, FSOpts)) -> Result<(), Self::Error> {
         let transformed = relative.map(|transform| {
-            let mut result = femtovg::Path::new();
+            let mut result = Self::VGPath::new();
             path.verbs().for_each(|verb| { use femtovg::Verb::*;
                 let point = |x, y| transform.transform_point(x, y);
                 match verb {
@@ -122,151 +172,152 @@ impl<T: femtovg::renderer::SurfacelessRenderer> RenderContext for femtovg::Canva
             }); result
         });
         let path = transformed.as_ref().unwrap_or(path);
-        let mut style = style.borrow_mut();
-        let (paint, options) = &mut *style;
-        match options {
-            FSOpts::Fill(rule) => {
-                paint.set_fill_rule(match rule {
-                    FillRule::NonZero => FFR::NonZero,
-                    FillRule::EvenOdd => FFR::EvenOdd,
-                }); self.fill_path(path, paint);
-            }
+        match &style.1 {
+            FSOpts::Fill(_) => self.fill_path(path, &style.0),
+            FSOpts::Stroke { .. } => self.stroke_path(path, &style.0),
+        }   Ok(())
+    }
+}
 
-            FSOpts::Stroke { width, limit, join, cap, dash } => {
-                paint.set_line_width (*width);
-                paint.set_miter_limit(*limit);
+impl<T: SurfacelessRenderer> CompositeContext for FemtovgContext<'_, T> {
+    type Offscreen = Offscreen;
+    type Image = ImageId;
 
-                paint.set_line_join(match join {
-                    LineJoin::Miter => FLJ::Miter, LineJoin::Round => FLJ::Round,
-                    LineJoin::Bevel => FLJ::Bevel,
-                });
-                paint.set_line_cap(match cap {
-                    LineCap::Butt   => FLC::Butt,   LineCap::Round => FLC::Round,
-                    LineCap::Square => FLC::Square,
-                });
-
-                if dash.1.is_empty() {
-                    paint.set_line_dash(&[]);
-                    paint.set_line_dash_offset(0.);
-                } else {
-                    paint.set_line_dash(&dash.1);
-                    paint.set_line_dash_offset(dash.0);
-                }   self.stroke_path(path, paint);
-            }
-        }
+    fn begin_offscreen(&mut self) -> Result<Self::Offscreen, Self::Error> {
+        let (w, h) = (self.width(), self.height());
+        let image = self.create_image_empty(w as _, h as _,
+            PixelFormat::Rgba8, ImageFlags::FLIP_Y)?;
+        let parent = self.target;
+        self.set_target(RenderTarget::Image(image));
+        self.clear_rect(0, 0, w, h, CLEAR_COLOR);
+        Ok(Offscreen { image, parent })
     }
 
-    fn prepare_matte(&mut self,
-        vl: &VisualLayer, matte: &mut Option<TrackMatte<Self::ImageID>>) {
-        if vl.tt.is_none() && matte.is_none() { return }
-
-        // XXX: limit image to viewport/viewbox
-        let (w, h) = (self.width(), self.height());
-        let (lx, ty) = self.transform().transform_point(0., 0.);
-        let (lx, ty) = (lx as u32, ty as u32);
-        let (cw, ch) = (w.saturating_sub(lx.saturating_mul(2)),
-                        h.saturating_sub(ty.saturating_mul(2)));
-
-        if vl.tt.is_some() || vl.has_mask {
-            let imgid = self.create_image_empty(w as _, h as _,
-                PixelFormat::Rgba8, ImageFlags::FLIP_Y).unwrap();
-            self.set_render_target(RenderTarget::Image(imgid));
-            self.clear_rect(lx, ty, cw, ch, CLEAR_COLOR);
-
-            *matte = Some(TrackMatte { mode: vl.tt.unwrap_or(MatteMode::Normal),
-                mlid: vl.tp, imgid, mskid: None }); 	return
-        } else if vl.td.is_some_and(|td| !td.as_bool()) { return }
-
-        let matte = matte.as_mut().unwrap();
-        if vl.base.ind.is_some_and(|ind|
-            matte.mlid.is_some_and(|mlid| ind != mlid)) { return }
-
-        let mskid = self.create_image_empty(w as _, h as _,
-            PixelFormat::Rgba8, ImageFlags::FLIP_Y).unwrap();
-        self.set_render_target(RenderTarget::Image(mskid));
-        self.clear_rect(lx, ty, cw, ch, CLEAR_COLOR);
-        matte.mskid = Some(mskid);
+    fn abort_offscreen(&mut self, target: Self::Offscreen) {
+        self.set_target(target.parent);     self.flush();
+        self.delete_image(target.image);
     }
 
-    fn compose_matte(&mut self, vl: &VisualLayer,
-        matte: &mut Option<TrackMatte<Self::ImageID>>, ltm: &TM2DwO<Self::TM2D>, fnth: f32) {
-        if (vl.tt.is_some() || matte.is_none() ||
-            vl.td.is_some_and(|td| !td.as_bool())) && !vl.has_mask { return }
+    fn end_offscreen(&mut self, target: Self::Offscreen) -> Result<Self::Image, Self::Error> {
+        self.set_target(target.parent); Ok(target.image)
+    }
 
-        let track = matte.as_mut().unwrap();
-        if  vl.base.ind.is_some_and(|ind|
-            track.mlid.is_some_and(|mlid| ind != mlid)) { return }
-        let (imgid, mut path) = (track.imgid, Self::VGPath::new());
+    fn apply_masks(&mut self, content: Self::Image, vl: &VisualLayer,
+        ltm: &TM2DwO<Self::TM2D>, fnth: f32) -> Result<Self::Image, Self::Error> {
+        let (w, h, parent) = (self.width(), self.height(), self.target);
+        let accum = match self.create_image_empty(w as _, h as _,
+            PixelFormat::Rgba8, ImageFlags::FLIP_Y) {
+            Err(error) => { self.delete_image(content); return Err(error) }
+             Ok(image) => image,
+        };
+        let mut images = Vec::with_capacity(1 + vl.masks.len() * 2);
+        self.save();    images.push(accum);
+        self.reset_transform(); self.set_global_alpha(1.);
+        self.set_target(RenderTarget::Image(accum));
+        self.clear_rect(0, 0, w, h, CLEAR_COLOR);
 
-        // XXX: limit image to viewport/viewbox
-        //let (w, h) = self.image_size(imgid).unwrap();
-        let (w, h) = (self.width(), self.height());
-        let (lx, ty) = self.transform().transform_point(0., 0.);
-        path.rect(lx, ty, w as f32 - lx * 2., h as f32 - ty * 2.);
+        let (mut initialized, bounds) = (false, full_path(w, h));
+        let result = (|| {
+            for mask in &vl.masks {
+                if matches!(mask.mode, MaskMode::None) { continue }
+                if matches!(mask.mode, MaskMode::Lighten | MaskMode::Darken) {
+                    return Err(Self::Error::UnsupportedOperation)
+                }
+                let part = self.create_image_empty(w as _, h as _,
+                    PixelFormat::Rgba8, ImageFlags::FLIP_Y)?;
+                images.push(part); self.set_target(RenderTarget::Image(part));
+                self.clear_rect(0, 0, w, h, CLEAR_COLOR);
+                self.global_composite_operation(CompOp::SourceOver);
 
-        if  vl.has_mask {
-            let mskid = self.create_image_empty(w as _, h as _,
-                PixelFormat::Rgba8, ImageFlags::FLIP_Y).unwrap();
-            self.set_render_target(RenderTarget::Image(mskid));
-            let paint = Self::VGStyle::image(mskid, 0., 0., w as _, h as _, 0., 1.);
-            let mut mpaint = Self::VGStyle::color(CLEAR_COLOR);
-
-            vl.masks.iter().for_each(|mask| {
                 let mut path: Self::VGPath = mask.shape.to_path(fnth);
-                if mask.inv { path.solidity(femtovg::Solidity::Hole); }
-                if let Some(_expand) = &mask.expand { todo!() }
-
-                let  opacity = mask.opacity.as_ref().map_or(1.,
+                if let Some(expand) = &mask.expand {
+                    path.offset_path(expand.get_value(fnth), LineJoin::Round, 4.);
+                }
+                let opacity = mask.opacity.as_ref().map_or(1.,
                     |opacity| opacity.get_value(fnth) / 100.);
-                mpaint.set_color(VGColor::rgbaf(0., 0., 0., opacity));
+                self.save(); self.set_transform(&ltm.0); self.set_global_alpha(1.);
+                self.fill_path(&path, &Self::VGStyle::color(MASK_COLOR)); self.restore();
 
-                self.clear_rect(lx as _, ty as _,
-                    w.saturating_sub((lx as u32).saturating_mul(2)),
-                    h.saturating_sub((ty as u32).saturating_mul(2)), CLEAR_COLOR);
+                let source = if mask.inv {
+                    let inverse = self.create_image_empty(w as _, h as _,
+                        PixelFormat::Rgba8, ImageFlags::FLIP_Y)?;
+                    images.push(inverse); self.set_target(RenderTarget::Image(inverse));
+                    self.clear_rect(0, 0, w, h, MASK_COLOR);
+                    self.global_composite_operation(CompOp::DestinationOut);
+                    self.fill_path(&bounds,
+                        &Self::VGStyle::image(part, 0., 0., w as _, h as _, 0., 1.));
+                    inverse
+                } else { part };
 
-                self.save_state();
-                self.apply_transform(&ltm.0, Some(ltm.1));
-                self.fill_path(&path, &mpaint);
-                self.restore_state(());
+                self.set_target(RenderTarget::Image(accum));
+                if !initialized && matches!(mask.mode,
+                    MaskMode::Subtract | MaskMode::Intersect) {
+                    self.clear_rect(0, 0, w, h, MASK_COLOR);
+                }
+                self.set_global_alpha(opacity);
+                self.global_composite_operation(match mask.mode {
+                    MaskMode::Add        => CompOp::SourceOver,
+                    MaskMode::Subtract   => CompOp::DestinationOut,
+                    MaskMode::Intersect  => CompOp::DestinationIn,
+                    MaskMode::Difference => CompOp::Xor,
+                    MaskMode::None | MaskMode::Lighten | MaskMode::Darken => unreachable!(),
+                });
+                self.fill_path(&bounds,
+                    &Self::VGStyle::image(source, 0., 0., w as _, h as _, 0., 1.));
+                initialized = true;
+            }
+            if initialized {
+                self.set_global_alpha(1.);
+                self.set_target(RenderTarget::Image(content));
+                self.global_composite_operation(CompOp::DestinationIn);
+                self.fill_path(&bounds,
+                    &Self::VGStyle::image(accum, 0., 0., w as _, h as _, 0., 1.));
+                self.flush();
+            }   Ok(content)
+        })();
 
-                let cop = match mask.mode {
-                    MaskMode::Add       => Some(CompOp::DestinationIn),
-                    MaskMode::Subtract  => Some(CompOp::DestinationOut),
-                    MaskMode::Intersect => Some(CompOp::DestinationAtop),
-                    MaskMode::Lighten   => Some(CompOp::Lighter),
-                    MaskMode::Darken | MaskMode::Difference => unimplemented!(),
-                    MaskMode::None => None,
-                };
-
-                if let Some(cop) = cop {
-                    self.global_composite_operation (cop);
-                    self.set_render_target(RenderTarget::Image(imgid));
-                    self.fill_path(&path, &paint);  self.flush();
-                } 	self.set_render_target(RenderTarget::Image(mskid));
-            }); 	self.delete_image(mskid);
-        }
-
-        if let Some(mskid) = track.mskid {
-            // https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/
-            let cop = match track.mode {
-                MatteMode::Alpha =>         Some(CompOp::DestinationIn),
-                MatteMode::InvertedAlpha => Some(CompOp::DestinationOut),
-                MatteMode::Luma | MatteMode::InvertedLuma => unimplemented!(),
-                MatteMode::Normal => None,
-            };
-
-            if let Some(cop) = cop {
-                self.global_composite_operation (cop);
-                self.set_render_target(RenderTarget::Image(imgid));
-
-                self.fill_path(&path, &Self::VGStyle::image(mskid,
-                    0., 0., w as _, h as _, 0., 1.));   self.flush();
-            } 	self.delete_image(mskid);
-        }
-
-        self.set_render_target(RenderTarget::Screen);
-        self.global_composite_operation(CompOp::SourceOver);
-        self.fill_path(&path, &Self::VGStyle::image(imgid, 0., 0., w as _, h as _, 0., 1.));
-        self.flush();   self.delete_image(imgid); 	*matte = None;
+        self.set_target(parent);    self.flush();
+        for image in images { self.delete_image(image); }
+        self.restore();
+        if  result.is_err() { self.delete_image(content); }
+            result
     }
+
+    fn apply_matte(&mut self, content: Self::Image, matte: Self::Image,
+        mode: MatteMode) -> Result<Self::Image, Self::Error> {
+        if matches!(mode, MatteMode::Luma | MatteMode::InvertedLuma) {
+            self.flush();
+            self.delete_image(content); self.delete_image(matte);
+            return Err(Self::Error::UnsupportedOperation)
+        }
+        let (w, h, parent) = (self.width(), self.height(), self.target);
+        if !matches!(mode, MatteMode::Normal) {
+            self.save(); self.reset_transform(); self.set_global_alpha(1.);
+            self.set_target(RenderTarget::Image(content));
+            self.global_composite_operation(match mode {
+                MatteMode::Alpha => CompOp::DestinationIn,
+                MatteMode::InvertedAlpha => CompOp::DestinationOut,
+                _ => unreachable!(),
+            });
+            self.fill_path(&full_path(w, h), &Self::VGStyle::image(
+                matte, 0., 0., w as _, h as _, 0., 1.));
+            self.flush(); self.set_target(parent); self.restore();
+        }   self.delete_image(matte);   Ok(content)
+    }
+
+    fn present(&mut self, image: Self::Image) -> Result<(), Self::Error> {
+        let (w, h) = (self.width(), self.height());
+        self.save(); self.reset_transform(); self.set_global_alpha(1.);
+        self.global_composite_operation(CompOp::SourceOver);
+        self.fill_path(&full_path(w, h), &Self::VGStyle::image(
+            image, 0., 0., w as _, h as _, 0., 1.));
+        self.flush(); self.restore();
+        self.delete_image(image);   Ok(())
+    }
+    fn discard(&mut self, image: Self::Image) { self.flush(); self.delete_image(image); }
+}
+
+fn full_path(w: u32, h: u32) -> femtovg::Path {
+    let mut path = femtovg::Path::new();
+    path.rect(0., 0., w as _, h as _); path
 }

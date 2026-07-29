@@ -28,7 +28,7 @@ impl PathBuilder for BezPath {
     fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
         self.curve_to(ocp, icp, end)
     }
-    fn quad_to(&mut self, cp: Vec2D, end: Vec2D) { self.quad_to(cp, end) }
+    fn quad_to (&mut self, cpt: Vec2D, end: Vec2D) { self.quad_to(cpt, end) }
 
     fn   to_kurbo(&self) -> BezPath { self.clone() }
     fn from_kurbo(path: BezPath) ->   Self { path }
@@ -41,7 +41,7 @@ pub trait PathBuilder {     //type Point; type Path;
 
     fn move_to (&mut self, end: Vec2D);
     fn line_to (&mut self, end: Vec2D);
-    fn quad_to (&mut self,  cp: Vec2D, end: Vec2D);  // elevating curve order
+    fn quad_to (&mut self, cpt: Vec2D, end: Vec2D);  // elevating curve order
         //self.cubic_to(cp + (current_pos - cp) / 3, cp + (end - cp) / 3, end)
     fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D);
     /* fn curve_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
@@ -85,10 +85,10 @@ pub trait PathBuilder {     //type Point; type Path;
         }   use kurbo::PathEl::*;
 
         path.iter().for_each(|el| match el {
-            MoveTo(pt) => pb.move_to(pt.into()),
-            LineTo(pt) => pb.line_to(pt.into()),
+            MoveTo (pt) => pb.move_to(pt.into()),
+            LineTo (pt) => pb.line_to(pt.into()),
             CurveTo(ot, it, pt) => pb.cubic_to(ot.into(), it.into(), pt.into()),
-            QuadTo(ct, pt) => pb.quad_to(ct.into(), pt.into()),
+            QuadTo (cp, pt)     => pb.quad_to (cp.into(), pt.into()),
             ClosePath => pb.close(),
         }); pb
     }
@@ -366,10 +366,8 @@ fn bezier_path<PB: PathBuilder>(curve: &super::schema::Bezier, reversed: bool) -
     path.move_to(curve.vp[first]);
     let mut append = |from: usize, to: usize| {
         let (out, incoming) = if reversed {
-            (curve.it[from], curve.ot[to])
-        } else {
-            (curve.ot[from], curve.it[to])
-        };
+                 (curve.it[from], curve.ot[to])
+        } else { (curve.ot[from], curve.it[to]) };
         path.cubic_to(curve.vp[from] + out, curve.vp[to] + incoming, curve.vp[to]);
     };
 

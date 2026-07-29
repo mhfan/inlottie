@@ -479,12 +479,15 @@ impl WinitApp {
 
         match &mut self.graph {
             #[cfg(feature =  "lottie")] AnimGraph::Lottie(lottie) =>
-                if !(lottie.render_next_frame(ctx2d, _elapsed.as_secs_f32(),
-                    Some(RGBA::new_f32(0.4, 0.4, 0.4, 1.)))) { return }
+                match lottie.render_next_frame(
+                    &mut inlottie::backend::femtovg::FemtovgContext::new(ctx2d),
+                    _elapsed.as_secs_f32(), Some(RGBA::new_f32(0.4, 0.4, 0.4, 1.))) {
+                    Ok(true) => (), Ok(false) => return,
+                    Err(error) => { eprintln!("Lottie rendering failed: {error:?}"); return }
+                }
                 // TODO: draw frame time (lottie.frame()) on screen?
 
-            #[cfg(feature = "rive-rs")]
-            AnimGraph::Rive((scene, viewport)) =>
+            #[cfg(feature = "rive-rs")] AnimGraph::Rive((scene, viewport)) =>
                 if !scene.advance_and_maybe_draw(&mut unsafe { RiveNVG::new(ctx2d) },
                     _elapsed, viewport) { return }
 

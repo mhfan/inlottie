@@ -5,61 +5,184 @@
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
-use crate::core::{helpers::{Vec2D, RGBA}, pathm::{PathBuilder, BezPath},
-    schema::{FillRule, LineJoin, LineCap}, render::RenderContext,
-    style::{StyleConv, MatrixConv, FSOpts},
+use crate::core::{CompositeContext, helpers::{Vec2D, RGBA}, render::RenderContext,
+    schema::{FillRule, LineJoin, LineCap, MatteMode, MaskMode, VisualLayer},
+    style::{StyleConv, MatrixConv, TM2DwO, FSOpts},
+    pathm::{PathBuilder, PathFactory, BezPath},
 };
-use intvg::blend2d::{BLPoint, BLPath, BLMatrix2D, BLContext, BLRgba32, BLImage,
-    BLSolidColor, BLGradient, BLLinearGradientValues, BLRadialGradientValues,
-    B2DStyle, BLFillRule::*, BLStrokeJoin::*, BLStrokeCap::*,
+use intvg::blend2d::{BLPoint, BLPath, BLMatrix2D, BLContext, BLRgba32, BLErr, BLFormat,
+    BLRadialGradientValues, B2DStyle, BLFillRule::*, BLStrokeJoin::*, BLStrokeCap::*,
+    BLRectI, BLCompOp::*, BLSolidColor, BLGradient, BLLinearGradientValues, BLImage,
 };
 
+pub struct B2DTarget(Option<BLContext>);
+
+impl CompositeContext for BLContext {
+    type Offscreen = B2DTarget;
+    type Image = BLImage;
+
+    fn begin_offscreen(&mut self) -> Result<Self::Offscreen, Self::Error> {
+        let size = self.get_target_size();
+        let mut layer = BLContext::new(size.width() as _, size.height() as _,
+            BLFormat::BL_FORMAT_PRGB32)?;   layer.clear_all()?;
+        Ok(B2DTarget(Some(core::mem::replace(self, layer))))
+    }
+
+    fn abort_offscreen(&mut self, mut target: Self::Offscreen) {
+        if let Some(parent) = target.0.take() { *self = parent; }
+    }
+
+    fn end_offscreen(&mut self, mut target: Self::Offscreen) ->
+        Result<Self::Image, Self::Error> {
+        let parent = target.0.take().expect("offscreen target is consumed once");
+        core::mem::replace(self, parent).end()
+    }
+
+    fn apply_masks(&mut self, mut content: Self::Image, layer: &VisualLayer,
+        transform: &TM2DwO<Self::TM2D>, frame: f32) ->
+        Result<Self::Image, Self::Error> {
+        let size = self.get_target_size();
+        let area: BLRectI = (0, 0, size.width(), size.height()).into();
+
+        let mut mask = BLContext::new(size.width() as _, size.height() as _,
+            BLFormat::BL_FORMAT_A8)?;   mask.clear_all()?;
+        let mut initialized = false;
+        for item in &layer.masks {
+            if matches!(item.mode, MaskMode::None) { continue }
+            let mut part = BLContext::new(size.width() as _, size.height() as _,
+                BLFormat::BL_FORMAT_A8)?;   part.clear_all()?;
+            part.reset_transform(Some(&transform.0));
+            let mut path: Self::VGPath = item.shape.to_path(frame);
+            if let Some(expand) = &item.expand {
+                path.offset_path(expand.get_value(frame), LineJoin::Round, 4.);
+            }
+            part.fill_geometry_rgba32(&path, BLRgba32::new(255, 255, 255, 255))?;
+            let mut image = part.end()?;
+
+            if item.inv {
+                let mut inverse = BLContext::new(size.width() as _,
+                    size.height() as _, BLFormat::BL_FORMAT_A8)?;
+                inverse.fill_all_rgba32(BLRgba32::new(255, 255, 255, 255))?;
+                inverse.set_comp_op(BL_COMP_OP_DST_OUT);
+                inverse.blit_image_d(BLPoint::new(), &image, &area)?;
+                image = inverse.end()?;
+            }
+            if !initialized && matches!(item.mode,
+                MaskMode::Subtract | MaskMode::Intersect | MaskMode::Darken) {
+                mask.fill_all_rgba32(BLRgba32::new(255, 255, 255, 255))?;
+            }
+            mask.set_global_alpha(item.opacity.as_ref().map_or(1.,
+                |opacity| opacity.get_value(frame) / 100.) as _);
+            mask.set_comp_op(match item.mode {
+                MaskMode::Add        => BL_COMP_OP_SRC_OVER,
+                MaskMode::Subtract   => BL_COMP_OP_DST_OUT,
+                MaskMode::Intersect  => BL_COMP_OP_DST_IN,
+                MaskMode::Lighten    => BL_COMP_OP_LIGHTEN,
+                MaskMode::Darken     => BL_COMP_OP_DARKEN,
+                MaskMode::Difference => BL_COMP_OP_XOR,
+                MaskMode::None => unreachable!(),
+            });
+            mask.blit_image_d(BLPoint::new(), &image, &area)?;
+            initialized = true;
+        }
+        if  initialized {
+            let mask = mask.end()?;
+            let mut masked = BLContext::from_image(content)?;
+            masked.set_comp_op(BL_COMP_OP_DST_IN);
+            masked.blit_image_d(BLPoint::new(), &mask, &area)?;
+            content = masked.end()?;
+        }   Ok(content)
+    }
+
+    fn apply_matte(&mut self, content: Self::Image, matte: Self::Image,
+        mode: MatteMode) -> Result<Self::Image, Self::Error> {
+        // Rec.709/sRGB luminance weights (Y = 0.2126 R + 0.7152 G + 0.0722 B)
+        // in Blend2D PRGB32's little-endian BGRA memory order.
+        const LUMA_BGR: [f32; 3] = [0.0722, 0.7152, 0.2126];
+
+        if matches!(mode, MatteMode::Normal) { return Ok(content) }
+        let area: BLRectI = (0, 0, matte.width(), matte.height()).into();
+        let mut masked = BLContext::from_image(content)?;
+        masked.set_comp_op(match mode {
+            MatteMode::Alpha | MatteMode::Luma => BL_COMP_OP_DST_IN,
+            MatteMode::InvertedAlpha | MatteMode::InvertedLuma => BL_COMP_OP_DST_OUT,
+            MatteMode::Normal => unreachable!(),
+        });
+        if matches!(mode, MatteMode::Luma | MatteMode::InvertedLuma) {
+            let stride = matte.stride() as usize;
+            let mut alpha = vec![0; matte.width() as usize * matte.height() as usize];
+            if let Some(pixels) = matte.pixels() {
+                for (src, dst) in pixels.chunks(stride)
+                    .zip(alpha.chunks_mut(matte.width() as usize)) {
+                    for (bgra, value) in src.chunks_exact(4).zip(dst) {
+                        *value = (LUMA_BGR[0] * bgra[0] as f32 +
+                                  LUMA_BGR[1] * bgra[1] as f32 +
+                                  LUMA_BGR[2] * bgra[2] as f32).round() as u8;
+                    }
+                }
+                // SAFETY: `alpha` outlives the temporary image and synchronous blit.
+                let mask = unsafe { Self::Image::from_buffer(matte.width(), matte.height(),
+                    BLFormat::BL_FORMAT_A8, &mut alpha, matte.width())?
+                };
+                     masked.blit_image_d(BLPoint::new(), &mask,  &area)?;
+            } else { masked.blit_image_d(BLPoint::new(), &matte, &area)?; }
+        }     else { masked.blit_image_d(BLPoint::new(), &matte, &area)?; }
+                     masked.end()
+    }
+
+    fn present(&mut self, content: Self::Image) -> Result<(), Self::Error> {
+        let area: BLRectI = (0, 0, content.width(), content.height()).into();
+        self.save()?;   self.set_comp_op(BL_COMP_OP_SRC_OVER);
+        self.reset_transform(None);     self.set_global_alpha(1.);
+        let result = self.blit_image_d(BLPoint::new(), &content, &area);
+        result.and(self.restore())
+    }
+    fn discard(&mut self, _: Self::Image) {}
+}
+
 impl RenderContext for BLContext {
-    type ImageID = BLImage;
+    type State = (Self::TM2D, f64);
     type TM2D = BLMatrix2D;
     type VGStyle = BLStyle;
     type VGPath  = BLPath;
-    type State = (Self::TM2D, f64);
+    type Error = BLErr;
 
     fn get_size(&self) -> (u32, u32) {
         let sz = self.get_target_size();
         (sz.width() as _, sz.height() as _)
     }
 
-    fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32, color: RGBA) {
+    fn clear_rect_with(&mut self, x: u32, y: u32, w: u32, h: u32,
+        color: RGBA) -> Result<(), Self::Error> {
         if color.a < u8::MAX {
-            self.clear_rect_d(&(x as f64, y as f64, w as f64, h as f64).into())
-                .expect("failed to clear Blend2D rectangle");
+            self.clear_rect_d(&(x, y, w, h).into())?;
         }
         if color.a != 0 {
-            self.fill_rect_i_rgba32(&(x, y, w, h).into(), color.into())
-                .expect("failed to fill Blend2D background");
-        }
+            self.fill_rect_i_rgba32(&(x, y, w, h).into(), color.into())?;
+        }   Ok(())
     }
-    fn save_state(&mut self) -> Self::State {
+    fn save_state(&mut self) -> Result<Self::State, Self::Error> {
         //self.save().expect("failed to save Blend2D state");
-        (self.user_transform(), self.get_global_alpha())
+        Ok((self.user_transform(), self.get_global_alpha()))
     }
-    fn restore_state(&mut self, (transform, alpha): Self::State) {
+    fn restore_state(&mut self, (transform, alpha): Self::State) -> Result<(), Self::Error> {
         //self.restore().expect("failed to restore Blend2D state");
-        self.reset_transform(Some(&transform)); self.set_global_alpha(alpha);
+        self.reset_transform(Some(&transform)); self.set_global_alpha(alpha); Ok(())
     }
-    fn apply_transform(&mut self, trfm: &Self::TM2D, opacity: Option<f32>) {
+    fn apply_transform(&mut self, trfm: &Self::TM2D,
+        opacity: Option<f32>) -> Result<(), Self::Error> {
         if let Some(opacity) = opacity { self.set_global_alpha(opacity as _) }
-        self.reset_transform(Some(trfm));
+        self.reset_transform(Some(trfm));   Ok(())
     }
 
-    fn fill_stroke(&mut self, path: &Self::VGPath,
-        relative: Option<&Self::TM2D>,
-        style: &core::cell::RefCell<(Self::VGStyle, FSOpts)>) {
+    fn fill_stroke(&mut self, path: &Self::VGPath, relative: Option<&Self::TM2D>,
+        style: &(Self::VGStyle, FSOpts)) -> Result<(), Self::Error> {
         let transformed = relative.map(|transform| {
-            let mut result = BLPath::new();
-            result.add_transformed_path(path, transform)
-                .expect("failed to transform Blend2D path");
-            result
-        });
+            let mut result = Self::VGPath::new();
+            result.add_transformed_path(path, transform).map(|()| result)
+        }).transpose()?;
+
         let path = transformed.as_ref().unwrap_or(path);
-        let style = style.borrow();
         match &style.1 {
             FSOpts::Fill(rule) => {
                 self.set_fill_rule(match rule {
@@ -68,7 +191,7 @@ impl RenderContext for BLContext {
                 });
 
                 self.set_fill_style(style.0.as_b2d_style());
-                self.fill_geometry(path).expect("failed to fill Blend2D path");
+                self.fill_geometry(path)?;
             }
 
             FSOpts::Stroke { width, limit,
@@ -87,19 +210,15 @@ impl RenderContext for BLContext {
                     LineCap::Square => BL_STROKE_CAP_SQUARE,
                 });
 
-                if dash.1.is_empty() {
-                    self.set_stroke_dash(0., &[])
-                        .expect("failed to clear Blend2D stroke dash");
-                } else {
+                if dash.1.is_empty() { self.set_stroke_dash(0., &[])?; } else {
                     self.set_stroke_dash(dash.0 as _,
-                        &dash.1.iter().map(|&x| x as _).collect::<Vec<_>>())
-                        .expect("failed to set Blend2D stroke dash");
+                        &dash.1.iter().map(|&x| x as _).collect::<Vec<_>>())?;
                 }
 
                 self.set_stroke_style(style.0.as_b2d_style());
-                self.stroke_geometry(path).expect("failed to stroke Blend2D path");
+                self.stroke_geometry(path)?;
             }
-        }
+        }   Ok(())
     }
 }
 
@@ -116,13 +235,13 @@ impl PathBuilder for BLPath {
             .map(|pt| Vec2D { x: pt.x() as _, y: pt.y() as _ })
     }
 
-    fn move_to(&mut self, end: Vec2D) { self.move_to(end.into()) }
-    fn line_to(&mut self, end: Vec2D) { self.line_to(end.into()) }
+    fn move_to (&mut self, end: Vec2D) { self.move_to(end.into()) }
+    fn line_to (&mut self, end: Vec2D) { self.line_to(end.into()) }
     fn cubic_to(&mut self, ocp: Vec2D, icp: Vec2D, end: Vec2D) {
         self.cubic_to(ocp.into(), icp.into(), end.into())
     }
-    fn quad_to(&mut self, cp: Vec2D, end: Vec2D) {
-        self.quad_to(cp.into(), end.into())
+    fn quad_to (&mut self, cpt: Vec2D, end: Vec2D) {
+        self.quad_to(cpt.into(), end.into())
     }
     fn add_arc(&mut self, center: Vec2D, radii: Vec2D, start: f32, sweep: f32) {
         self.arc_to(center.into(), (radii.x as _, radii.y as _), start as _, sweep as _)
@@ -140,8 +259,7 @@ impl PathBuilder for BLPath {
         self.iter().for_each(|item| match item {
             MoveTo(end) => pb.move_to((end.x(), end.y())),
             LineTo(end) => pb.line_to((end.x(), end.y())),
-            QuadTo(cp, end) =>
-                pb.quad_to((cp.x(), cp.y()), (end.x(), end.y())),
+            QuadTo(cpt, end) =>      pb.quad_to((cpt.x(), cpt.y()), (end.x(), end.y())),
             CubicTo(ocp, icp, end) =>
                 pb.curve_to((ocp.x(), ocp.y()), (icp.x(), icp.y()), (end.x(), end.y())),
             Close => pb.close(),
