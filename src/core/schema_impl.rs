@@ -383,8 +383,8 @@ impl<T: Clone + math::Tween> AnimatedProperty<T> {
         Ok(match keyframes {
             AnimatedValue::Static(val) => Cow::Borrowed(val),
             AnimatedValue::Animated(coll) => {
-                let mut current = coll.partition_point(|keyframe| keyframe.start <= fnth)
-                    .saturating_sub(1);
+                let mut current = coll.partition_point(|keyframe|
+                    keyframe.start <= fnth).saturating_sub(1);
                 if fnth < coll[0].start { current = 0; }
                 while coll[current].value.is_none() { current -= 1; }
 

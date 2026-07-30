@@ -154,6 +154,12 @@ pub use super::schema_impl::{AnyAsset, AnyValue, UnresolvedSlot};
         assert!((mid.x - 50.).abs() < 1e-3);
         assert!((mid.y - 75.).abs() < 1e-3);
     }
+
+    #[test] fn cubic_easing_handles_a_flat_initial_derivative() {
+        // x(t) = t^3 and y(t) = t, so x = 1/8 must resolve to t = y = 1/2.
+        let easing = math::CubicBezierEasing::new((0., 1. / 3.), (0., 2. / 3.));
+        assert!((easing.get_y(0.125) - 0.5).abs() < 1e-4);
+    }
 }
 
 pub const ACCURACY_TOLERANCE: f64 = 1e-2;
@@ -207,34 +213,22 @@ pub fn fast_atan2(y: f32, x: f32) -> f32 {  use core::f32::consts::PI;
 
 use core::ops::{Div, Mul, Add, Sub, Neg};
 impl Div<f32> for Vec2D {  type Output =  Self;
-    fn div(self, scale: f32) -> Self {
-        Self { x: self.x / scale, y: self.y / scale }
-    }
+    fn div(self, scale: f32) -> Self { Self { x: self.x / scale, y: self.y / scale } }
 }
 impl Mul<f32> for Vec2D {  type Output =  Self;
-    fn mul(self, scale: f32) -> Self {
-        Self { x: self.x * scale, y: self.y * scale }
-    }
+    fn mul(self, scale: f32) -> Self { Self { x: self.x * scale, y: self.y * scale } }
 }
 impl Add<f32> for Vec2D {  type Output =   Self;
-    fn add(self, offset: f32) -> Self {
-        Self { x: self.x + offset, y: self.y + offset }
-    }
+    fn add(self, offset: f32) -> Self { Self { x: self.x + offset, y: self.y + offset } }
 }
 impl Sub<f32> for Vec2D {  type Output =   Self;
-    fn sub(self, offset: f32) -> Self {
-        Self { x: self.x - offset, y: self.y - offset }
-    }
+    fn sub(self, offset: f32) -> Self { Self { x: self.x - offset, y: self.y - offset } }
 }
 impl Add for Vec2D {  type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        Self { x: self.x + rhs.x, y: self.y + rhs.y }
-    }
+    fn add(self, rhs: Self) -> Self { Self { x: self.x + rhs.x, y: self.y + rhs.y } }
 }
 impl Sub for Vec2D {  type Output = Self;
-    fn sub(self, rhs: Self) -> Self {
-        Self { x: self.x - rhs.x, y: self.y - rhs.y }
-    }
+    fn sub(self, rhs: Self) -> Self { Self { x: self.x - rhs.x, y: self.y - rhs.y } }
 }
 impl Neg for Vec2D {  type Output = Self;
     fn neg(self) -> Self { Self { x: -self.x, y: -self.y } }
@@ -259,7 +253,8 @@ impl Vec2D {
     assert!(easing.get_y(0.2) > easing.get_y(0.1));
     assert!(easing.get_y(0.8) > easing.get_y(0.2));
 ``` */
-pub struct CubicBezierEasing { p1: (f32, f32), p2: (f32, f32), }
+#[derive(Clone, Copy, Debug)]
+pub struct CubicBezierEasing { p1: (f32, f32), p2: (f32, f32) }
 
 impl CubicBezierEasing {    // https://pomax.github.io/bezierinfo
     // B(t) = p0 * (1 - t)^3 + p1 * 3 * (1 - t)^2 * t + p2 * 3 * (1 - t) * t^2 + p3 * t^3
@@ -281,13 +276,28 @@ impl CubicBezierEasing {    // https://pomax.github.io/bezierinfo
         3.0 * Self::a(x1, x2) * t * t + 2.0 * Self::b(x1, x2) * t + Self::c(x1)
     }
 
-    fn calc_t(x: f32, x1: f32, x2: f32) -> f32 {    // Newton-Raphson iteration
-        let mut guess_t = x;    for _ in 0..5 {
-            let current_slope = Self::slope(guess_t, x1, x2);
-            if  current_slope < f32::EPSILON { break }
-            let delta = (Self::at(guess_t, x1, x2) - x) / current_slope;
-            guess_t -= delta;   //if delta.abs() < 1e-5 { break }
-        }   guess_t
+    fn calc_t(x: f32, x1: f32, x2: f32) -> f32 {
+        // Newton-Raphson iteration method is fast for regular curves.
+        // Clamp every step and use a bounded bisection fallback
+        // for flat derivatives and unusual finite handles.
+        let mut parameter = x;
+        for _ in 0..6 {
+            let derivative = Self::slope(parameter, x1, x2);
+            if  derivative.abs() <= f32::EPSILON { break }
+            let delta = Self::at(parameter, x1, x2) - x;
+            parameter = (parameter - delta / derivative).clamp(0.0, 1.0);
+        }
+        if (Self::at(parameter, x1, x2) - x).abs() > 1e-5 {
+            let (mut lower, mut upper) = (0.0, 1.0);
+            for _ in 0..10 {
+                if Self::at(parameter, x1, x2) < x {
+                    lower = parameter;
+                } else {
+                    upper = parameter;
+                }
+                parameter = (lower + upper) * 0.5;
+            }
+        }       parameter
     }
 
     /* fn binary_subdivide(x: f32, mut a: f32, mut b: f32, x1: f32, x2: f32) -> f32 {
@@ -302,7 +312,6 @@ impl CubicBezierEasing {    // https://pomax.github.io/bezierinfo
 
     pub fn get_y(&self, x: f32) -> f32 {
         if x == 0. || x == 1. { x } else {
-            //if self.p1.0 == self.p1.1 && self.p2.0 == self.p2.1 { return x }
             Self::at(Self::calc_t(x, self.p1.0, self.p2.0), self.p1.1, self.p2.1)
         }
     }

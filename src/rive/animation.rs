@@ -4,6 +4,7 @@
 use super::{decode::{Object, RiveFile, core_color_default, object_ids, property_ids},
     runtime::{Result, RuntimeError, float, track::TrackBinding, uint},
 };
+use crate::core::helpers::math::CubicBezierEasing;
 
 #[derive(Debug, Clone, Copy)] enum Interpolation {
     Hold, Linear, Cubic { x1: f32, y1: f32, x2: f32, y2: f32 },
@@ -191,28 +192,7 @@ fn evaluate(keyframes: &[Keyframe], frame: f32) -> Option<TrackValue> {
     let mut factor = ((frame - current.frame as f32) /
         (next.frame - current.frame) as f32).clamp(0.0, 1.0);
     if let Interpolation::Cubic { x1, y1, x2, y2 } = current.interp {
-        // Invert the Bezier x coordinate. Newton is fast for regular curves; bisection is the
-        // bounded fallback for flat derivatives or unusual but finite control points.
-        let at = |t: f32, p1: f32, p2: f32|
-            ((3.0 * p1 - 3.0 * p2 + 1.0) * t +
-             (3.0 * p2 - 6.0 * p1)) * t * t + 3.0 * p1 * t;
-        let slope = |t: f32, p1: f32, p2: f32|
-            3.0 * (3.0 * p1 - 3.0 * p2 + 1.0) * t * t +
-            2.0 * (3.0 * p2 - 6.0 * p1) * t + 3.0 * p1;
-        let (x, mut parameter) = (factor, factor);
-        for _ in 0..6 {
-            let derivative = slope(parameter, x1, x2);
-            if  derivative.abs() <= f32::EPSILON { break }
-            parameter = (parameter - (at(parameter, x1, x2) - x) / derivative)
-                .clamp(0.0, 1.0);
-        }
-        if (at(parameter, x1, x2) - x).abs() > 1e-5 {
-            let (mut lower, mut upper) = (0.0, 1.0);
-            for _ in 0..10 {
-                if at(parameter, x1, x2) < x { lower = parameter } else { upper = parameter }
-                parameter = (lower + upper) * 0.5;
-            }
-        }   factor = at(parameter, y1, y2);
+        factor = CubicBezierEasing::new((x1, y1), (x2, y2)).get_y(factor);
     }
     Some(match (current.value, next.value) {
         (TrackValue::Scalar(from), TrackValue::Scalar(to)) =>
