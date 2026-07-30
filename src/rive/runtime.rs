@@ -156,6 +156,47 @@ impl ComponentImage {
     animation: u32, elapsed: f32, kind: NestedAnimationKind,
 }
 
+#[derive(Debug)] struct ComponentNestedHost {
+    paused: bool, speed: f32, quantize: f32, carry: f32,
+}
+
+impl ComponentNestedHost {
+    fn set(&mut self, prop_id: u32, value: TrackValue) -> bool {
+        match (prop_id, value) {
+            (property_ids::ISPAUSED, TrackValue::Bool(value)) =>
+                { self.paused = value; true }
+            (property_ids::NESTEDARTBOARD_SPEED, TrackValue::Scalar(value)) =>
+                { self.speed = value; true }
+            (property_ids::NESTEDARTBOARD_QUANTIZE, TrackValue::Scalar(value)) =>
+                { self.quantize = value; true }
+            _ => false,
+        }
+    }
+
+    fn elapsed(&mut self, delta: f32) -> Option<f32> {
+        if self.paused { return None }
+        let delta = delta * self.speed;
+        if self.quantize <= 0.0 { return Some(delta) }
+        self.carry += delta;
+        let interval = self.quantize.recip();
+        if self.carry.abs() <= interval { return Some(0.0) }
+        let elapsed = (self.carry / interval).trunc() * interval;
+        self.carry -= elapsed; Some(elapsed)
+    }
+}
+
+#[derive(Debug)] struct ComponentNestedOrigin(Point);
+
+impl ComponentNestedOrigin {
+    fn set(&mut self, prop_id: u32, value: f32) -> bool {
+        match prop_id {
+            property_ids::NESTEDARTBOARDORIGIN_ORIGINX => self.0.x = value,
+            property_ids::NESTEDARTBOARDORIGIN_ORIGINY => self.0.y = value,
+            _ => return false,
+        }   true
+    }
+}
+
 #[derive(Debug)] enum NestedAnimationKind {
     Simple { speed: f32, mix: f32, playing: bool },
     Remap  {  time: f32, mix: f32 },
@@ -189,6 +230,8 @@ impl ComponentNestedAnimation {
     Clip(ComponentClip),
     Constraint(Constraint),
     Image(ComponentImage),
+    NestedHost(ComponentNestedHost),
+    NestedOrigin(ComponentNestedOrigin),
     NestedAnimation(ComponentNestedAnimation),
 }
 
@@ -311,6 +354,18 @@ impl Component {
             Some(value)
         } else { None }
     }
+    fn nested_host(&self) -> Option<&ComponentNestedHost> {
+        if let ComponentData::NestedHost(value) = &self.data { Some(value) } else { None }
+    }
+    fn nested_host_mut(&mut self) -> Option<&mut ComponentNestedHost> {
+        if let ComponentData::NestedHost(value) = &mut self.data { Some(value) } else { None }
+    }
+    fn nested_origin(&self) -> Option<&ComponentNestedOrigin> {
+        if let ComponentData::NestedOrigin(value) = &self.data { Some(value) } else { None }
+    }
+    fn nested_origin_mut(&mut self) -> Option<&mut ComponentNestedOrigin> {
+        if let ComponentData::NestedOrigin(value) = &mut self.data { Some(value) } else { None }
+    }
 }
 
 #[derive(Debug)] struct DrawGroup {
@@ -324,7 +379,7 @@ impl Component {
 }
 
 #[derive(Debug)] struct NestedRuntime {
-    host: u32, runtime: Box<Runtime>, animations: Vec<u32>,
+    host: u32, origin: Option<u32>, runtime: Box<Runtime>, animations: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Copy)] pub(super) enum ColorTarget {
@@ -462,7 +517,19 @@ impl Runtime {
             if  obj_idx == u32::MAX { return Err(RuntimeError::TooManyObjects) }
 
             let parent_id = uint(object, property_ids::COMPONENT_PARENTID)?;
-            let data = if matches!(object.type_id.0,
+            let data = if object.type_id.0 == object_ids::NESTED_ARTBOARD {
+                ComponentData::NestedHost(ComponentNestedHost {
+                    paused: boolean(object, property_ids::ISPAUSED)?,
+                    speed: float(object, property_ids::NESTEDARTBOARD_SPEED)?,
+                    quantize: float(object, property_ids::NESTEDARTBOARD_QUANTIZE)?,
+                    carry: 0.0,
+                })
+            } else if object.type_id.0 == object_ids::NESTED_ARTBOARD_ORIGIN {
+                ComponentData::NestedOrigin(ComponentNestedOrigin(Point {
+                    x: float(object, property_ids::NESTEDARTBOARDORIGIN_ORIGINX)?,
+                    y: float(object, property_ids::NESTEDARTBOARDORIGIN_ORIGINY)?,
+                }))
+            } else if matches!(object.type_id.0,
                 object_ids::NESTED_SIMPLE_ANIMATION | object_ids::NESTED_REMAP_ANIMATION) {
                 let animation = uint(object, property_ids::NESTEDANIMATION_ANIMATIONID)?;
                 let kind = if object.type_id.0 == object_ids::NESTED_SIMPLE_ANIMATION {
@@ -687,13 +754,22 @@ impl Runtime {
             let animations = self.components.iter().enumerate().filter_map(|(index, component)|
                 (component.parent == Some(host) && component.nested_animation().is_some())
                     .then_some(index as u32)).collect();
-            self.nested.push(NestedRuntime { host, runtime: Box::new(runtime), animations });
+            let origin = self.components.iter().enumerate().find_map(|(index, component)|
+                (component.parent == Some(host) && component.nested_origin().is_some())
+                    .then_some(index as u32));
+            self.nested.push(NestedRuntime {
+                host, origin, runtime: Box::new(runtime), animations
+            });
         }   Ok(())
     }
 
     fn advance_nested(&mut self, delta_seconds: f32) -> bool {
         let mut changed = false;
         for nested in &mut self.nested {
+            let Some(delta_seconds) = self.components[nested.host as usize]
+                .nested_host_mut().and_then(|host| host.elapsed(delta_seconds)) else {
+                continue
+            };
             for &component in &nested.animations {
                 let animation = self.components[component as usize]
                     .nested_animation_mut().unwrap();

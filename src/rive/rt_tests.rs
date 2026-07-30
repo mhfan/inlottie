@@ -261,6 +261,19 @@ fn nested_scene(controller: Option<Object>) -> RiveFile {
     assert!(runtime.is_fully_supported());
 }
 
+#[test] fn applies_nested_origin_override() {
+    let mut source = nested_scene(None);
+    let mut origin = parented(object_ids::NESTED_ARTBOARD_ORIGIN, 1);
+    prop(&mut origin, property_ids::NESTEDARTBOARDORIGIN_ORIGINX, 0.5);
+    prop(&mut origin, property_ids::NESTEDARTBOARDORIGIN_ORIGINY, 0.25);
+    source.ocoll.insert(2, origin);
+    prop(&mut source.ocoll[3], property_ids::LAYOUTCOMPONENT_WIDTH, 100.0);
+    prop(&mut source.ocoll[3], property_ids::LAYOUTCOMPONENT_HEIGHT, 80.0);
+    let item = &display_list(&Runtime::from_file(source).unwrap())[0];
+    assert!((item.shapes[0].trfm.tx + 35.0).abs() < 1e-5);
+    assert!((item.shapes[0].trfm.ty + 20.0).abs() < 1e-5);
+}
+
 #[test] fn advances_nested_linear_animations() {
     let mut simple = parented(object_ids::NESTED_SIMPLE_ANIMATION, 1);
     uint_prop(&mut simple, property_ids::NESTEDANIMATION_ANIMATIONID, 0);
@@ -274,6 +287,52 @@ fn nested_scene(controller: Option<Object>) -> RiveFile {
     prop(&mut remap, property_ids::TIME, 0.25);
     let runtime = Runtime::from_file(nested_scene(Some(remap))).unwrap();
     assert!((display_list(&runtime)[0].shapes[0].trfm.tx - 20.0).abs() < 1e-5);
+}
+
+#[test] fn applies_nested_pause_speed_and_quantization() {
+    let mut simple = parented(object_ids::NESTED_SIMPLE_ANIMATION, 1);
+    uint_prop(&mut simple, property_ids::NESTEDANIMATION_ANIMATIONID, 0);
+    simple.add_prop(VarUInt(property_ids::ISPLAYING), FieldValue::VarUInt(VarUInt(1)));
+
+    let mut paused = nested_scene(Some(simple));
+    paused.ocoll[1].add_prop(VarUInt(property_ids::ISPAUSED),
+        FieldValue::VarUInt(VarUInt(1)));
+    let mut runtime = Runtime::from_file(paused).unwrap();
+    assert!(!runtime.advance(1.0));
+    assert!((display_list(&runtime)[0].shapes[0].trfm.tx - 15.0).abs() < 1e-5);
+
+    let mut quantized = nested_scene(Some(parented(
+        object_ids::NESTED_SIMPLE_ANIMATION, 1)));
+    uint_prop(&mut quantized.ocoll[2], property_ids::NESTEDANIMATION_ANIMATIONID, 0);
+    quantized.ocoll[2].add_prop(VarUInt(property_ids::ISPLAYING),
+        FieldValue::VarUInt(VarUInt(1)));
+    prop(&mut quantized.ocoll[1], property_ids::NESTEDARTBOARD_SPEED, 0.5);
+    prop(&mut quantized.ocoll[1], property_ids::NESTEDARTBOARD_QUANTIZE, 2.0);
+    let mut runtime = Runtime::from_file(quantized).unwrap();
+    assert!(runtime.advance(1.0));
+    assert!((display_list(&runtime)[0].shapes[0].trfm.tx - 15.0).abs() < 1e-5);
+    runtime.advance(0.01);
+    assert!((display_list(&runtime)[0].shapes[0].trfm.tx - 25.0).abs() < 1e-5);
+}
+
+#[test] fn parent_animation_drives_nested_origin() {
+    let mut host = parented(object_ids::NESTED_ARTBOARD, 0);
+    uint_prop(&mut host, property_ids::NESTEDARTBOARD_ARTBOARDID, 1);
+    prop(&mut host, property_ids::NODE_X, 10.0);
+    let origin = parented(object_ids::NESTED_ARTBOARD_ORIGIN, 1);
+    let mut child = artboard();
+    prop(&mut child, property_ids::LAYOUTCOMPONENT_WIDTH, 100.0);
+    let mut ellipse = parented(object_ids::ELLIPSE, 0);
+    prop(&mut ellipse, property_ids::NODE_X, 5.0);
+    let objects = vec![artboard(), host, origin, linear_animation(b"origin", 10, 10, 0),
+        keyed_object(2),
+        keyed_property(property_ids::NESTEDARTBOARDORIGIN_ORIGINX),
+        double_keyframe(0, 0.0, 1), double_keyframe(10, 0.5, 1),
+        child, ellipse];
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    assert!((display_list(&runtime)[0].shapes[0].trfm.tx + 10.0).abs() < 1e-5);
 }
 
 #[test] fn rejects_recursive_nested_artboards() {

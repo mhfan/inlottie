@@ -11,19 +11,21 @@ use crate::rive::animation::{
 };
 
 #[derive(Debug, Clone, Copy)] pub(super) enum TrackTarget {
+    Vertex { component: u32, path: u32, slot: u32, prop_id: u32 },
     Transform { component: u32, prop_id: u32 },
     Geometry { component: u32, prop_id: u32 },
-    Vertex { component: u32, path: u32, slot: u32, prop_id: u32 },
     Gradient { component: u32, prop_id: u32 },
     GradientStopPos { component: u32, stop: u32 },
     GradientStopColor { component: u32, stop: u32 },
     SolidColor { component: u32 },
-    Paint { component: u32, prop_id: u32 },
-    Effect { target: EffectTarget, prop_id: u32 },
     Visibility { component: u32 },
     ClipVisibility { component: u32 },
-    Constraint { component: u32, prop_id: u32 },
     Image { component: u32, prop_id: u32 },
+    Paint { component: u32, prop_id: u32 },
+    Effect { target: EffectTarget, prop_id: u32 },
+    Constraint { component: u32, prop_id: u32 },
+    NestedHost { component: u32, prop_id: u32 },
+    NestedOrigin { component: u32, prop_id: u32 },
     NestedAnimation { component: u32, prop_id: u32 },
 }
 
@@ -183,6 +185,10 @@ fn resolve_target(components: &[Component], bindings: &[ComponentTarget],
             Some(TrackTarget::Constraint { component, prop_id }),
         TrackValue::Scalar(_) if state.image().is_some() =>
             Some(TrackTarget::Image { component, prop_id }),
+        TrackValue::Scalar(_) | TrackValue::Bool(_) if state.nested_host().is_some() =>
+            Some(TrackTarget::NestedHost { component, prop_id }),
+        TrackValue::Scalar(_) if state.nested_origin().is_some() =>
+            Some(TrackTarget::NestedOrigin { component, prop_id }),
         TrackValue::Scalar(_) | TrackValue::Bool(_)
             if state.nested_animation().is_some() =>
             Some(TrackTarget::NestedAnimation { component, prop_id }),
@@ -261,6 +267,12 @@ fn apply_track(components: &mut [Component], target: TrackTarget, value: TrackVa
         (TrackTarget::Image { component, prop_id }, TrackValue::Scalar(value)) =>
             return components[component as usize].image_mut()
                 .is_some_and(|image| image.set(prop_id, value)),
+        (TrackTarget::NestedHost { component, prop_id }, value) =>
+            return components[component as usize].nested_host_mut()
+                .is_some_and(|host| host.set(prop_id, value)),
+        (TrackTarget::NestedOrigin { component, prop_id }, TrackValue::Scalar(value)) =>
+            return components[component as usize].nested_origin_mut()
+                .is_some_and(|origin| origin.set(prop_id, value)),
         (TrackTarget::NestedAnimation { component, prop_id }, value) =>
             return components[component as usize].nested_animation_mut()
                 .is_some_and(|animation| animation.set(prop_id, value)),

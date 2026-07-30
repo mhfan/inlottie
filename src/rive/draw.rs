@@ -59,7 +59,15 @@ impl Runtime {
     fn write_nested(&self, index: u32, opacity: f32,
         parent_clips: &[Clip], list: &mut DisplayList) {
         let nested = &self.nested[index as usize];
-        let host = self.components[nested.host as usize].world;
+        let mut host = self.components[nested.host as usize].world;
+        if let Some(origin) = nested.origin
+            .and_then(|index| self.components[index as usize].nested_origin()) {
+            let (width, height) = nested.runtime.artboard_size;
+            host = host.then(Affine2 {
+                tx: -origin.0.x * width, ty: -origin.0.y * height,
+                ..Affine2::default()
+            });
+        }
         let scope = self.components[nested.host as usize].obj_idx + 1;
         let mut child = DisplayList::default();
         nested.runtime.write_display_list(&mut child);
