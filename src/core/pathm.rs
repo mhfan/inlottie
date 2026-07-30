@@ -115,7 +115,16 @@ pub trait PathBuilder {     //type Point; type Path;
     fn offset_path(&mut self,
             amount: f32, join: LineJoin, miter_limit: f32) where Self: Sized {
         if  amount == 0. { return }
-        modify_kurbo(self, |path| offset_kurbo(path, amount, join, miter_limit));
+        self.offset_path_with_tolerance(amount, join, miter_limit, ACCURACY_TOLERANCE);
+    }
+
+    fn offset_path_with_tolerance(&mut self, amount: f32, join: LineJoin,
+        miter_limit: f32, tolerance: f64) where Self: Sized {
+        if amount == 0. { return }
+        assert!(tolerance.is_finite() && 0. < tolerance,
+            "path flattening tolerance must be finite and positive");
+        modify_kurbo(self, |path|
+            offset_kurbo(path, amount, join, miter_limit, tolerance));
     }
 }
 
@@ -144,16 +153,15 @@ pub(crate) fn round_kurbo(path: &mut BezPath, radius: f32) {
 }
 
 pub(crate) fn offset_kurbo(path: &mut BezPath, amount: f32,
-    join: LineJoin, miter_limit: f32) {
-    let (source, mut output, mut points) =
-        (mem::take(path), BezPath::new(), Vec::new());
+    join: LineJoin, miter_limit: f32, tolerance: f64) {
+    let (source, mut points) = (mem::take(path), Vec::new());
+    let mut output = BezPath::new();
     for_each_contour(&source, |elements, closed| {
         points.clear();
-        flatten_contour(elements, &mut points);
-        offset_contour(&mut points, closed, amount.into(), join,
-            miter_limit.into(), &mut output);
-    });
-    *path = output;
+        flatten_contour(elements, tolerance, &mut points);
+        offset_contour(&mut points, closed, amount.into(),
+            join, miter_limit.into(), &mut output);
+    }); *path = output;
 }
 
 pub trait PathFactory { fn to_path<PB: PathBuilder>(&self, fnth: f32) -> PB; }
@@ -430,6 +438,26 @@ fn bezier_path<PB: PathBuilder>(curve: &super::schema::Bezier, reversed: bool) -
             .any(|element| matches!(element, kurbo::PathEl::CurveTo(..))));
         assert!(bevel.elements().iter()
             .all(|element| !matches!(element, kurbo::PathEl::CurveTo(..))));
+    }
+
+    #[test] fn offset_path_respects_explicit_flatten_tolerance() {
+        let mut path = BezPath::new();
+        path.move_to((0., 0.)); path.curve_to((0., 100.), (100., 100.), (100., 0.));
+        let (mut fine, mut coarse) = (path.clone(), path);
+          fine.offset_path_with_tolerance(2., LineJoin::Bevel, 4., 0.01);
+        coarse.offset_path_with_tolerance(2., LineJoin::Bevel, 4., 0.5);
+        assert!(coarse.elements().len() < fine.elements().len());
+        let (fine, coarse) = (fine.bounding_box(), coarse.bounding_box());
+        assert!((fine.x0 - coarse.x0).abs() <= 0.5);
+        assert!((fine.y0 - coarse.y0).abs() <= 0.5);
+        assert!((fine.x1 - coarse.x1).abs() <= 0.5);
+        assert!((fine.y1 - coarse.y1).abs() <= 0.5);
+    }
+
+    #[test] #[should_panic(expected = "path flattening tolerance")]
+    fn offset_path_rejects_invalid_flatten_tolerance() {
+        let mut path = square();
+        path.offset_path_with_tolerance(1., LineJoin::Miter, 4., f64::NAN);
     }
 
     #[test] fn rounded_rectangle_has_four_quarter_curves() {

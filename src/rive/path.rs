@@ -1,7 +1,7 @@
 
 //! Rive vertex decoding and backend-neutral path construction.
 
-use std::f32;
+use core::f32::consts::{FRAC_PI_2, TAU};
 use super::{decode::{self, Object, object_ids, property_ids},
     display_list::{CornerRadii, Geometry, Path, PathCommand, Point, Rect},
     runtime::{Result, RuntimeError, boolean, float, uint},
@@ -348,7 +348,7 @@ fn ideal_control_distance(prev: Point, next: Point, radius: f32) -> f32 {
     let angle = (prev.x * next.y - prev.y * next.x)
           .atan2(prev.x * next.x + prev.y * next.y).abs();
     4.0 / 3.0 * (angle / 4.0).tan() * radius *
-    if angle < f32::consts::FRAC_PI_2 { 1.0 + angle.cos() } else { 2.0 - angle.sin() }
+    if angle < FRAC_PI_2 { 1.0 + angle.cos() } else { 2.0 - angle.sin() }
 }
 
 fn rotate_corner(next: Point, prev: Point, point: Point,
@@ -382,8 +382,7 @@ fn parametric(type_id: u32, rect: Rect, points: u16,
     let center = Point { x: rect.x + half_width, y: rect.y + half_height };
     let mut vertices = Vec::with_capacity(vertex_count);
     for index in 0..vertex_count {
-        let angle = -f32::consts::FRAC_PI_2 +
-                     f32::consts::TAU * index as f32 / vertex_count as f32;
+        let angle = -FRAC_PI_2 + TAU * index as f32 / vertex_count as f32;
         let scale = if type_id == object_ids::STAR && index % 2 == 1 { inner_radius
         } else { 1.0 };
         vertices.push(straight_vertex(
@@ -424,7 +423,7 @@ pub(super) fn rectangle_radii(object: &Object) -> decode::Result<CornerRadii> {
             kind: VertexKind::Detached { in_rotation: 0.0, in_distance: 1.0,
                 out_rotation: 0.0, out_distance: 1.0 }
         };
-        detached.set(property_ids::INROTATION, f32::consts::FRAC_PI_2);
+        detached.set(property_ids::INROTATION, FRAC_PI_2);
         detached.set(property_ids::CUBICDETACHEDVERTEX_OUTDISTANCE, 3.0);
         let vertex = detached.vertex();
         assert!((vertex.incoming.unwrap().y - 3.0).abs() < 1e-6);
@@ -433,16 +432,14 @@ pub(super) fn rectangle_radii(object: &Object) -> decode::Result<CornerRadii> {
         let mut asymmetric = VertexParams { x: 0.0, y: 0.0,
             kind: VertexKind::Asymmetric {
                 rotation: 0.0, in_distance: 1.0, out_distance: 1.0 } };
-        asymmetric.set(property_ids::CUBICASYMMETRICVERTEX_ROTATION,
-            f32::consts::FRAC_PI_2);
+        asymmetric.set(property_ids::CUBICASYMMETRICVERTEX_ROTATION, FRAC_PI_2);
         asymmetric.set(property_ids::CUBICASYMMETRICVERTEX_INDISTANCE, 2.0);
         let vertex = asymmetric.vertex();
         assert!((vertex.incoming.unwrap().y + 2.0).abs() < 1e-6);
 
         let mut mirrored = VertexParams { x: 0.0, y: 0.0,
             kind: VertexKind::Mirrored { rotation: 0.0, distance: 1.0 } };
-        mirrored.set(property_ids::CUBICMIRROREDVERTEX_ROTATION,
-            f32::consts::FRAC_PI_2);
+        mirrored.set(property_ids::CUBICMIRROREDVERTEX_ROTATION, FRAC_PI_2);
         mirrored.set(property_ids::CUBICMIRROREDVERTEX_DISTANCE, 2.0);
         let vertex = mirrored.vertex();
         assert!((vertex.incoming.unwrap().y + 2.0).abs() < 1e-6);

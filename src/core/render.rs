@@ -385,16 +385,15 @@ impl<P: PathBuilder> PathBuilder for PendingPath<P> {
     }}
     fn trim_path(&mut self, start: f32, trim: f32) {
         if trim <= 0. { *self = Self::new(0); return }
-        if 1. <= trim { return }
-        trim_kurbo(self.kurbo_mut(), start, trim)
+        if 1. > trim { trim_kurbo(self.kurbo_mut(), start, trim) }
     }
     fn round_corners(&mut self, radius: f32) {
-        if radius <= 0. { return }
-        round_kurbo(self.kurbo_mut(), radius)
+        if 0. < radius { round_kurbo(self.kurbo_mut(), radius) }
     }
     fn offset_path(&mut self, amount: f32,
         join: super::schema::LineJoin, miter_limit: f32) {
-        if amount != 0. { offset_kurbo(self.kurbo_mut(), amount, join, miter_limit) }
+        if amount == 0. { return }
+        offset_kurbo(self.kurbo_mut(), amount, join, miter_limit, ACCURACY_TOLERANCE)
     }
 }
 

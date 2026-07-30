@@ -69,16 +69,18 @@ pub(super) fn round_contour(elements: &[kurbo::PathEl], closed: bool, radius: f6
     }
 }
 
-pub(super) fn flatten_contour(elements: &[kurbo::PathEl], points: &mut Vec<kurbo::Point>) {
-    fn flatten(segment: kurbo::PathSeg, points: &mut Vec<kurbo::Point>, depth: u8) {
+pub(super) fn flatten_contour(elements: &[kurbo::PathEl],
+    tolerance: f64, points: &mut Vec<kurbo::Point>) {
+    fn flatten(segment: kurbo::PathSeg, tolerance: f64,
+        points: &mut Vec<kurbo::Point>, depth: u8) {
         let (start, end, middle) =
             (segment.eval(0.), segment.eval(1.), segment.eval(0.5));
         let chord = end - start;
         let distance = if chord.hypot2() == 0. { (middle - start).hypot()
         } else { chord.cross(middle - start).abs() / chord.hypot() };
-        if  distance <= ACCURACY_TOLERANCE || depth == 12 { points.push(end); } else {
-            flatten(segment.subsegment(0. .. 0.5), points, depth + 1);
-            flatten(segment.subsegment(0.5 .. 1.), points, depth + 1);
+        if  distance <= tolerance || depth == 12 { points.push(end); } else {
+            flatten(segment.subsegment(0. .. 0.5), tolerance, points, depth + 1);
+            flatten(segment.subsegment(0.5 .. 1.), tolerance, points, depth + 1);
         }
     }
 
@@ -88,12 +90,14 @@ pub(super) fn flatten_contour(elements: &[kurbo::PathEl], points: &mut Vec<kurbo
         LineTo(point) => { points.push(point); current = Some(point); }
         QuadTo(control, point) => {
             if let Some(start) = current {
-                flatten(kurbo::QuadBez::new(start, control, point).into(), points, 0);
+                flatten(kurbo::QuadBez::new(start, control, point).into(),
+                    tolerance, points, 0);
             }   current = Some(point);
         }
         CurveTo(first, second, point) => {
             if let Some(start) = current {
-                flatten(kurbo::CubicBez::new(start, first, second, point).into(), points, 0);
+                flatten(kurbo::CubicBez::new(start, first, second, point).into(),
+                    tolerance, points, 0);
             }   current = Some(point);
         }
         ClosePath => {}
