@@ -506,6 +506,11 @@ impl WinitApp {
         }
         let mut runtime = RiveRuntime::from_file(
             RiveFile::read(&mut fs::File::open(path)?)?)?;
+        if !runtime.is_fully_supported() {
+            let features = runtime.unsupported_features().iter()
+                .map(ToString::to_string).collect::<Vec<_>>().join(", ");
+            eprintln!("Rive file uses unsupported native-runtime features: {features}");
+        }
         if 0 < runtime.animation_count() { runtime.set_animation(0)?; }
         let mut list = DisplayList::default();
         runtime.write_display_list(&mut list);

@@ -25,6 +25,16 @@ fn uint_prop(object: &mut Object, id: u32, value: u32) {
     object.add_prop(VarUInt(id), FieldValue::VarUInt(VarUInt(value)));
 }
 
+fn constraint(type_id: u32, owner: u32, target: u32) -> Object {
+    let mut object = parented(type_id, owner);
+    uint_prop(&mut object, property_ids::TARGETEDCONSTRAINT_TARGETID, target);
+    object
+}
+
+fn world(runtime: &Runtime, obj_idx: u32) -> Affine2 {
+    runtime.components.iter().find(|component| component.obj_idx == obj_idx).unwrap().world
+}
+
 fn artboard() -> Object { Object::new_simple(object_ids::ARTBOARD) }
 
 #[test] fn exposes_artboard_size() {
@@ -175,6 +185,184 @@ fn clipped_scene() -> Vec<Object> {
         Geometry::Ellipse(Rect { x: -20.0, y: -10.0, w: 40.0, h: 20.0 }));
 }
 
+#[test] fn reports_unsupported_rive_subsystems_once() {
+    let runtime = Runtime::from_file(file(vec![artboard(),
+        parented(object_ids::BONE,  0), parented(object_ids::SKIN, 0),
+        parented(object_ids::IMAGE, 0), parented(object_ids::NESTED_ARTBOARD, 0),
+        parented(object_ids::STATE_MACHINE,  0), parented(object_ids::TEXT, 0),
+        parented(object_ids::I_K_CONSTRAINT, 0),
+    ])).unwrap();
+    assert_eq!(runtime.unsupported_features(), &[
+        UnsupportedFeature::BonesAndSkins, UnsupportedFeature::AdvancedConstraints,
+        UnsupportedFeature::Images, UnsupportedFeature::NestedArtboards,
+        UnsupportedFeature::StateMachines, UnsupportedFeature::Text,
+    ]);
+    assert!(!runtime.is_fully_supported());
+    assert!(Runtime::from_file(file(vec![artboard()])).unwrap().is_fully_supported());
+}
+
+#[test] fn applies_translation_rotation_and_scale_constraints() {
+    let mut target = parented(object_ids::NODE, 0);
+    prop(&mut target, property_ids::NODE_X, 100.0);
+    prop(&mut target, property_ids::NODE_Y, 40.0);
+    prop(&mut target, property_ids::TRANSFORMCOMPONENT_ROTATION, 1.0);
+    prop(&mut target, property_ids::TRANSFORMCOMPONENT_SCALEX, 3.0);
+    prop(&mut target, property_ids::TRANSFORMCOMPONENT_SCALEY, 5.0);
+    let owner = parented(object_ids::SHAPE, 0);
+    let ellipse = parented(object_ids::ELLIPSE, 2);
+    let mut translation = constraint(object_ids::TRANSLATION_CONSTRAINT, 2, 1);
+    prop(&mut translation, property_ids::CONSTRAINT_STRENGTH, 0.5);
+    let rotation = constraint(object_ids::ROTATION_CONSTRAINT, 2, 1);
+    let scale = constraint(object_ids::SCALE_CONSTRAINT, 2, 1);
+
+    let runtime = Runtime::from_file(file(vec![artboard(), target, owner, ellipse,
+        translation, rotation, scale])).unwrap();
+    let matrix = world(&runtime, 2);
+    assert!((matrix.tx - 50.0).abs() < 1e-5);
+    assert!((matrix.ty - 20.0).abs() < 1e-5);
+    assert!((matrix.yx.atan2(matrix.xx) - 1.0).abs() < 1e-5);
+    assert!((matrix.xx.hypot(matrix.yx) - 3.0).abs() < 1e-5);
+    assert!((world(&runtime, 3).tx - matrix.tx).abs() < 1e-5);
+}
+
+#[test] fn applies_constraint_limits_and_dependency_order() {
+    let   owner = parented(object_ids::SHAPE, 0);
+    let ellipse = parented(object_ids::ELLIPSE, 1);
+    let  middle = parented(object_ids::NODE, 0);
+    let mut target = parented(object_ids::NODE, 0);
+    prop(&mut target, property_ids::NODE_X, 100.0);
+    // Deliberately store the dependent constraint first.
+    let mut dependent = constraint(object_ids::TRANSLATION_CONSTRAINT, 1, 3);
+    uint_prop(&mut dependent, property_ids::MAX, 1);
+    prop(&mut dependent, property_ids::MAXVALUE, 60.0);
+    let source = constraint(object_ids::TRANSLATION_CONSTRAINT, 3, 4);
+
+    let runtime = Runtime::from_file(file(vec![artboard(), owner, ellipse, middle,
+        target, dependent, source])).unwrap();
+    assert!((world(&runtime, 3).tx - 100.0).abs() < 1e-5);
+    assert!((world(&runtime, 1).tx - 60.0).abs() < 1e-5);
+    assert!((world(&runtime, 2).tx - 60.0).abs() < 1e-5);
+}
+
+#[test] fn animates_constraint_strength() {
+    let mut target = parented(object_ids::NODE, 0);
+    prop(&mut target, property_ids::NODE_X, 100.0);
+    let   owner = parented(object_ids::SHAPE, 0);
+    let ellipse = parented(object_ids::ELLIPSE, 2);
+    let translation = constraint(object_ids::TRANSLATION_CONSTRAINT, 2, 1);
+    let objects = vec![artboard(), target, owner, ellipse, translation,
+        linear_animation(b"constraint", 10, 10, 0), keyed_object(4),
+        keyed_property(property_ids::CONSTRAINT_STRENGTH),
+        double_keyframe(0, 0.0, 1), double_keyframe(10, 1.0, 1)];
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    assert!(world(&runtime, 2).tx.abs() < 1e-5);
+    runtime.advance(0.5);
+    assert!((world(&runtime, 2).tx - 50.0).abs() < 1e-5);
+}
+
+#[test] fn applies_transform_constraint_and_artboard_origin() {
+    let mut artboard = artboard();
+    prop(&mut artboard, property_ids::LAYOUTCOMPONENT_WIDTH, 200.0);
+    prop(&mut artboard, property_ids::LAYOUTCOMPONENT_HEIGHT, 100.0);
+    let   owner = parented(object_ids::SHAPE, 0);
+    let ellipse = parented(object_ids::ELLIPSE, 1);
+    let mut constraint = constraint(object_ids::TRANSFORM_CONSTRAINT, 1, 0);
+    prop(&mut constraint, property_ids::TRANSFORMCONSTRAINT_ORIGINX, 0.5);
+    prop(&mut constraint, property_ids::TRANSFORMCONSTRAINT_ORIGINY, 0.5);
+    prop(&mut constraint, property_ids::CONSTRAINT_STRENGTH, 0.5);
+    let runtime = Runtime::from_file(file(vec![
+        artboard, owner, ellipse, constraint])).unwrap();
+    let matrix = world(&runtime, 1);
+    assert!((matrix.tx - 50.0).abs() < 1e-5);
+    assert!((matrix.ty - 25.0).abs() < 1e-5);
+    assert!((world(&runtime, 2).tx - 50.0).abs() < 1e-5);
+}
+
+#[test] fn transform_constraint_interpolates_the_complete_matrix() {
+    let mut target = parented(object_ids::NODE, 0);
+    prop(&mut target, property_ids::NODE_X, 100.0);
+    prop(&mut target, property_ids::NODE_Y, 40.0);
+    prop(&mut target, property_ids::TRANSFORMCOMPONENT_ROTATION, 1.0);
+    prop(&mut target, property_ids::TRANSFORMCOMPONENT_SCALEX, 3.0);
+    prop(&mut target, property_ids::TRANSFORMCOMPONENT_SCALEY, 5.0);
+    let   owner = parented(object_ids::SHAPE, 0);
+    let ellipse = parented(object_ids::ELLIPSE, 2);
+    let mut constraint = constraint(object_ids::TRANSFORM_CONSTRAINT, 2, 1);
+    prop(&mut constraint, property_ids::CONSTRAINT_STRENGTH, 0.5);
+    let runtime = Runtime::from_file(file(vec![
+        artboard(), target, owner, ellipse, constraint])).unwrap();
+    let matrix = world(&runtime, 2);
+    assert!((matrix.tx - 50.0).abs() < 1e-5);
+    assert!((matrix.ty - 20.0).abs() < 1e-5);
+    assert!((matrix.yx.atan2(matrix.xx) - 0.5).abs() < 1e-5);
+    assert!((matrix.xx.hypot(matrix.yx) - 2.0).abs() < 1e-5);
+    assert!((matrix.xy.hypot(matrix.yy) - 3.0).abs() < 1e-5);
+}
+
+#[test] fn applies_distance_constraint_modes() {
+    fn constrained(mode: u32, owner_x: f32, distance: f32) -> f32 {
+        let  target = parented(object_ids::NODE, 0);
+        let mut owner = parented(object_ids::SHAPE, 0);
+        prop(&mut owner, property_ids::NODE_X, owner_x);
+        let ellipse = parented(object_ids::ELLIPSE, 2);
+        let mut constraint = constraint(object_ids::DISTANCE_CONSTRAINT, 2, 1);
+        prop(&mut constraint, property_ids::DISTANCECONSTRAINT_DISTANCE, distance);
+        uint_prop(&mut constraint, property_ids::DISTANCECONSTRAINT_MODEVALUE, mode);
+        world(&Runtime::from_file(file(vec![
+            artboard(), target, owner, ellipse, constraint])).unwrap(), 2).tx
+    }
+
+    assert!((constrained(2, 40.0, 100.0) - 100.0).abs() < 1e-5);
+    assert!((constrained(0, 40.0, 100.0) - 40.0).abs() < 1e-5);
+    assert!((constrained(0, 140.0, 100.0) - 100.0).abs() < 1e-5);
+    assert!((constrained(1, 40.0, 100.0) - 100.0).abs() < 1e-5);
+    assert!((constrained(1, 140.0, 100.0) - 140.0).abs() < 1e-5);
+}
+
+#[test] fn animates_distance_constraint() {
+    let  target = parented(object_ids::NODE, 0);
+    let mut owner = parented(object_ids::SHAPE, 0);
+    prop(&mut owner, property_ids::NODE_X, 100.0);
+    let ellipse = parented(object_ids::ELLIPSE, 2);
+    let mut distance = constraint(object_ids::DISTANCE_CONSTRAINT, 2, 1);
+    uint_prop(&mut distance, property_ids::DISTANCECONSTRAINT_MODEVALUE, 2);
+    let objects = vec![artboard(), target, owner, ellipse, distance,
+        linear_animation(b"distance", 10, 10, 0), keyed_object(4),
+        keyed_property(property_ids::DISTANCECONSTRAINT_DISTANCE),
+        double_keyframe(0, 100.0, 1), double_keyframe(10, 200.0, 1)];
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    assert!((world(&runtime, 2).tx - 150.0).abs() < 1e-5);
+}
+
+#[test] fn rejects_invalid_and_cyclic_constraints() {
+    let  owner = parented(object_ids::NODE, 0);
+    let invalid = constraint(object_ids::TRANSLATION_CONSTRAINT, 1, 1);
+    assert!(matches!(Runtime::from_file(file(vec![artboard(), owner, invalid])),
+        Err(RuntimeError::InvalidConstraintTarget(1))));
+
+    let  first = parented(object_ids::NODE, 0);
+    let second = parented(object_ids::NODE, 0);
+    let first_constraint = constraint(object_ids::TRANSLATION_CONSTRAINT, 1, 2);
+    let second_constraint = constraint(object_ids::TRANSLATION_CONSTRAINT, 2, 1);
+    assert!(matches!(Runtime::from_file(file(vec![artboard(), first, second,
+        first_constraint, second_constraint])), Err(RuntimeError::ConstraintCycle(_))));
+}
+
+#[test] fn targetless_constraint_still_applies_limits() {
+    let mut owner = parented(object_ids::SHAPE, 0);
+    prop(&mut owner, property_ids::NODE_X, 100.0);
+    let   ellipse = parented(object_ids::ELLIPSE, 1);
+    let mut limit = parented(object_ids::TRANSLATION_CONSTRAINT, 1);
+    uint_prop(&mut limit, property_ids::MAX, 1);
+    prop(&mut limit, property_ids::MAXVALUE, 60.0);
+    let runtime = Runtime::from_file(file(vec![artboard(), owner, ellipse, limit])).unwrap();
+    assert!((world(&runtime, 1).tx - 60.0).abs() < 1e-5);
+    assert!((world(&runtime, 2).tx - 60.0).abs() < 1e-5);
+}
+
 #[test] fn discovers_selects_and_advances_linear_animation() {
     let mut ellipse = parented(object_ids::ELLIPSE, 0);
     prop(&mut ellipse, property_ids::PARAMETRICPATH_WIDTH, 10.0);
@@ -219,7 +407,7 @@ fn clipped_scene() -> Vec<Object> {
 
 #[test] fn animates_stroke_width_and_trim_parameters() {
     let shape = parented(object_ids::SHAPE, 0);
-    let path  = parented(object_ids::ELLIPSE, 1);
+    let  path = parented(object_ids::ELLIPSE, 1);
     let mut stroke = parented(object_ids::STROKE, 1);
     prop(&mut stroke, property_ids::THICKNESS, 0.0);
     let mut trim = parented(object_ids::TRIM_PATH, 3);
@@ -285,7 +473,7 @@ fn clipped_scene() -> Vec<Object> {
 #[test] fn animates_gradient_stop_colors_and_positions() {
     let shape = parented(object_ids::SHAPE, 0);
     let ellipse = parented(object_ids::ELLIPSE, 1);
-    let fill = parented(object_ids::FILL, 1);
+    let  fill = parented(object_ids::FILL, 1);
     let mut solid = parented(object_ids::SOLID_COLOR, 3);
     solid.add_prop(VarUInt(property_ids::SOLIDCOLOR_COLORVALUE),
         FieldValue::Color(0x0010_80ff));
@@ -336,8 +524,8 @@ fn clipped_scene() -> Vec<Object> {
 
 #[test] fn applies_discrete_bool_and_uint_tracks() {
     let shape = parented(object_ids::SHAPE, 0);
-    let path = parented(object_ids::POINTS_PATH, 1);
-    let first = parented(object_ids::STRAIGHT_VERTEX, 2);
+    let  path = parented(object_ids::POINTS_PATH, 1);
+    let  first = parented(object_ids::STRAIGHT_VERTEX, 2);
     let second = parented(object_ids::STRAIGHT_VERTEX, 2);
     let mut fill = parented(object_ids::FILL, 1);
     fill.add_prop(VarUInt(property_ids::SHAPEPAINT_ISVISIBLE),
@@ -376,7 +564,7 @@ fn clipped_scene() -> Vec<Object> {
 
 #[test] fn animates_points_path_vertices_and_restores_them() {
     let shape = parented(object_ids::SHAPE, 0);
-    let path = parented(object_ids::POINTS_PATH, 1);
+    let  path = parented(object_ids::POINTS_PATH, 1);
     let first = parented(object_ids::STRAIGHT_VERTEX, 2);
     let mut second = parented(object_ids::STRAIGHT_VERTEX, 2);
     prop(&mut second, property_ids::VERTEX_X, 10.0);

@@ -4,7 +4,7 @@
 use super::{Brush, ColorTarget, Component, ComponentPaint, ComponentTarget, EffectTarget,
     Paint, Runtime, TrackValue, core_boolean_default, core_color_default, core_float_default,
     core_is_transform_component, core_varuint_default, float, property_ids,
-    shape::{set_effect, set_paint}, update_world_state,
+    apply_constraints, shape::{set_effect, set_paint}, update_world_state,
 };
 use crate::rive::animation::{Animation, LinearAnimation, RawAnimation, evaluate_track};
 
@@ -20,6 +20,7 @@ use crate::rive::animation::{Animation, LinearAnimation, RawAnimation, evaluate_
     Effect { target: EffectTarget, prop_id: u32 },
     Visibility { component: u32 },
     ClipVisibility { component: u32 },
+    Constraint { component: u32, prop_id: u32 },
 }
 
 #[derive(Debug, Clone, Copy)] pub(in crate::rive) struct TrackBinding {
@@ -104,6 +105,8 @@ impl Runtime {
         refresh_geometry(&mut self.components, &animation.geometries);
         if transform_dirty {
             update_world_state(&mut self.components, &self.update_order);
+            apply_constraints(&mut self.components, &self.update_order, &self.constraints,
+                &mut self.constraint_dirty);
         }
         let gradients = if transform_dirty { &self.gradients } else { &animation.gradients };
         sync_gradients(&mut self.components, gradients);
@@ -145,6 +148,9 @@ fn resolve_target(components: &[Component], bindings: &[ComponentTarget],
         _ => {}
     }
     match value {
+        TrackValue::Scalar(_) | TrackValue::Bool(_) | TrackValue::Uint(_)
+            if state.constraint().is_some() =>
+            Some(TrackTarget::Constraint { component, prop_id }),
         TrackValue::Scalar(_) if state.gradient().is_some() =>
             Some(TrackTarget::Gradient { component, prop_id }),
         TrackValue::Scalar(_) | TrackValue::Bool(_) | TrackValue::Uint(_)
@@ -213,7 +219,11 @@ fn apply_track(components: &mut [Component], target: TrackTarget, value: TrackVa
             if let Some(clip) = components[component as usize].clip_mut() {
                 clip.visible = value;
             }
-        }   _ => {}
+        }
+        (TrackTarget::Constraint { component, prop_id }, value) =>
+            return components[component as usize].constraint_mut()
+                .is_some_and(|constraint| constraint.set(prop_id, value)),
+        _ => {}
     }   false
 }
 

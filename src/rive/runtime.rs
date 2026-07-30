@@ -14,10 +14,12 @@ use super::{animation::{LinearAnimation, TrackValue, build_animations},
     }, path::{GeomParams, Vertex, VertexParams, build_path},
 };
 
-#[path = "draw.rs"] mod draw;
+use shape::fill_rule;
+#[path = "draw.rs"]  mod draw;
 #[path = "shape.rs"] mod shape;
 #[path = "track.rs"] pub(super) mod track;
-use shape::fill_rule;
+#[path = "constraint.rs"] mod constraint;
+use constraint::{Constraint, apply_constraints, sort_constraints};
 
 pub type Result<T> = std::result::Result<T, RuntimeError>;
 
@@ -25,6 +27,7 @@ pub type Result<T> = std::result::Result<T, RuntimeError>;
     Decode(DecodeError), AnimationNameNotFound, AnimationNotFound(u32), ArtboardNotFound(u32),
     DrawOrderCycle(u32), InvalidInterpolation(u32), InvalidInterpolator(u32),
     InvalidTrimMode(u32), ParentCycle(u32), TooManyObjects, TooManyVertices(u32),
+    ConstraintCycle(u32), InvalidConstraintOwner(u32), InvalidConstraintTarget(u32),
     InvalidClipSource { comp_id: u32, source_id: u32 },
     InvalidParent { comp_id: u32, parent_id: u32 },
 }
@@ -49,6 +52,12 @@ impl fmt::Display for RuntimeError {
             write!(f, "component {comp_id} references missing parent {parent_id}"),
         Self::InvalidClipSource { comp_id, source_id } =>
             write!(f, "clipping component {comp_id} references invalid source {source_id}"),
+        Self::InvalidConstraintOwner(obj_idx) =>
+            write!(f, "constraint {obj_idx} has no transform-component owner"),
+        Self::InvalidConstraintTarget(target_id) =>
+            write!(f, "constraint references invalid target {target_id}"),
+        Self::ConstraintCycle(obj_idx) =>
+            write!(f, "Rive constraint dependency cycle at object {obj_idx}"),
         Self::ParentCycle(comp_id) => write!(f, "component parent cycle at {comp_id}"),
     } }
 }
@@ -135,6 +144,7 @@ impl ComponentGeom {
     Gradient(GradientState),
     Paint(ComponentPaint),
     Clip(ComponentClip),
+    Constraint(Constraint),
 }
 
 #[derive(Debug)] struct GradientState {
@@ -234,6 +244,12 @@ impl Component {
     fn clip_mut(&mut self) -> Option<&mut ComponentClip> {
         if let ComponentData::Clip(value) = &mut self.data { Some(value) } else { None }
     }
+    fn constraint(&self) -> Option<&Constraint> {
+        if let ComponentData::Constraint(value) = &self.data { Some(value) } else { None }
+    }
+    fn constraint_mut(&mut self) -> Option<&mut Constraint> {
+        if let ComponentData::Constraint(value) = &mut self.data { Some(value) } else { None }
+    }
 }
 
 #[derive(Debug)] struct DrawGroup {
@@ -263,6 +279,22 @@ impl Component {
 #[derive(Debug, Clone, Copy, PartialEq)] pub struct AnimationInfo<'a> {
     pub name: &'a [u8], pub duration: u32, pub fps: u32,
     pub speed: f32, pub loop_mode: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum UnsupportedFeature {
+    BonesAndSkins, AdvancedConstraints, Images, NestedArtboards, StateMachines, Text,
+}
+
+impl fmt::Display for UnsupportedFeature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(match self {
+        Self::BonesAndSkins => "bones/skins",
+        Self::AdvancedConstraints => "advanced constraints",
+        Self::Images => "images",
+        Self::NestedArtboards => "nested artboards",
+        Self::StateMachines => "state machines",
+        Self::Text => "text",
+    }) }
 }
 
 #[derive(Debug, Clone, Copy)] pub(super) struct TransformValues {
@@ -315,9 +347,12 @@ impl TransformValues {
     file: RiveFile, artboard_obj: u32, artboard_size: (f32, f32), elapsed: f32,
     components: Vec<Component>,
     update_order: Vec<u32>,
-    gradients: Vec<u32>,
+      gradients: Vec<u32>,
+    constraints: Vec<u32>,
+    constraint_dirty: Vec<bool>,
     draw_groups: Vec<DrawGroup>,
-    animations: Vec<LinearAnimation>,
+     animations: Vec<LinearAnimation>,
+    unsupported: Vec<UnsupportedFeature>,
     active_animation: Option<u32>,
 }
 
@@ -337,6 +372,7 @@ impl Runtime {
             float(&file.ocoll[context_start], property_ids::LAYOUTCOMPONENT_WIDTH)?,
             float(&file.ocoll[context_start], property_ids::LAYOUTCOMPONENT_HEIGHT)?,
         );
+        let unsupported = collect_unsupported(&file.ocoll[context_start..context_end]);
         let (mut components, mut parent_objs) = (Vec::new(), Vec::new());
         let mut obj_comps = vec![None; file.ocoll.len()];
 
@@ -360,6 +396,8 @@ impl Runtime {
                 ComponentData::Vertex(value)
             } else if let Some(value) = GradientState::from_object(object)? {
                 ComponentData::Gradient(value)
+            } else if let Some(value) = Constraint::from_object(object)? {
+                ComponentData::Constraint(value)
             } else { ComponentData::None };
             obj_comps[obj_idx as usize] = Some(components.len() as u32);
             components.push(Component {
@@ -398,16 +436,30 @@ impl Runtime {
                     comp_id: components[index].obj_idx, source_id })
             }   components[index].clip_mut().unwrap().source = source;
         }
+        let constraints: Vec<_> = components.iter().enumerate()
+            .filter_map(|(index, component)|
+                component.constraint().is_some().then_some(index as u32)).collect();
+        for &index in &constraints {
+            let mut constraint = *components[index as usize].constraint().unwrap();
+            constraint.resolve(index, &components, &file.ocoll, &obj_comps, context_start)?;
+            *components[index as usize].constraint_mut().unwrap() = constraint;
+        }
 
         let animations = build_animations(&file, context_start, context_end, &obj_comps)?;
+        let constraint_dirty = if constraints.is_empty() {
+            Vec::new()
+        } else { vec![false; components.len()] };
         let mut runtime = Self { file, artboard_obj: context_start as u32, artboard_size,
             components, update_order: Vec::new(), gradients: Vec::new(), elapsed: 0.0,
-            draw_groups: Vec::new(), animations: Vec::new(), active_animation: None,
+            constraint_dirty, constraints, unsupported, draw_groups: Vec::new(),
+            animations: Vec::new(), active_animation: None,
         };
         // Construction order matters: world transforms feed gradients, then shape content feeds
         // draw grouping and finally draw rules reorder those completed groups.
         runtime.validate_hierarchy()?;
+        sort_constraints(&runtime.components, &mut runtime.constraints)?;
         runtime.update_world_state();
+        runtime.apply_constraints();
         let targets = runtime.build_shape_content()?;
         runtime.gradients = runtime.components.iter().enumerate()
             .filter_map(|(index, component)|
@@ -424,6 +476,8 @@ impl Runtime {
     pub fn artboard_object_index(&self) -> u32 { self.artboard_obj }
     pub fn artboard_size(&self) -> (f32, f32) { self.artboard_size }
     pub fn component_count(&self) -> usize { self.components.len() }
+    pub fn unsupported_features(&self) -> &[UnsupportedFeature] { &self.unsupported }
+    pub fn is_fully_supported(&self) -> bool { self.unsupported.is_empty() }
 
     pub fn animation_count(&self) -> u32 { self.animations.len() as u32 }
     pub fn animation(&self, index: u32) -> Option<AnimationInfo<'_>> {
@@ -475,6 +529,32 @@ impl Runtime {
     fn update_world_state(&mut self) {
         update_world_state(&mut self.components, &self.update_order);
     }
+
+    pub(super) fn apply_constraints(&mut self) {
+        apply_constraints(&mut self.components, &self.update_order, &self.constraints,
+            &mut self.constraint_dirty);
+    }
+}
+
+fn collect_unsupported(objects: &[Object]) -> Vec<UnsupportedFeature> {
+    let mut features = Vec::new();
+    for object in objects {
+        let feature = match object.type_id.0 {
+            object_ids::BONE | object_ids::ROOT_BONE | object_ids::SKIN |
+            object_ids::TENDON | object_ids::WEIGHT => UnsupportedFeature::BonesAndSkins,
+            object_ids::I_K_CONSTRAINT | object_ids::FOLLOW_PATH_CONSTRAINT =>
+                UnsupportedFeature::AdvancedConstraints,
+            object_ids::IMAGE | object_ids::IMAGE_ASSET | object_ids::LAYER_IMAGE_ASSET =>
+                UnsupportedFeature::Images,
+            object_ids::NESTED_ARTBOARD => UnsupportedFeature::NestedArtboards,
+            object_ids::STATE_MACHINE | object_ids::STATE_MACHINE_LAYER |
+            object_ids::ANIMATION_STATE => UnsupportedFeature::StateMachines,
+            object_ids::TEXT | object_ids::TEXT_VALUE_RUN | object_ids::TEXT_STYLE_PAINT |
+            object_ids::FONT_ASSET => UnsupportedFeature::Text,
+            _ => continue,
+        };
+        if !features.contains(&feature) { features.push(feature) }
+    }       features.sort();   features
 }
 
 fn update_world_state(components: &mut [Component], order: &[u32]) {
