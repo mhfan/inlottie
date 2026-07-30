@@ -233,6 +233,18 @@ fn lerp_color(from: u32, to: u32, factor: f32) -> u32 {
     };  channel(24) << 24 | channel(16) << 16 | channel(8) << 8 | channel(0)
 }
 
+pub(super) fn mix_value(from: TrackValue, to: TrackValue, factor: f32) -> TrackValue {
+    let factor = factor.clamp(0.0, 1.0);
+    match (from, to) {
+        (TrackValue::Scalar(from), TrackValue::Scalar(to)) =>
+            TrackValue::Scalar(from + (to - from) * factor),
+        (TrackValue::Color(from), TrackValue::Color(to)) =>
+            TrackValue::Color(lerp_color(from, to, factor)),
+        (_, to) if factor >= 0.5 => to,
+        (from, _) => from,
+    }
+}
+
 #[cfg(test)] mod tests { use super::*;
 
     fn track(interp: Interpolation) -> RawTrack {

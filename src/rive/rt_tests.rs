@@ -240,6 +240,69 @@ fn clipped_scene() -> Vec<Object> {
         Geometry::Ellipse(Rect { x: -20.0, y: -10.0, w: 40.0, h: 20.0 }));
 }
 
+fn nested_scene(controller: Option<Object>) -> RiveFile {
+    let mut host = parented(object_ids::NESTED_ARTBOARD, 0);
+    uint_prop(&mut host, property_ids::NESTEDARTBOARD_ARTBOARDID, 1);
+    prop(&mut host, property_ids::NODE_X, 10.0);
+    let mut objects = vec![artboard(), host];
+    if let Some(controller) = controller { objects.push(controller) }
+    let mut ellipse = parented(object_ids::ELLIPSE, 0);
+    prop(&mut ellipse, property_ids::NODE_X, 5.0);
+    prop(&mut ellipse, property_ids::PARAMETRICPATH_WIDTH, 10.0);
+    objects.extend([artboard(), ellipse, linear_animation(b"nested", 10, 10, 0),
+        keyed_object(1), keyed_property(property_ids::NODE_X),
+        double_keyframe(0, 5.0, 1), double_keyframe(10, 25.0, 1)]);
+    file(objects)
+}
+
+#[test] fn expands_static_nested_artboards() {
+    let runtime = Runtime::from_file(nested_scene(None)).unwrap();
+    assert!((display_list(&runtime)[0].shapes[0].trfm.tx - 15.0).abs() < 1e-5);
+    assert!(runtime.is_fully_supported());
+}
+
+#[test] fn advances_nested_linear_animations() {
+    let mut simple = parented(object_ids::NESTED_SIMPLE_ANIMATION, 1);
+    uint_prop(&mut simple, property_ids::NESTEDANIMATION_ANIMATIONID, 0);
+    simple.add_prop(VarUInt(property_ids::ISPLAYING), FieldValue::VarUInt(VarUInt(1)));
+    let mut runtime = Runtime::from_file(nested_scene(Some(simple))).unwrap();
+    assert!(runtime.advance(0.5));
+    assert!((display_list(&runtime)[0].shapes[0].trfm.tx - 25.0).abs() < 1e-5);
+
+    let mut remap = parented(object_ids::NESTED_REMAP_ANIMATION, 1);
+    uint_prop(&mut remap, property_ids::NESTEDANIMATION_ANIMATIONID, 0);
+    prop(&mut remap, property_ids::TIME, 0.25);
+    let runtime = Runtime::from_file(nested_scene(Some(remap))).unwrap();
+    assert!((display_list(&runtime)[0].shapes[0].trfm.tx - 20.0).abs() < 1e-5);
+}
+
+#[test] fn rejects_recursive_nested_artboards() {
+    let mut nested = parented(object_ids::NESTED_ARTBOARD, 0);
+    uint_prop(&mut nested, property_ids::NESTEDARTBOARD_ARTBOARDID, 0);
+    assert!(matches!(Runtime::from_file(file(vec![artboard(), nested])),
+        Err(RuntimeError::NestedArtboardCycle(0))));
+}
+
+#[test] fn parent_animation_drives_nested_remap_time() {
+    let mut host = parented(object_ids::NESTED_ARTBOARD, 0);
+    uint_prop(&mut host, property_ids::NESTEDARTBOARD_ARTBOARDID, 1);
+    prop(&mut host, property_ids::NODE_X, 10.0);
+    let mut remap = parented(object_ids::NESTED_REMAP_ANIMATION, 1);
+    uint_prop(&mut remap, property_ids::NESTEDANIMATION_ANIMATIONID, 0);
+    let mut ellipse = parented(object_ids::ELLIPSE, 0);
+    prop(&mut ellipse, property_ids::NODE_X, 5.0);
+    let objects = vec![artboard(), host, remap, linear_animation(b"parent", 10, 10, 0),
+        keyed_object(2), keyed_property(property_ids::TIME),
+        double_keyframe(0, 0.0, 1), double_keyframe(10, 1.0, 1),
+        artboard(), ellipse, linear_animation(b"child", 10, 10, 0),
+        keyed_object(1), keyed_property(property_ids::NODE_X),
+        double_keyframe(0, 5.0, 1), double_keyframe(10, 25.0, 1)];
+    let mut runtime = Runtime::from_file(file(objects)).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    assert!((display_list(&runtime)[0].shapes[0].trfm.tx - 25.0).abs() < 1e-5);
+}
+
 #[test] fn reports_unsupported_rive_subsystems_once() {
     let runtime = Runtime::from_file(file(vec![artboard(),
         parented(object_ids::BONE,  0), parented(object_ids::SKIN, 0),

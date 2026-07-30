@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 use femtovg::{Canvas, Color, CompositeOperation, ErrorKind, FillRule as VgFillRule,
-    ImageFlags, LineCap, LineJoin, Paint, Path, PixelFormat, RenderTarget, Solidity, Transform2D,
-    renderer::SurfacelessRenderer
+    ImageFlags, LineCap, LineJoin, Paint, Path, PixelFormat, RenderTarget, Solidity,
+    Transform2D, renderer::SurfacelessRenderer
 };
 use super::{RenderContext, RenderPath, apply_effects, shape_paths,
     display_list::{Brush, Clip, DisplayList, DrawItem, FillRule,
@@ -21,6 +21,7 @@ impl<T: SurfacelessRenderer> RenderContext for Canvas<T> {
 
 #[derive(Default)] pub struct ImageCache(HashMap<u32, femtovg::ImageId>);
 impl ImageCache {
+    /// Releases canvas-owned images before this cache or canvas is replaced.
     pub fn clear<T: SurfacelessRenderer>(&mut self, canvas: &mut Canvas<T>) {
         for (_, image) in self.0.drain() { canvas.delete_image(image) }
     }
@@ -62,11 +63,11 @@ impl<T: SurfacelessRenderer> FemtovgRenderer<'_, T> {
             };
             let mut end = start + 1;
             // Render one contiguous run sharing the same clip-prefix only once.
-            while   end < items.len() && items[end].clips.get(depth)
-                    .is_some_and(|next| next.obj_idx == clip.obj_idx) &&
+            while   end < items.len() && items[end].clips.get(depth).is_some_and(|next|
+                    (next.scope, next.obj_idx) == (clip.scope, clip.obj_idx)) &&
                 items[start].clips.iter().zip(items[end].clips.iter()).take(depth)
-                    .all(|(left, right)| left.obj_idx == right.obj_idx) {       end += 1;
-            }
+                    .all(|(left, right)| (left.scope,  left.obj_idx) ==
+                                        (right.scope, right.obj_idx)) { end += 1; }
             self.render_clip(&items[start..end], clip, depth, target)?; start = end;
         }   Ok(())
     }
@@ -160,11 +161,12 @@ impl<T: SurfacelessRenderer> FemtovgRenderer<'_, T> {
         let canvas = &mut *self.canvas;
         let base = canvas.transform();
         canvas.set_transform(&Transform2D::new(
-            image.trfm.xx, image.trfm.yx, image.trfm.xy,
-            image.trfm.yy, image.trfm.tx, image.trfm.ty));
+            image.trfm.xx, image.trfm.yx,  image.trfm.xy,
+            image.trfm.yy, image.trfm.tx,  image.trfm.ty));
         canvas.translate(-(width as f32) * image.origin.x,
-            -(height as f32) * image.origin.y);
+                        -(height as f32) * image.origin.y);
         canvas.set_global_alpha(opacity.clamp(0.0, 1.0));
+
         let mut path = Path::new();
         path.rect(0.0, 0.0, width as _, height as _);
         canvas.fill_path(&path, &Paint::image(
@@ -183,9 +185,8 @@ impl<T: SurfacelessRenderer> FemtovgRenderer<'_, T> {
         // Transparent SourceOver cannot clear existing pixels; Copy replaces them.
         canvas.global_composite_operation(CompositeOperation::Copy);
         canvas.clear_rect(0, 0, width, height, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
-        canvas.set_global_alpha(1.0);
         canvas.global_composite_operation(CompositeOperation::SourceOver);
-        Ok(image)
+        canvas.set_global_alpha(1.0);   Ok(image)
     }
 }
 

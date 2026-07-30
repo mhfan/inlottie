@@ -1,8 +1,8 @@
 //! Blend2D adapter for backend-neutral Rive display lists.
 
 use std::collections::HashMap;
-use intvg::blend2d::{BLCompOp, BLContext, BLEllipse, BLErr, BLFillRule,
-    BLGeometryDirection, BLGradient, BLImage, BLLinearGradientValues, BLMatrix2D, BLPath,
+use intvg::blend2d::{BLCompOp, BLContext, BLEllipse, BLErr, BLFillRule, BLPath,
+    BLGeometryDirection, BLGradient, BLImage, BLLinearGradientValues, BLMatrix2D,
     BLRadialGradientValues, BLRoundRect, BLRgba32, BLStrokeCap, BLStrokeJoin
 };
 use super::{RenderContext, RenderPath, apply_effects, shape_paths,
@@ -15,8 +15,8 @@ impl RenderContext for BLContext {
         cache: &mut Self::Cache) -> Result<(), Self::Error> {
         render(self, list, cache)
     }
-    type Error = BLErr;
     type Cache = ImageCache;
+    type Error = BLErr;
 }
 
 #[derive(Default)] pub struct ImageCache(HashMap<u32, BLImage>);
@@ -28,7 +28,7 @@ fn render(blctx: &mut BLContext, list: &DisplayList,
     blctx.set_global_alpha(1.0);
     blctx.set_stroke_alpha(1.0); blctx.set_fill_alpha(1.0);
     blctx.set_comp_op(BLCompOp::BL_COMP_OP_SRC_OVER);
-    // Keep decoded images alive until queued Blend2D commands are flushed.
+    // The cache retains decoded assets across frames.
     let result = render_range(blctx, list, 0, &mut assets.0);
     let restore = blctx.restore();
     let flush   = blctx.flush();
@@ -45,16 +45,17 @@ fn render_range(blctx: &mut BLContext, items: &[DrawItem],
         };
         let mut end = start + 1;
         // A shared clip-prefix is rendered once for the whole contiguous run.
-        while   end < items.len() && items[end].clips.get(depth)
-                .is_some_and(|next| next.obj_idx == clip.obj_idx) &&
+        while   end < items.len() && items[end].clips.get(depth).is_some_and(|next|
+                (next.scope, next.obj_idx) == (clip.scope, clip.obj_idx)) &&
             items[start].clips.iter().zip(items[end].clips.iter()).take(depth)
-                .all(|(left, right)| left.obj_idx == right.obj_idx) { end += 1; }
+                .all(|(left, right)| (left.scope,  left.obj_idx) ==
+                                    (right.scope, right.obj_idx)) { end += 1; }
         render_clip(blctx, &items[start..end], clip, depth, assets)?; start = end;
     }   Ok(())
 }
 
-fn render_clip(blctx: &mut BLContext, items: &[DrawItem],
-    clip: &Clip, depth: usize, assets: &mut HashMap<u32, BLImage>) -> Result<(), BLErr> {
+fn render_clip(blctx: &mut BLContext, items: &[DrawItem], clip: &Clip, depth: usize,
+    assets: &mut HashMap<u32, BLImage>) -> Result<(), BLErr> {
     let path = b2d_shapes(&clip.shapes, clip.rule)?;
     blctx.set_global_alpha(1.0);
     blctx.set_fill_rule(b2d_rule(clip.rule));
@@ -118,8 +119,9 @@ fn draw_item(blctx: &mut BLContext, item: &DrawItem,
 
 fn draw_image(blctx: &mut BLContext, image: &super::display_list::Image,
     opacity: f32, assets: &mut HashMap<u32, BLImage>) -> Result<(), BLErr> {
-    if !assets.contains_key(&image.asset_id) {
-        assets.insert(image.asset_id, BLImage::read_from_data(&image.data)?);
+    if let std::collections::hash_map::Entry::Vacant(entry) =
+        assets.entry(image.asset_id) {
+        entry.insert(BLImage::read_from_data(&image.data)?);
     }
     let image_data = &assets[&image.asset_id];
     let (width, height) = (image_data.width(), image_data.height());
@@ -132,8 +134,8 @@ fn draw_image(blctx: &mut BLContext, image: &super::display_list::Image,
     let previous = blctx.user_transform();
     blctx.apply_transform(&trfm);
     blctx.set_global_alpha(opacity.clamp(0.0, 1.0) as _);
-    let result = blctx.blit_image_d((0.0, 0.0).into(), image_data,
-        &(0, 0, width, height).into());
+    let result = blctx.blit_image_d((0.0, 0.0).into(),
+        image_data, &(0, 0, width, height).into());
     blctx.reset_transform(Some(&previous)); result
 }
 

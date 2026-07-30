@@ -24,10 +24,11 @@ use constraint::{Constraint, apply_constraints, sort_constraints};
 pub type Result<T> = std::result::Result<T, RuntimeError>;
 
 #[derive(Debug)] pub enum RuntimeError {
-    Decode(DecodeError), AnimationNameNotFound, AnimationNotFound(u32), ArtboardNotFound(u32),
+    Decode(DecodeError), AnimationNameNotFound, AnimationNotFound(u32),
     DrawOrderCycle(u32), InvalidInterpolation(u32), InvalidInterpolator(u32),
     InvalidTrimMode(u32), ParentCycle(u32), TooManyObjects, TooManyVertices(u32),
-    ConstraintCycle(u32), InvalidConstraintOwner(u32), InvalidConstraintTarget(u32),
+    NestedArtboardCycle(u32), ConstraintCycle(u32), InvalidConstraintOwner(u32),
+    ArtboardNotFound(u32), InvalidConstraintTarget(u32),
     InvalidClipSource { comp_id: u32, source_id: u32 },
     InvalidParent { comp_id: u32, parent_id: u32 },
 }
@@ -38,6 +39,8 @@ impl fmt::Display for RuntimeError {
         Self::AnimationNameNotFound => f.write_str("Rive animation name does not exist"),
         Self::AnimationNotFound(index) => write!(f, "Rive animation {index} does not exist"),
         Self::ArtboardNotFound(index) => write!(f, "Rive artboard {index} does not exist"),
+        Self::NestedArtboardCycle(index) =>
+            write!(f, "Rive nested-artboard cycle at artboard {index}"),
         Self::DrawOrderCycle(obj_idx) =>
             write!(f, "Rive draw-rule cycle at object {obj_idx}"),
         Self::InvalidInterpolation(value) =>
@@ -137,9 +140,7 @@ impl ComponentGeom {
     source: u32, rule: FillRule, visible: bool, shapes: Vec<u32>,
 }
 
-#[derive(Debug)] struct ComponentImage {
-    asset_id: u32, data: Arc<[u8]>, origin: Point,
-}
+#[derive(Debug)] struct ComponentImage { asset_id: u32, data: Arc<[u8]>, origin: Point }
 
 impl ComponentImage {
     fn set(&mut self, prop_id: u32, value: f32) -> bool {
@@ -148,6 +149,34 @@ impl ComponentImage {
             property_ids::IMAGE_ORIGINY => self.origin.y = value,
             _ => return false,
         }   true
+    }
+}
+
+#[derive(Debug)] struct ComponentNestedAnimation {
+    animation: u32, elapsed: f32, kind: NestedAnimationKind,
+}
+
+#[derive(Debug)] enum NestedAnimationKind {
+    Simple { speed: f32, mix: f32, playing: bool },
+    Remap  {  time: f32, mix: f32 },
+}
+
+impl ComponentNestedAnimation {
+    fn set(&mut self, prop_id: u32, value: TrackValue) -> bool {
+        match (&mut self.kind, prop_id, value) {
+            (NestedAnimationKind::Simple { speed, .. },
+                property_ids::NESTEDSIMPLEANIMATION_SPEED, TrackValue::Scalar(value)) =>
+                {   *speed = value; true }
+            (NestedAnimationKind::Simple { mix, .. } |
+             NestedAnimationKind::Remap { mix, .. },
+                property_ids::MIX, TrackValue::Scalar(value)) => {  *mix = value; true }
+            (NestedAnimationKind::Simple { playing, .. },
+                property_ids::ISPLAYING, TrackValue::Bool(value)) =>
+                { *playing = value; true }
+            (NestedAnimationKind::Remap { time, .. },
+                property_ids::TIME, TrackValue::Scalar(value)) => { *time = value; true }
+            _ => false,
+        }
     }
 }
 
@@ -160,6 +189,7 @@ impl ComponentImage {
     Clip(ComponentClip),
     Constraint(Constraint),
     Image(ComponentImage),
+    NestedAnimation(ComponentNestedAnimation),
 }
 
 #[derive(Debug)] struct GradientState {
@@ -271,6 +301,16 @@ impl Component {
     fn image_mut(&mut self) -> Option<&mut ComponentImage> {
         if let ComponentData::Image(value) = &mut self.data { Some(value) } else { None }
     }
+    fn nested_animation(&self) -> Option<&ComponentNestedAnimation> {
+        if let ComponentData::NestedAnimation(value) = &self.data {
+            Some(value)
+        } else { None }
+    }
+    fn nested_animation_mut(&mut self) -> Option<&mut ComponentNestedAnimation> {
+        if let ComponentData::NestedAnimation(value) = &mut self.data {
+            Some(value)
+        } else { None }
+    }
 }
 
 #[derive(Debug)] struct DrawGroup {
@@ -278,8 +318,13 @@ impl Component {
     opacity_component: u32,
     components: Vec<u32>,
     paints: Vec<u32>,
-    clips: Vec<u32>,
-    image: Option<u32>,
+     clips: Vec<u32>,
+     image: Option<u32>,
+    nested: Option<u32>,
+}
+
+#[derive(Debug)] struct NestedRuntime {
+    host: u32, runtime: Box<Runtime>, animations: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Copy)] pub(super) enum ColorTarget {
@@ -364,9 +409,9 @@ impl TransformValues {
 /// points-path geometry with solid or gradient paint. Animation, constraints,
 /// text and state machines can update this retained state without changing the display-list API.
 ///
-/// TODO: Add constraints, text, state machines, skins/deformers, and nested artboards.
+/// TODO: Add text, state machines, skins/deformers, and advanced nested-artboard layout.
 #[derive(Debug)] pub struct Runtime {
-    file: RiveFile, artboard_obj: u32, artboard_size: (f32, f32), elapsed: f32,
+    file: Arc<RiveFile>, artboard_obj: u32, artboard_size: (f32, f32), elapsed: f32,
     components: Vec<Component>,
     update_order: Vec<u32>,
       gradients: Vec<u32>,
@@ -375,6 +420,7 @@ impl TransformValues {
     draw_groups: Vec<DrawGroup>,
      animations: Vec<LinearAnimation>,
     unsupported: Vec<UnsupportedFeature>,
+    nested: Vec<NestedRuntime>,
     active_animation: Option<u32>,
 }
 
@@ -382,6 +428,16 @@ impl Runtime {
     pub fn from_file(file: RiveFile) -> Result<Self> { Self::from_artboard(file, 0) }
 
     pub fn from_artboard(file: RiveFile, artboard_index: u32) -> Result<Self> {
+        let mut stack = Vec::new();
+        Self::from_artboard_inner(Arc::new(file), artboard_index, &mut stack)
+    }
+
+    fn from_artboard_inner(file: Arc<RiveFile>, artboard_index: u32,
+        stack: &mut Vec<u32>) -> Result<Self> {
+        if stack.contains(&artboard_index) {
+            return Err(RuntimeError::NestedArtboardCycle(artboard_index))
+        }   stack.push(artboard_index);
+
         // An artboard owns the contiguous object range up to the next artboard object.
         let context_start = file.ocoll.iter().enumerate()
             .filter(|(_, object)| object.type_id.0 == object_ids::ARTBOARD)
@@ -395,9 +451,9 @@ impl Runtime {
             float(&file.ocoll[context_start], property_ids::LAYOUTCOMPONENT_HEIGHT)?,
         );
         let mut unsupported = collect_unsupported(&file.ocoll[context_start..context_end]);
-        let image_assets = collect_image_assets(&file)?;
         let (mut components, mut parent_objs) = (Vec::new(), Vec::new());
         let mut obj_comps = vec![None; file.ocoll.len()];
+        let image_assets = collect_image_assets(&file)?;
 
         for (obj_idx, object) in file.ocoll.iter().enumerate()
             .take(context_end).skip(context_start) {
@@ -406,7 +462,25 @@ impl Runtime {
             if  obj_idx == u32::MAX { return Err(RuntimeError::TooManyObjects) }
 
             let parent_id = uint(object, property_ids::COMPONENT_PARENTID)?;
-            let data = if object.type_id.0 == object_ids::IMAGE {
+            let data = if matches!(object.type_id.0,
+                object_ids::NESTED_SIMPLE_ANIMATION | object_ids::NESTED_REMAP_ANIMATION) {
+                let animation = uint(object, property_ids::NESTEDANIMATION_ANIMATIONID)?;
+                let kind = if object.type_id.0 == object_ids::NESTED_SIMPLE_ANIMATION {
+                    NestedAnimationKind::Simple {
+                        playing: boolean(object, property_ids::ISPLAYING)?,
+                        speed: float(object, property_ids::NESTEDSIMPLEANIMATION_SPEED)?,
+                          mix: float(object, property_ids::MIX)?,
+                    }
+                } else {
+                    NestedAnimationKind::Remap {
+                        time: float(object, property_ids::TIME)?,
+                         mix: float(object, property_ids::MIX)?,
+                    }
+                };
+                ComponentData::NestedAnimation(ComponentNestedAnimation {
+                    animation, elapsed: 0.0, kind
+                })
+            } else if object.type_id.0 == object_ids::IMAGE {
                 let asset_id = uint(object, property_ids::IMAGE_ASSETID)?;
                 if let Some(data) = image_assets.get(asset_id as usize)
                     .and_then(|data| data.clone()) {
@@ -419,15 +493,13 @@ impl Runtime {
                 } else {
                     if !unsupported.contains(&UnsupportedFeature::Images) {
                         unsupported.push(UnsupportedFeature::Images);
-                    }
-                    ComponentData::None
+                    }   ComponentData::None
                 }
             } else if object.type_id.0 == object_ids::CLIPPING_SHAPE {
                 ComponentData::Clip(ComponentClip {
-                    source: uint(object, property_ids::SOURCEID)?,
+                    source: uint(object, property_ids::SOURCEID)?, shapes: Vec::new(),
                     rule: fill_rule(uint(object, property_ids::CLIPPINGSHAPE_FILLRULE)?),
                     visible: boolean(object, property_ids::CLIPPINGSHAPE_ISVISIBLE)?,
-                    shapes: Vec::new(),
                 })
             } else if let Some(value) = GeomParams::from_object(object)? {
                 ComponentData::Geometry(ComponentGeom::parametric(value))
@@ -439,9 +511,8 @@ impl Runtime {
                 ComponentData::Constraint(value)
             } else { ComponentData::None };
             obj_comps[obj_idx as usize] = Some(components.len() as u32);
-            components.push(Component {
+            components.push(Component {     data, world_opacity: 1.0,
                 is_hole: boolean(object, property_ids::ISHOLE)?, obj_idx, parent: None,
-                data, world_opacity: 1.0,
                 transform: TransformValues::from_object(object)?, world: Affine2::default(),
             });
             parent_objs.push(if obj_idx as usize == context_start { None } else {
@@ -456,17 +527,16 @@ impl Runtime {
             let Some(parent) = obj_comps.get(parent_obj).copied().flatten() else {
                 return Err(RuntimeError::InvalidParent {
                     comp_id: components[index].obj_idx + 1, parent_id })
-            };
-            components[index].parent = Some(parent);
+            };  components[index].parent = Some(parent);
         }
         // Mesh and nine-slice images need textured geometry, not a flat image quad.
         let advanced_images: Vec<_> = components.iter().filter_map(|component| {
             matches!(file.ocoll[component.obj_idx as usize].type_id.0,
                 object_ids::MESH | object_ids::N_SLICER)
-                .then_some(component.parent).flatten()
+                    .then_some(component.parent).flatten()
         }).collect();
         for owner in advanced_images {
-            if components[owner as usize].image().is_some() {
+            if  components[owner as usize].image().is_some() {
                 components[owner as usize].data = ComponentData::None;
                 if !unsupported.contains(&UnsupportedFeature::Images) {
                     unsupported.push(UnsupportedFeature::Images);
@@ -483,7 +553,8 @@ impl Runtime {
                 return Err(RuntimeError::InvalidClipSource {
                     comp_id: components[index].obj_idx, source_id })
             };
-            let source_type = file.ocoll[components[source as usize].obj_idx as usize].type_id.0;
+            let obj_idx = components[source as usize].obj_idx as usize;
+            let source_type = file.ocoll[obj_idx].type_id.0;
             if !core_is_transform_component(source_type) {
                 return Err(RuntimeError::InvalidClipSource {
                     comp_id: components[index].obj_idx, source_id })
@@ -499,14 +570,13 @@ impl Runtime {
         }
 
         let animations = build_animations(&file, context_start, context_end, &obj_comps)?;
-        unsupported.sort();
-        let constraint_dirty = if constraints.is_empty() {
-            Vec::new()
+        let constraint_dirty = if constraints.is_empty() { Vec::new()
         } else { vec![false; components.len()] };
+        unsupported.sort();
         let mut runtime = Self { file, artboard_obj: context_start as u32, artboard_size,
             components, update_order: Vec::new(), gradients: Vec::new(), elapsed: 0.0,
             constraint_dirty, constraints, unsupported, draw_groups: Vec::new(),
-            animations: Vec::new(), active_animation: None,
+            animations: Vec::new(), nested: Vec::new(), active_animation: None,
         };
         // Construction order matters: world transforms feed gradients, then shape content feeds
         // draw grouping and finally draw rules reorder those completed groups.
@@ -519,10 +589,12 @@ impl Runtime {
             .filter_map(|(index, component)|
                 component.gradient().is_some().then_some(index as u32)).collect();
         runtime.animations = runtime.bind_animations(animations, &targets);
+        runtime.build_nested(stack)?;
+        runtime.advance_nested(0.0);
         runtime.build_draw_groups();
         runtime.attach_clips();
         runtime.apply_draw_rules(&obj_comps)?;
-        Ok(runtime)
+        stack.pop();    Ok(runtime)
     }
 
     pub fn file(&self) -> &RiveFile { &self.file }
@@ -546,7 +618,9 @@ impl Runtime {
         }
         if let Some(active) = self.active_animation { self.reset_animation(active); }
         self.active_animation = Some(index); self.elapsed = 0.0;
-        self.apply_animation(); Ok(())
+        self.apply_animation();
+        self.advance_nested(0.0);
+        Ok(())
     }
     pub fn set_animation_by_name(&mut self, name: &[u8]) -> Result<()> {
         let index = self.animations.iter().position(|animation| animation.name == name)
@@ -555,9 +629,13 @@ impl Runtime {
     }
 
     pub fn advance(&mut self, delta_seconds: f32) -> bool {
-        if delta_seconds <= 0.0 || self.active_animation.is_none() { return false }
-        self.elapsed += delta_seconds.max(0.0);
-        self.apply_animation();     true
+        if delta_seconds <= 0.0 { return false }
+        if  self.active_animation.is_some() {
+            self.elapsed += delta_seconds;
+            self.apply_animation();
+        }
+        let nested = self.advance_nested(delta_seconds);
+        self.active_animation.is_some() || nested
     }
 
     fn validate_hierarchy(&mut self) -> Result<()> {
@@ -588,6 +666,54 @@ impl Runtime {
         apply_constraints(&mut self.components, &self.update_order, &self.constraints,
             &mut self.constraint_dirty);
     }
+
+    fn build_nested(&mut self, stack: &mut Vec<u32>) -> Result<()> {
+        let hosts: Vec<_> = self.components.iter().enumerate().filter_map(|(index, component)|
+            (self.file.ocoll[component.obj_idx as usize].type_id.0 ==
+                object_ids::NESTED_ARTBOARD).then_some(index as u32)).collect();
+        let artboard_count = self.file.ocoll.iter()
+            .filter(|object| object.type_id.0 == object_ids::ARTBOARD).count();
+        for host in hosts {
+            let object = &self.file.ocoll[self.components[host as usize].obj_idx as usize];
+            let artboard = uint(object, property_ids::NESTEDARTBOARD_ARTBOARDID)?;
+            if artboard == u32::MAX || artboard as usize >= artboard_count {
+                push_unsupported(&mut self.unsupported, UnsupportedFeature::NestedArtboards);
+                continue
+            }
+            let runtime = Self::from_artboard_inner(self.file.clone(), artboard, stack)?;
+            for &feature in &runtime.unsupported {
+                push_unsupported(&mut self.unsupported, feature);
+            }
+            let animations = self.components.iter().enumerate().filter_map(|(index, component)|
+                (component.parent == Some(host) && component.nested_animation().is_some())
+                    .then_some(index as u32)).collect();
+            self.nested.push(NestedRuntime { host, runtime: Box::new(runtime), animations });
+        }   Ok(())
+    }
+
+    fn advance_nested(&mut self, delta_seconds: f32) -> bool {
+        let mut changed = false;
+        for nested in &mut self.nested {
+            for &component in &nested.animations {
+                let animation = self.components[component as usize]
+                    .nested_animation_mut().unwrap();
+                match &mut animation.kind {
+                    NestedAnimationKind::Simple { speed, mix, playing } => {
+                        if *playing { animation.elapsed += delta_seconds * *speed }
+                        if *playing || *mix != 0.0 {
+                            nested.runtime.apply_animation_sample(
+                                animation.animation, animation.elapsed, *mix);
+                        }   changed |= *playing;
+                    }
+                    NestedAnimationKind::Remap { time, mix } => {
+                        nested.runtime.apply_animation_progress(
+                            animation.animation, *time, *mix);
+                    }
+                }
+            }
+            changed |= nested.runtime.advance_nested(delta_seconds);
+        }   changed
+    }
 }
 
 fn collect_unsupported(objects: &[Object]) -> Vec<UnsupportedFeature> {
@@ -598,7 +724,6 @@ fn collect_unsupported(objects: &[Object]) -> Vec<UnsupportedFeature> {
             object_ids::TENDON | object_ids::WEIGHT => UnsupportedFeature::BonesAndSkins,
             object_ids::I_K_CONSTRAINT | object_ids::FOLLOW_PATH_CONSTRAINT =>
                 UnsupportedFeature::AdvancedConstraints,
-            object_ids::NESTED_ARTBOARD => UnsupportedFeature::NestedArtboards,
             object_ids::STATE_MACHINE | object_ids::STATE_MACHINE_LAYER |
             object_ids::ANIMATION_STATE => UnsupportedFeature::StateMachines,
             object_ids::TEXT | object_ids::TEXT_VALUE_RUN | object_ids::TEXT_STYLE_PAINT |
@@ -607,6 +732,10 @@ fn collect_unsupported(objects: &[Object]) -> Vec<UnsupportedFeature> {
         };
         if !features.contains(&feature) { features.push(feature) }
     }       features.sort();   features
+}
+
+fn push_unsupported(features: &mut Vec<UnsupportedFeature>, feature: UnsupportedFeature) {
+    if !features.contains(&feature) { features.push(feature); features.sort() }
 }
 
 fn collect_image_assets(file: &RiveFile) -> decode::Result<Vec<Option<Arc<[u8]>>>> {
@@ -627,12 +756,9 @@ fn collect_image_assets(file: &RiveFile) -> decode::Result<Vec<Option<Arc<[u8]>>
                 if let Some(bytes) = object.bytes(property_ids::BYTES)? {
                     if !bytes.is_empty() { assets[index] = Some(Arc::from(bytes)) }
                 }
-            }
-            current = None;
-        }
-        _ => {}
-    }}
-    Ok(assets)
+            }   current = None;
+        }   _ => {}
+    } } Ok(assets)
 }
 
 fn update_world_state(components: &mut [Component], order: &[u32]) {

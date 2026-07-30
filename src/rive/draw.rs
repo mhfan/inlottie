@@ -2,8 +2,8 @@
 
 use std::{mem, sync::Arc};
 
-use super::{ComponentPaint, DrawGroup, Result, Runtime, RuntimeError, uint,
-    object_ids, property_ids, Clip, DisplayList, DrawItem, Image, Paint, Shape,
+use super::{ComponentPaint, DrawGroup, Result, Runtime, RuntimeError, uint, Shape,
+    object_ids, property_ids, Affine2, Brush, Clip, DisplayList, DrawItem, Image, Paint,
 };
 
 impl Runtime {
@@ -17,8 +17,8 @@ impl Runtime {
         list.reserve(primitive_count);
         let clip_paths: Vec<_> = self.components.iter().map(|component| {
             let clip = component.clip()?;
-            clip.visible.then(|| Clip { obj_idx: component.obj_idx, rule: clip.rule,
-                shapes: self.snapshot_shapes(&clip.shapes) })
+            clip.visible.then(|| Clip { obj_idx: component.obj_idx, scope: 0,
+                rule: clip.rule, shapes: self.snapshot_shapes(&clip.shapes) })
         }).collect();
 
         // A DrawItem is a snapshot: cloning Paint and Shape data keeps an emitted list valid
@@ -29,6 +29,9 @@ impl Runtime {
             let shapes = self.snapshot_shapes(&group.components);
             let clips: Arc<[_]> = group.clips.iter()
                 .filter_map(|&index| clip_paths[index as usize].clone()).collect();
+            if let Some(index) = group.nested {
+                self.write_nested(index, opacity, &clips, list); continue
+            }
             if group.paints.is_empty() {
                 list.push(DrawItem {
                     obj_idx: group.obj_idx, opacity, clips, shapes, paint: None,
@@ -40,17 +43,44 @@ impl Runtime {
                     visible_paint(paint).then(|| DrawItem {
                         obj_idx: group.obj_idx, opacity,
                         clips: clips.clone(), shapes: shapes.clone(),
-                        paint: Some(paint.value.clone()),
-                        image: None,
+                        paint: Some(paint.value.clone()), image: None,
                     })
                 }));
                 if  list.len() == start {
                     list.push(DrawItem {
-                        obj_idx: group.obj_idx, opacity, clips, shapes, paint: None,
-                        image: None });
+                        obj_idx: group.obj_idx, opacity, clips, shapes,
+                        paint: None, image: None
+                    });
                 }
             }
         }
+    }
+
+    fn write_nested(&self, index: u32, opacity: f32,
+        parent_clips: &[Clip], list: &mut DisplayList) {
+        let nested = &self.nested[index as usize];
+        let host = self.components[nested.host as usize].world;
+        let scope = self.components[nested.host as usize].obj_idx + 1;
+        let mut child = DisplayList::default();
+        nested.runtime.write_display_list(&mut child);
+        list.reserve(child.len());
+        list.extend(child.into_items().map(|mut item| {
+            item.opacity *= opacity;
+            for shape in Arc::make_mut(&mut item.shapes) {
+                shape.trfm = host.then(shape.trfm);
+            }
+            if let Some(image) = &mut item.image { image.trfm = host.then(image.trfm) }
+            if let Some(paint) = &mut item.paint { transform_brush(paint, host) }
+            let mut clips = Vec::with_capacity(parent_clips.len() + item.clips.len());
+            clips.extend_from_slice(parent_clips);
+            clips.extend(item.clips.iter().cloned().map(|mut clip| {
+                clip.scope = scope;
+                for shape in Arc::make_mut(&mut clip.shapes) {
+                    shape.trfm = host.then(shape.trfm);
+                }   clip
+            }));
+            item.clips = clips.into(); item
+        }));
     }
 
     fn snapshot_image(&self, index: u32) -> Image {
@@ -90,20 +120,30 @@ impl Runtime {
                 shape_groups[index] = Some(self.draw_groups.len());
                 self.draw_groups.push(DrawGroup {
                     obj_idx: component.obj_idx, opacity_component: index as u32,
-                    components: Vec::new(), paints: Vec::new(), clips: Vec::new(), image: None,
+                    components: Vec::new(), paints: Vec::new(), clips: Vec::new(),
+                    image: None, nested: None,
                 });
             } else if component.geom().is_some() && shapes[index].is_none() {
                 self.draw_groups.push(DrawGroup {
                     obj_idx: component.obj_idx, opacity_component: index as u32,
                     components: vec![index as u32], paints: Vec::new(),
-                    clips: Vec::new(), image: None,
+                    clips: Vec::new(), image: None, nested: None,
                 });
             } else if component.image().is_some() {
                 self.draw_groups.push(DrawGroup {
                     obj_idx: component.obj_idx, opacity_component: index as u32,
                     components: Vec::new(), paints: Vec::new(),
-                    clips: Vec::new(), image: Some(index as u32),
+                    clips: Vec::new(), image: Some(index as u32), nested: None,
                 });
+            } else if type_id == object_ids::NESTED_ARTBOARD {
+                if let Some(nested) = self.nested.iter()
+                    .position(|nested| nested.host == index as u32) {
+                    self.draw_groups.push(DrawGroup {
+                        obj_idx: component.obj_idx, opacity_component: index as u32,
+                        components: Vec::new(), paints: Vec::new(), clips: Vec::new(),
+                        image: None, nested: Some(nested as u32),
+                    });
+                }
             }
         }
         for (index, component) in self.components.iter().enumerate() {
@@ -111,8 +151,10 @@ impl Runtime {
             let group = &mut self.draw_groups[shape_groups[shape as usize].unwrap()];
             if component.geom().is_some() { group.components.push(index as u32) }
             if component.paint().is_some() { group.paints.push(index as u32) }
-        }   self.draw_groups.retain(|group|
-            !group.components.is_empty() || group.image.is_some());
+        }
+
+        self.draw_groups.retain(|group| !group.components.is_empty() ||
+                group.image.is_some() || group.nested.is_some());
     }
 
     pub(super) fn attach_clips(&mut self) {
@@ -243,5 +285,16 @@ fn is_descendant(components: &[super::Component], mut component: u32, ancestor: 
 fn visible_paint(paint: &ComponentPaint) -> bool {
     paint.visible && match &paint.value {
         Paint::Stroke { width, .. } => 0.0 < *width, _ => true,
+    }
+}
+
+fn transform_brush(paint: &mut Paint, host: Affine2) {
+    let brush = match paint {
+        Paint::Fill { brush, .. } | Paint::Stroke { brush, .. } => brush,
+    };
+    match brush {
+        Brush::LinearGradient { trfm, .. } |
+        Brush::RadialGradient { trfm, .. } => *trfm = host.then(*trfm),
+        Brush::Solid(_) => {}
     }
 }

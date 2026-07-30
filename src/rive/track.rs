@@ -6,7 +6,9 @@ use super::{Brush, ColorTarget, Component, ComponentPaint, ComponentTarget, Effe
     core_is_transform_component, core_varuint_default, float, property_ids,
     apply_constraints, shape::{set_effect, set_paint}, update_world_state,
 };
-use crate::rive::animation::{Animation, LinearAnimation, RawAnimation, evaluate_track};
+use crate::rive::animation::{
+    Animation, LinearAnimation, RawAnimation, evaluate_track, mix_value
+};
 
 #[derive(Debug, Clone, Copy)] pub(super) enum TrackTarget {
     Transform { component: u32, prop_id: u32 },
@@ -22,6 +24,7 @@ use crate::rive::animation::{Animation, LinearAnimation, RawAnimation, evaluate_
     ClipVisibility { component: u32 },
     Constraint { component: u32, prop_id: u32 },
     Image { component: u32, prop_id: u32 },
+    NestedAnimation { component: u32, prop_id: u32 },
 }
 
 #[derive(Debug, Clone, Copy)] pub(in crate::rive) struct TrackBinding {
@@ -87,19 +90,45 @@ impl Runtime {
             }
             _ => frame = frame.min(duration),
         }}
-        self.update_animation(index, Some(frame));
+        self.update_animation(index, Some(frame), 1.0);
     }
 
     pub(super) fn reset_animation(&mut self, animation: u32) {
-        self.update_animation(animation, None);
+        self.update_animation(animation, None, 1.0);
     }
 
-    fn update_animation(&mut self, index: u32, frame: Option<f32>) {
+    pub(super) fn apply_animation_sample(&mut self,
+        index: u32, seconds: f32, mix: f32) -> bool {
+        let Some(animation) = self.animations.get(index as usize) else { return false };
+        let (duration, fps, speed, loop_mode) =
+            (animation.duration as f32, animation.fps as f32,
+             animation.speed, animation.loop_mode);
+        let mut frame = seconds * fps * speed;
+        if 0.0 < duration { match loop_mode {
+            1 => frame = frame.rem_euclid(duration),
+            2 => {
+                frame = frame.rem_euclid(duration * 2.0);
+                if duration < frame { frame = duration * 2.0 - frame }
+            }
+            _ => frame = frame.clamp(0.0, duration),
+        }}
+        self.update_animation(index, Some(frame), mix); true
+    }
+
+    pub(super) fn apply_animation_progress(&mut self,
+        index: u32, progress: f32, mix: f32) -> bool {
+        let Some(duration) = self.animations.get(index as usize)
+            .map(|animation| animation.duration as f32) else { return false };
+        self.update_animation(index, Some(duration * progress.clamp(0.0, 1.0)), mix); true
+    }
+
+    fn update_animation(&mut self, index: u32, frame: Option<f32>, mix: f32) {
         let animation = &self.animations[index as usize];
         let mut transform_dirty = false;
         for track in &animation.tracks {
             let value = frame.and_then(|frame| evaluate_track(track, frame))
-                .unwrap_or(track.binding.default);
+                .map_or(track.binding.default,
+                    |value| mix_value(track.binding.default, value, mix));
             transform_dirty |= apply_track(&mut self.components,
                 track.binding.target, value);
         }
@@ -154,6 +183,9 @@ fn resolve_target(components: &[Component], bindings: &[ComponentTarget],
             Some(TrackTarget::Constraint { component, prop_id }),
         TrackValue::Scalar(_) if state.image().is_some() =>
             Some(TrackTarget::Image { component, prop_id }),
+        TrackValue::Scalar(_) | TrackValue::Bool(_)
+            if state.nested_animation().is_some() =>
+            Some(TrackTarget::NestedAnimation { component, prop_id }),
         TrackValue::Scalar(_) if state.gradient().is_some() =>
             Some(TrackTarget::Gradient { component, prop_id }),
         TrackValue::Scalar(_) | TrackValue::Bool(_) | TrackValue::Uint(_)
@@ -229,6 +261,9 @@ fn apply_track(components: &mut [Component], target: TrackTarget, value: TrackVa
         (TrackTarget::Image { component, prop_id }, TrackValue::Scalar(value)) =>
             return components[component as usize].image_mut()
                 .is_some_and(|image| image.set(prop_id, value)),
+        (TrackTarget::NestedAnimation { component, prop_id }, value) =>
+            return components[component as usize].nested_animation_mut()
+                .is_some_and(|animation| animation.set(prop_id, value)),
         _ => {}
     }   false
 }

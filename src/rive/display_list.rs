@@ -105,7 +105,7 @@ pub enum FillRule { NonZero, EvenOdd, Clockwise }
 
 #[derive(Debug, Clone, PartialEq)] pub struct Clip {
     /// All contours form one clip path under this fill rule.
-    pub obj_idx: u32, pub rule: FillRule, pub shapes: Arc<[Shape]>,
+    pub obj_idx: u32, pub scope: u32, pub rule: FillRule, pub shapes: Arc<[Shape]>,
 }
 
 #[derive(Debug, Clone, PartialEq)] pub struct Image {
@@ -137,6 +137,9 @@ impl DisplayList {
     pub(crate) fn reserve(&mut self, additional: usize) { self.0.reserve(additional) }
     pub(crate) fn extend(&mut self, items: impl IntoIterator<Item = DrawItem>) {
         self.0.extend(items)
+    }
+    pub(crate) fn into_items(self) -> impl ExactSizeIterator<Item = DrawItem> {
+        self.0.into_iter()
     }
 }
 
