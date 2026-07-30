@@ -3,7 +3,7 @@
 use std::{mem, sync::Arc};
 
 use super::{ComponentPaint, DrawGroup, Result, Runtime, RuntimeError, uint, Shape,
-    object_ids, property_ids, Affine2, Brush, Clip, DisplayList, DrawItem, Image, Paint,
+    object_ids, property_ids, Affine, Brush, Clip, DisplayList, DrawItem, Image, Paint,
 };
 
 impl Runtime {
@@ -63,9 +63,9 @@ impl Runtime {
         if let Some(origin) = nested.origin
             .and_then(|index| self.components[index as usize].nested_origin()) {
             let (width, height) = nested.runtime.artboard_size;
-            host = host.then(Affine2 {
+            host = host.then(Affine {
                 tx: -origin.0.x * width, ty: -origin.0.y * height,
-                ..Affine2::default()
+                ..Affine::default()
             });
         }
         let scope = self.components[nested.host as usize].obj_idx + 1;
@@ -296,7 +296,7 @@ fn visible_paint(paint: &ComponentPaint) -> bool {
     }
 }
 
-fn transform_brush(paint: &mut Paint, host: Affine2) {
+fn transform_brush(paint: &mut Paint, host: Affine) {
     let brush = match paint {
         Paint::Fill { brush, .. } | Paint::Stroke { brush, .. } => brush,
     };

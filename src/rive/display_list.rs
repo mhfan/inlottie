@@ -21,16 +21,16 @@ pub struct Rect { pub x: f32, pub y: f32, pub w: f32, pub h: f32 }
     pub tl: f32, pub tr: f32, pub br: f32, pub bl: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)] pub struct Affine2 {
+#[derive(Debug, Clone, Copy, PartialEq)] pub struct Affine {
     pub xx: f32, pub yx: f32, pub xy: f32,
     pub yy: f32, pub tx: f32, pub ty: f32,
 }
 
-impl Default for Affine2 {
+impl Default for Affine {
     fn default() -> Self { Self { xx: 1.0, yx: 0.0, xy: 0.0, yy: 1.0, tx: 0.0, ty: 0.0 } }
 }
 
-impl Affine2 {
+impl Affine {
     pub fn from_transform(x: f32, y: f32, rotation: f32,
         scale_x: f32, scale_y: f32) -> Self {
         let (sin, cos) = rotation.sin_cos();
@@ -83,9 +83,9 @@ pub enum FillRule { NonZero, EvenOdd, Clockwise }
 }
 
 #[derive(Debug, Clone, PartialEq)] pub enum Brush { Solid(u32),
-    LinearGradient {  start: Point,  end: Point, trfm: Affine2,
+    LinearGradient {  start: Point,  end: Point, trfm: Affine,
         opacity: f32, stops: Arc<[GradientStop]> },
-    RadialGradient { center: Point, radius: f32, trfm: Affine2,
+    RadialGradient { center: Point, radius: f32, trfm: Affine,
         opacity: f32, stops: Arc<[GradientStop]> },
 }
 
@@ -99,7 +99,7 @@ pub enum FillRule { NonZero, EvenOdd, Clockwise }
     /// Source object index, retained for diagnostics and future hit testing.
     pub obj_idx: u32,
     pub is_hole: bool,
-    pub trfm: Affine2,
+    pub trfm: Affine,
     pub geom: Geometry,
 }
 
@@ -112,7 +112,7 @@ pub enum FillRule { NonZero, EvenOdd, Clockwise }
     /// File-asset slot, stable within one Runtime and used by backend caches.
     pub asset_id: u32,
     pub data: Arc<[u8]>,
-    pub trfm: Affine2,
+    pub trfm: Affine,
     pub origin: Point,
 }
 

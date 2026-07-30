@@ -2,7 +2,7 @@
 
 use super::{Component, Result, RuntimeError, TrackValue,
     boolean, core_is_transform_component, float, object_ids, property_ids, uint};
-use crate::rive::{decode::Object, display_list::{Affine2, Point}};
+use crate::rive::{decode::Object, display_list::{Affine, Point}};
 use core::f32::consts::{PI, TAU};
 
 #[derive(Debug, Clone, Copy)] enum Kind {
@@ -23,11 +23,11 @@ use core::f32::consts::{PI, TAU};
     x: f32, y: f32, scale_x: f32, scale_y: f32, rotation: f32, skew: f32,
 }
 
-struct PartsCache(Vec<(usize, Affine2, Parts)>);
+struct PartsCache(Vec<(usize, Affine, Parts)>);
 
 impl PartsCache {
     fn new(capacity: usize) -> Self { Self(Vec::with_capacity(capacity)) }
-    fn get(&mut self, index: usize, matrix: Affine2) -> Parts {
+    fn get(&mut self, index: usize, matrix: Affine) -> Parts {
         if let Some((_, _, parts)) = self.0.iter().rev()
             .find(|(cached_index, cached, _)| *cached_index == index && *cached == matrix) {
             return *parts
@@ -35,7 +35,7 @@ impl PartsCache {
         let parts = decompose(matrix);
         self.set(index, matrix, parts); parts
     }
-    fn set(&mut self, index: usize, matrix: Affine2, parts: Parts) {
+    fn set(&mut self, index: usize, matrix: Affine, parts: Parts) {
         if let Some(entry) = self.0.iter_mut()
             .find(|(cached_index, _, _)| *cached_index == index) {
             *entry = (index, matrix, parts);
@@ -246,18 +246,18 @@ fn apply_constraint(components: &mut [Component],
         return false
     }
     let owner_parent = components[owner].parent
-        .map_or(Affine2::default(), |parent| components[parent as usize].world);
+        .map_or(Affine::default(), |parent| components[parent as usize].world);
     let source = if let Some(target) = constraint.target {
         let target = target as usize;
         let mut target_world = components[target].world;
         if let Kind::Transform { origin, bounds } = constraint.kind {
-            target_world = target_world.then(Affine2 {
-                tx: bounds.x * origin.x, ty: bounds.y * origin.y, ..Affine2::default()
+            target_world = target_world.then(Affine {
+                tx: bounds.x * origin.x, ty: bounds.y * origin.y, ..Affine::default()
             });
         }
         if constraint.source_local {
             let target_parent = components[target].parent
-                .map_or(Affine2::default(), |parent| components[parent as usize].world);
+                .map_or(Affine::default(), |parent| components[parent as usize].world);
             let Some(inverse) = inverse(target_parent) else { return false };
             inverse.then(target_world)
         } else { target_world }
@@ -296,7 +296,7 @@ fn apply_constraint(components: &mut [Component],
     components[owner].world = next; true
 }
 
-fn constrain_transform(from: Parts, mut to: Parts, strength: f32) -> Affine2 {
+fn constrain_transform(from: Parts, mut to: Parts, strength: f32) -> Affine {
     let mut difference = to.rotation.rem_euclid(TAU) - from.rotation.rem_euclid(TAU);
     if PI < difference { difference -= TAU }
     else if difference < -PI { difference += TAU }
@@ -310,8 +310,8 @@ fn constrain_transform(from: Parts, mut to: Parts, strength: f32) -> Affine2 {
     compose(to)
 }
 
-fn constrain_distance(current: Affine2, target: Affine2,
-    distance: f32, mode: u32, strength: f32) -> Affine2 {
+fn constrain_distance(current: Affine, target: Affine,
+    distance: f32, mode: u32, strength: f32) -> Affine {
     let (dx, dy) = (current.tx - target.tx, current.ty - target.ty);
     let current_distance = dx.hypot(dy);
     if mode == 0 && current_distance < distance ||
@@ -321,12 +321,12 @@ fn constrain_distance(current: Affine2, target: Affine2,
     }
     let scale = distance / current_distance;
     let (x, y) = (target.tx + dx * scale, target.ty + dy * scale);
-    Affine2 { tx: current.tx + (x - current.tx) * strength,
+    Affine { tx: current.tx + (x - current.tx) * strength,
         ty: current.ty + (y - current.ty) * strength, ..current }
 }
 
-fn constrain_translation(current: Affine2, source: Affine2, parent: Affine2,
-    local: super::TransformValues, constraint: Constraint, has_target: bool) -> Affine2 {
+fn constrain_translation(current: Affine, source: Affine, parent: Affine,
+    local: super::TransformValues, constraint: Constraint, has_target: bool) -> Affine {
     let mut target = Point { x: source.tx, y: source.ty };
     if has_target {
         if !constraint.copy_x {
@@ -352,13 +352,13 @@ fn constrain_translation(current: Affine2, source: Affine2, parent: Affine2,
         constraint.has_max_y.then_some(constraint.max_y));
     if constraint.limits_local { limited = parent.transform_point(limited) }
     let strength = constraint.strength;
-    Affine2 { tx: current.tx + (limited.x - current.tx) * strength,
+    Affine { tx: current.tx + (limited.x - current.tx) * strength,
         ty: current.ty + (limited.y - current.ty) * strength, ..current }
 }
 
-fn constrain_rotation(current: Affine2, current_parts: Parts, mut target: Parts,
-    parent: Affine2, local: super::TransformValues, constraint: Constraint,
-    has_target: bool) -> Affine2 {
+fn constrain_rotation(current: Affine, current_parts: Parts, mut target: Parts,
+    parent: Affine, local: super::TransformValues, constraint: Constraint,
+    has_target: bool) -> Affine {
     if has_target {
         if !constraint.copy_x {
             target.rotation = if constraint.dest_local { 0.0 } else { current_parts.rotation };
@@ -385,9 +385,9 @@ fn constrain_rotation(current: Affine2, current_parts: Parts, mut target: Parts,
     };  compose(result)
 }
 
-fn constrain_scale(current: Affine2, current_parts: Parts, mut target: Parts,
-    parent: Affine2, local: super::TransformValues, constraint: Constraint,
-    has_target: bool) -> Affine2 {
+fn constrain_scale(current: Affine, current_parts: Parts, mut target: Parts,
+    parent: Affine, local: super::TransformValues, constraint: Constraint,
+    has_target: bool) -> Affine {
     if has_target {
         if !constraint.copy_x {
             target.scale_x = if constraint.dest_local { 1.0 } else { current_parts.scale_x };
@@ -426,7 +426,7 @@ fn clamp(mut value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
     if let Some(min) = min { value = value.max(min) }   value
 }
 
-fn decompose(matrix: Affine2) -> Parts {
+fn decompose(matrix: Affine) -> Parts {
     let denom = matrix.xx * matrix.xx + matrix.yx * matrix.yx;
     let scale_x = denom.sqrt();
     Parts { x: matrix.tx, y: matrix.ty, scale_x,
@@ -438,8 +438,8 @@ fn decompose(matrix: Affine2) -> Parts {
     }
 }
 
-fn compose(parts: Parts) -> Affine2 {
-    let mut matrix = Affine2::from_transform(
+fn compose(parts: Parts) -> Affine {
+    let mut matrix = Affine::from_transform(
         parts.x, parts.y, parts.rotation, parts.scale_x, parts.scale_y);
     if parts.skew != 0.0 {
         matrix.xy += matrix.xx * parts.skew;
@@ -447,11 +447,11 @@ fn compose(parts: Parts) -> Affine2 {
     }   matrix
 }
 
-fn inverse(matrix: Affine2) -> Option<Affine2> {
+fn inverse(matrix: Affine) -> Option<Affine> {
     let determinant = matrix.xx * matrix.yy - matrix.yx * matrix.xy;
     if determinant == 0.0 { return None }
     let inverse = determinant.recip();
-    Some(Affine2 {
+    Some(Affine {
         xx:  matrix.yy * inverse, yx: -matrix.yx * inverse,
         xy: -matrix.xy * inverse, yy:  matrix.xx * inverse,
         tx: (matrix.xy * matrix.ty -   matrix.yy * matrix.tx) * inverse,

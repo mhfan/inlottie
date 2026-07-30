@@ -31,7 +31,7 @@ fn constraint(type_id: u32, owner: u32, target: u32) -> Object {
     object
 }
 
-fn world(runtime: &Runtime, obj_idx: u32) -> Affine2 {
+fn world(runtime: &Runtime, obj_idx: u32) -> Affine {
     runtime.components.iter().find(|component| component.obj_idx == obj_idx).unwrap().world
 }
 

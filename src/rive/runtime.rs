@@ -4,7 +4,7 @@
 use std::{error::Error as StdError, fmt, f32, sync::Arc};
 
 use super::{animation::{LinearAnimation, TrackValue, build_animations},
-    display_list::{Affine2, Brush, Clip, DashSegment, DisplayList, FillRule,
+    display_list::{Affine, Brush, Clip, DashSegment, DisplayList, FillRule,
         Geometry, GradientStop, Image, Paint, PathEffect, Point, Shape,
         DrawItem, StrokeCap, StrokeJoin, TrimMode
     },
@@ -297,7 +297,7 @@ impl GradientState {
     data: ComponentData,
     transform: TransformValues,
     world_opacity: f32,
-    world: Affine2,
+    world: Affine,
     is_hole: bool,
 }
 
@@ -453,8 +453,8 @@ impl TransformValues {
         _ => false,
     } }
 
-    fn affine(self) -> Affine2 {
-        Affine2::from_transform(self.x, self.y, self.rotation, self.scale_x, self.scale_y)
+    fn affine(self) -> Affine {
+        Affine::from_transform(self.x, self.y, self.rotation, self.scale_x, self.scale_y)
     }
 }
 
@@ -580,7 +580,7 @@ impl Runtime {
             obj_comps[obj_idx as usize] = Some(components.len() as u32);
             components.push(Component {     data, world_opacity: 1.0,
                 is_hole: boolean(object, property_ids::ISHOLE)?, obj_idx, parent: None,
-                transform: TransformValues::from_object(object)?, world: Affine2::default(),
+                transform: TransformValues::from_object(object)?, world: Affine::default(),
             });
             parent_objs.push(if obj_idx as usize == context_start { None } else {
                 Some((context_start.checked_add(parent_id as usize)
