@@ -7,9 +7,10 @@
 
 use core::{mem, f32::consts::PI};
 use super::{helpers::{Vec2D, ACCURACY_TOLERANCE},
-    path_ops::{MeasuredPath, flatten_contour, for_each_contour, offset_contour, round_contour},
+    path_ops::{flatten_contour, for_each_contour, offset_contour, round_contour},
     schema::{Rectangle, Polystar, Ellipse, FreePath, ShapeProperty, StarType, LineJoin}
 };
+pub(crate) use super::path_ops::MeasuredPath;
 
 impl From<Vec2D> for kurbo::Vec2 {
     fn from(val: Vec2D) -> Self { Self::new(val.x as _, val.y as _) }
@@ -124,7 +125,7 @@ fn modify_kurbo<P: PathBuilder>(target: &mut P, f: impl FnOnce(&mut BezPath)) {
 }
 
 pub(crate) fn trim_kurbo(path: &mut BezPath, start: f32, trim: f32) {
-    let measured = MeasuredPath::new(mem::take(path));
+    let measured = MeasuredPath::new(mem::take(path), ACCURACY_TOLERANCE);
     let start = start.rem_euclid(1.) as _;
     let end   = start + trim as f64;
     *path = if end <= 1. {

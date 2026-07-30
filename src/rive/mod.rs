@@ -11,9 +11,11 @@ pub mod rscpp_nvg;
 mod path;
 pub mod runtime;
 
-use kurbo::{Affine, BezPath, ParamCurveArclen, Shape as _};
-use crate::core::pathm::PathBuilder;
+use kurbo::{Affine, BezPath, Shape as _};
 use display_list::{DisplayList, Geometry, PathCommand, PathEffect, Shape, TrimMode};
+use crate::core::pathm::MeasuredPath;
+
+const PATH_TOLERANCE: f64 = 1e-3;
 
 /// Backend contract for consuming immutable Rive frame snapshots.
 pub trait RenderContext { type Error; type Cache: Default;
@@ -68,16 +70,23 @@ fn apply_effects(mut paths: Vec<RenderPath>, effects: &[PathEffect]) -> Vec<Rend
                 // Sequential trim measures the painted contour stream as one path.
                 let mut path = BezPath::new();
                 for entry in paths { path.extend(entry.path) }
-                path.trim_path(*start + *offset, trim);
+                let measured = MeasuredPath::new(path, PATH_TOLERANCE);
+                path = trim_measured(&measured, *start + *offset, trim);
                 paths = vec![RenderPath { path, hole: false }];
             } else {
-                for entry in &mut paths { entry.path.trim_path(*start + *offset, trim); }
+                for entry in &mut paths {
+                    let measured = MeasuredPath::new(
+                        core::mem::take(&mut entry.path), PATH_TOLERANCE);
+                    entry.path = trim_measured(&measured, *start + *offset, trim);
+                }
             }
         }
         PathEffect::Dash { offset, relative, segments } => for entry in &mut paths {
+            let measured = MeasuredPath::new(
+                core::mem::take(&mut entry.path), PATH_TOLERANCE);
             // Relative dash values are fractions of the transformed contour length.
             let length = if *relative || segments.iter().any(|segment| segment.relative) {
-                entry.path.segments().map(|segment| segment.arclen(1e-3)).sum()
+                measured.length
             } else { 0.0 };
             let mut pattern: Vec<_> = segments.iter().map(|segment|
                 if segment.relative { segment.len * length as f32
@@ -85,8 +94,42 @@ fn apply_effects(mut paths: Vec<RenderPath>, effects: &[PathEffect]) -> Vec<Rend
             if pattern.len() % 2 == 1 { pattern.extend_from_within(..) }
             let offset = if *relative { *offset as f64 * length } else { *offset as f64 };
             entry.path = if pattern.iter().any(|&value| 0.0 < value) {
-                kurbo::dash(entry.path.iter(), offset, &pattern).collect()
+                measured.dash(offset, &pattern)
             } else { BezPath::new() };
         },
     }}  paths
+}
+
+fn trim_measured(measured: &MeasuredPath, start: f32, trim: f32) -> BezPath {
+    let start = start.rem_euclid(1.) as f64;
+    let end = start + trim as f64;
+    if  end <= 1. { measured.trim_ranges(&[(start, end)]) } else {
+                    measured.trim_ranges(&[(start, 1.), (0., end - 1.)])
+    }
+}
+
+#[cfg(test)] mod tests { use super::*;
+    use kurbo::ParamCurveArclen as _;
+    use display_list::DashSegment;
+    use std::sync::Arc;
+
+    #[test] fn trim_then_relative_dash_uses_the_trimmed_path_metrics() {
+        let mut path = BezPath::new();
+        path.move_to((0., 0.)); path.line_to((100., 0.));
+        let effects = [
+            PathEffect::Trim {
+                start: 0., end: 0.5, offset: 0., mode: TrimMode::Synchronized,
+            },
+            PathEffect::Dash {
+                segments: Arc::from([
+                    DashSegment { len: 0.1, relative: true },
+                    DashSegment { len: 0.1, relative: true },
+                ]), offset: 0., relative: false,
+            },
+        ];
+        let result = apply_effects(vec![RenderPath { path, hole: false }], &effects);
+        let length = result[0].path.segments()
+            .map(|segment| segment.arclen(PATH_TOLERANCE)).sum::<f64>();
+        assert!((length - 25.).abs() < PATH_TOLERANCE);
+    }
 }

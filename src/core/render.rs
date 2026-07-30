@@ -7,8 +7,9 @@
 
 use core::mem;
 use std::{collections::HashMap, rc::Rc};
-use super::{composite::{self, CompositeContext}, path_ops::MeasuredPath,
-    helpers::{Vec2D, RGBA, IntBool}, style::{StyleConv, MatrixConv, TM2DwO, FSOpts},
+use super::{composite::{self, CompositeContext},
+    helpers::{Vec2D, RGBA, IntBool, ACCURACY_TOLERANCE},
+    path_ops::MeasuredPath, style::{StyleConv, MatrixConv, TM2DwO, FSOpts},
     pathm::{BezPath, PathBuilder, PathFactory, trim_kurbo, round_kurbo, offset_kurbo},
     schema::{Animation, AssetItem, LayerItem, ShapeItem, TrimPath, TrimMultiple, FillRule},
 };
@@ -581,7 +582,8 @@ fn trim_shapes<VGPath: PathBuilder, VGPaint: StyleConv, TM2D: MatrixConv + Clone
         let mut paths = Vec::new();
 
         for_each_path_mut(draws, &mut |path| {
-            let path = MeasuredPath::new(mem::replace(path, VGPath::new(0)).into_kurbo());
+            let path = MeasuredPath::new(
+                mem::replace(path, VGPath::new(0)).into_kurbo(), ACCURACY_TOLERANCE);
             total += path.length;
             paths.push(path);
         });

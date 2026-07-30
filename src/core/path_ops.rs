@@ -171,18 +171,28 @@ pub(super) fn offset_contour(points: &mut Vec<kurbo::Point>, closed: bool,
 }
 
 pub(crate) struct MeasuredPath {
-    path: BezPath, pub length: f64,
+    path: BezPath, tolerance: f64, pub length: f64,
     segments: Vec<(kurbo::PathSeg, f64)>,
+    contours: Vec<(std::ops::Range<usize>, f64, bool)>,
 }
 
 impl MeasuredPath {
-    pub fn new(path: BezPath) -> Self {
+    pub fn new(path: BezPath, tolerance: f64) -> Self {
+        assert!(tolerance.is_finite() && 0. < tolerance,
+            "path measurement tolerance must be finite and positive");
         let mut segments = Vec::with_capacity(path.elements().len().saturating_sub(1));
-        let mut length = 0.;
-        for seg in path.segments() {
-            let len = seg.arclen(ACCURACY_TOLERANCE);
-            segments.push((seg, len)); length += len;
-        }   Self { path, segments, length }
+        let (mut length, mut contours) = (0., Vec::new());
+        for_each_contour(&path, |elements, closed| {
+            let (start, mut contour_length) = (segments.len(), 0.);
+            for seg in kurbo::segments(elements.iter().copied()) {
+                let len = seg.arclen(tolerance);
+                segments.push((seg, len));
+                contour_length += len;
+            }
+            contours.push((start..segments.len(), contour_length, closed));
+            length += contour_length;
+        });
+        Self { path, tolerance, length, segments, contours }
     }
 
     pub fn trim_ranges(&self, ranges: &[(f64, f64)]) -> BezPath {
@@ -201,11 +211,147 @@ impl MeasuredPath {
                 let next = offset + len;
                 let (lo, hi) = (from.max(offset), to.min(next));
                 if lo < hi && 0. < len {
-                    let range = seg.inv_arclen(lo - offset, ACCURACY_TOLERANCE)
-                             .. seg.inv_arclen(hi - offset, ACCURACY_TOLERANCE);
+                    let range = seg.inv_arclen(lo - offset, self.tolerance)
+                             .. seg.inv_arclen(hi - offset, self.tolerance);
                     output.push(seg.subsegment(range));
                 }   offset = next;
             }
         }   BezPath::from_path_segments(output.into_iter())
+    }
+
+    /// Apply a dash pattern using the segment lengths already measured by this path.
+    pub fn dash(&self, offset: f64, pattern: &[f64]) -> BezPath {
+        let period: f64 = pattern.iter().sum();
+        if  pattern.is_empty() ||     !period.is_finite() || period <= 0. ||
+            pattern.iter().any(|value| !value.is_finite() || *value < 0.) {
+            return BezPath::new()
+        }
+        let mut output = BezPath::new();
+        for (segments, length, closed) in &self.contours {
+            if *length == 0. { continue }
+            let (mut index, mut remaining, mut active) =
+                (0usize, pattern[0] - offset.rem_euclid(period), true);
+            while remaining < 0. {
+                index = (index + 1) % pattern.len();
+                remaining += pattern[index]; active = !active;
+            }
+
+            let (mut cursor, mut ranges) = (0., Vec::<(f64, f64)>::new());
+            while cursor < *length {
+                if remaining <= 0. {
+                    index = (index + 1) % pattern.len();
+                    remaining = pattern[index]; active = !active;
+                    continue
+                }
+                let step = remaining.min(*length - cursor);
+                if active && 0. < step {
+                    if let Some(last) = ranges.last_mut().filter(|last| last.1 == cursor) {
+                        last.1 += step;
+                    } else {
+                        ranges.push((cursor, cursor + step));
+                    }
+                }
+                cursor += step; remaining -= step;
+            }
+            if ranges.is_empty() { continue }
+            if *closed && ranges.len() == 1 && ranges[0] == (0., *length) {
+                append_range(&mut output, &self.segments[segments.clone()],
+                    0., *length, self.tolerance, false);
+                output.close_path();    continue
+            }
+
+            // A closed contour whose first and last dashes are active has one dash crossing
+            // the seam. Emit the tail and head as one connected subpath.
+            let wraps = *closed && ranges.len() > 1 &&
+                ranges.first().is_some_and(|range| range.0 == 0.) &&
+                ranges. last().is_some_and(|range| range.1 == *length);
+            if wraps {
+                let tail = ranges.pop().unwrap();
+                let head = ranges.remove(0);
+                append_range(&mut output, &self.segments[segments.clone()],
+                    tail.0, tail.1, self.tolerance, false);
+                append_range(&mut output, &self.segments[segments.clone()],
+                    head.0, head.1, self.tolerance, true);
+            }
+            for (from, to) in ranges {
+                append_range(&mut output, &self.segments[segments.clone()],
+                    from, to, self.tolerance, false);
+            }
+        }   output
+    }
+}
+
+fn append_range(output: &mut BezPath, segments: &[(kurbo::PathSeg, f64)],
+    from: f64, to: f64, tolerance: f64, connect: bool) {
+    let (mut offset, mut first) = (0., true);
+    for &(segment, length) in segments {
+        let next = offset + length;
+        let (lo, hi) = (from.max(offset), to.min(next));
+        if lo < hi && 0. < length {
+            let range = segment.inv_arclen(lo - offset, tolerance)
+                     .. segment.inv_arclen(hi - offset, tolerance);
+            let segment = segment.subsegment(range);
+            if first && !connect { output.move_to(segment.start()); }
+            match segment {
+                kurbo::PathSeg::Line(line) => output.line_to(line.p1),
+                kurbo::PathSeg::Quad(quad) => output.quad_to(quad.p1, quad.p2),
+                kurbo::PathSeg::Cubic(cubic) =>
+                    output.curve_to(cubic.p1, cubic.p2, cubic.p3),
+            }
+            first = false;
+        }   offset = next;
+    }
+}
+
+#[cfg(test)] mod tests { use super::*;
+    const TOLERANCE: f64 = 1e-6;
+
+    #[test] fn measured_dash_matches_kurbo_for_open_curves() {
+        let (mut path, pattern) = (BezPath::new(), [13., 7., 3., 5.]);
+        path.move_to((0., 0.)); path.curve_to((20., 40.), (80., -40.), (100., 0.));
+        let expected: BezPath = kurbo::dash(path.iter(), 9., &pattern).collect();
+        let actual = MeasuredPath::new(path, TOLERANCE).dash(9., &pattern);
+        assert_eq!(actual.segments().count(), expected.segments().count());
+        let length = |path: &BezPath| path.segments()
+            .map(|segment| segment.arclen(TOLERANCE)).sum::<f64>();
+        assert!((length(&actual) - length(&expected)).abs() < 1e-5);
+    }
+
+    #[test] fn measured_dash_resets_phase_for_each_contour() {
+        let mut path = BezPath::new();
+        path.move_to((0., 0.));   path.line_to((20., 0.));
+        path.move_to((100., 0.)); path.line_to((120., 0.));
+        let dashed = MeasuredPath::new(path, TOLERANCE).dash(3., &[8., 4.]);
+        let starts = dashed.elements().iter().filter_map(|element| match element {
+            kurbo::PathEl::MoveTo(point) => Some(point.x),
+            _ => None,
+        }).collect::<Vec<_>>();
+        assert_eq!(starts, [0., 9., 100., 109.]);
+    }
+
+    #[test] fn measured_dash_joins_a_closed_contour_across_its_seam() {
+        let mut path = BezPath::new();
+        path.move_to((0., 0.));   path.line_to((10., 0.));
+        path.line_to((10., 10.)); path.line_to((0., 10.)); path.close_path();
+        let dashed = MeasuredPath::new(path, TOLERANCE).dash(3., &[8., 4.]);
+        let moves = dashed.elements().iter()
+            .filter(|element| matches!(element, kurbo::PathEl::MoveTo(_))).count();
+        assert_eq!(moves, 3);
+        assert!(dashed.elements().iter()
+            .all(|element| !matches!(element, kurbo::PathEl::ClosePath)));
+
+        let unbroken = MeasuredPath::new(dashed, TOLERANCE);
+        assert!(unbroken.length > 0.);
+    }
+
+    #[test] fn measured_dash_preserves_an_unbroken_closed_contour() {
+        let mut path = BezPath::new();
+        path.move_to((0., 0.)); path.line_to((10., 0.));
+        path.line_to((10., 10.)); path.close_path();
+        let dashed = MeasuredPath::new(path.clone(), TOLERANCE).dash(0., &[100., 1.]);
+        assert!(matches!(dashed.elements().last(), Some(kurbo::PathEl::ClosePath)));
+        let length = |path: &BezPath| path.segments()
+            .map(|segment| segment.arclen(TOLERANCE)).sum::<f64>();
+        assert_eq!(length(&dashed), length(&path));
     }
 }
