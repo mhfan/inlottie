@@ -10,7 +10,7 @@
 
 use femtovg::{renderer::OpenGl, Renderer, Canvas};
 #[cfg(feature = "b2d")] use {intvg::blend2d::*, std::rc::Rc};
-use std::{collections::VecDeque, time::Instant, error::Error, fs, env};
+use std::{collections::{HashMap, VecDeque}, time::Instant, error::Error, fs, env};
 
 use winit::{application::ApplicationHandler, window::{Window, WindowId},
     event_loop::{ActiveEventLoop, EventLoop}, event::WindowEvent};
@@ -164,21 +164,28 @@ struct WinitApp {
     #[cfg(feature = "rive-rs")] use_rive_rs: bool,
 
     #[cfg(feature = "b2d")] blctx: Option<(BLContext, f32)>,
+    #[cfg(feature = "b2d")] b2d_svg_images: b2d_svg::ImageCache,
     #[cfg(feature = "b2d")] surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
 
     ctx2d: Option<Canvas<OpenGl>>,
+    #[cfg(feature = "lottie")] lottie_images: ImageCache,
+    svg_images: HashMap<usize, femtovg::ImageId>,
     #[cfg(not(target_arch = "wasm32"))]
     state: Option<(Surface<WindowSurface>, PossiblyCurrentContext)>,
     window: Option<Window>,
 }
 
-#[cfg(feature =  "lottie")] use inlottie::core::{helpers::RGBA, render::LottieRuntime};
+#[cfg(feature =  "lottie")] use inlottie::{
+    core::{helpers::RGBA, render::LottieRuntime},
+    backend::femtovg::FemtovgContext,
+    backend::femtovg::ImageCache,
+};
 #[cfg(feature = "rive-rs")] use inlottie::rive::rscpp_nvg::RiveNVG;
 use inlottie::rive::{RenderContext as _, decode::RiveFile,
-    display_list::DisplayList, runtime::Runtime as RiveRuntime};
-use inlottie::rive::render_nvg::ImageCache as NvgImageCache;
-#[cfg(feature = "b2d")]
-use inlottie::rive::render_b2d::ImageCache as B2dImageCache;
+    display_list::DisplayList, runtime::Runtime as RiveRuntime,
+    render_nvg::ImageCache as NvgImageCache,
+};
+#[cfg(feature = "b2d")] use inlottie::rive::render_b2d::ImageCache as B2dImageCache;
 
 #[derive(Clone, Copy, PartialEq)] enum BackendChoice { Auto, Femtovg, Blend2d }
 
@@ -211,10 +218,12 @@ impl WinitApp {
             #[cfg(feature = "b2d")] use_b2d: _use_b2d,
             #[cfg(feature = "b2d")] surface: None,
             #[cfg(feature = "b2d")] blctx: None,
+            #[cfg(feature = "b2d")] b2d_svg_images: Default::default(),
             perf: PerfGraph::new(), mouse_pos: Default::default(), prevt: Instant::now(),
-            graph: AnimGraph::None,
             #[cfg(feature = "rive-rs")] use_rive_rs: _use_rive_rs,
-            ctx2d: None, state: None, window: None,
+            #[cfg(feature = "lottie")] lottie_images: Default::default(),
+            svg_images: HashMap::new(), state: None, window: None,
+            graph: AnimGraph::None, ctx2d: None,
         }
     }
 
@@ -303,11 +312,10 @@ impl WinitApp {
 
                 let mouse = ((self.mouse_pos.0 - loff as f32) / *scale,
                              (self.mouse_pos.1 - topl as f32) / *scale);
-                b2d_svg::render_nodes(blctx, mouse,
-                    tree.root(), &usvg::Transform::identity())
+                b2d_svg::render_nodes(blctx, mouse, tree.root(),
+                    &usvg::Transform::identity(), &mut self.b2d_svg_images)
             })(),
-            AnimGraph::None => b2d_svg::blend2d_logo(blctx),
-            _ => return,
+            AnimGraph::None => b2d_svg::blend2d_logo(blctx), _ => return,
         };  result.expect("failed to render with Blend2D");
         self.perf.update(self.prevt.elapsed().as_secs_f32());
         self.perf.render_b2d(blctx, (3., 3.));
@@ -488,6 +496,11 @@ impl WinitApp {
         if let (AnimGraph::Rive(rive), Some(canvas)) = (&mut self.graph, &mut self.ctx2d) {
             rive.nvg_images.clear(canvas);
         }
+        if let Some(canvas) = &mut self.ctx2d {
+            #[cfg(feature = "lottie")] self.lottie_images.clear(canvas);
+            for (_, image) in self.svg_images.drain() { canvas.delete_image(image) }
+        }
+        #[cfg(feature = "b2d")] self.b2d_svg_images.clear();
 
         //path.rfind('.').map_or("", |i| &path[1 + i..])
         //if fs::metadata(&path).is_ok() {} //if path.exists() {}
@@ -567,8 +580,8 @@ impl WinitApp {
 
         match &mut self.graph {
             #[cfg(feature =  "lottie")] AnimGraph::Lottie(lottie) =>
-                match lottie.render_next_frame(
-                    &mut inlottie::backend::femtovg::FemtovgContext::new(ctx2d),
+                match lottie.render_next_frame(&mut FemtovgContext::with_image_cache(
+                        ctx2d, &mut self.lottie_images),
                     _elapsed.as_secs_f32(), Some(RGBA::new_f32(0.4, 0.4, 0.4, 1.))) {
                     Ok(true) => (), Ok(false) => return,
                     Err(error) => { eprintln!("Lottie rendering failed: {error:?}"); return }
@@ -593,8 +606,9 @@ impl WinitApp {
             AnimGraph::SVG(tree) => {
                 ctx2d.clear_rect(0, 0, ctx2d.width(), ctx2d.height(),
                     femtovg::Color::rgbf(0.4, 0.4, 0.4)); // XXX: limit to viewport/viewbox?
-                render_nodes(ctx2d, //ctx2d.transform().inversed().transform_point()
-                    self.mouse_pos, tree.root(), &usvg::Transform::identity());
+                render_nodes(ctx2d, self.mouse_pos, tree.root(),
+                    //ctx2d.transform().inversed().transform_point()
+                    &usvg::Transform::identity(), &mut self.svg_images);
             }
 
             AnimGraph::None => some_test_case(ctx2d),
@@ -687,9 +701,9 @@ impl PerfGraph { #[allow(clippy::new_without_default)]
 
 }
 
-fn render_nodes<T: Renderer>(ctx2d: &mut Canvas<T>, mouse: (f32, f32),
-    parent: &usvg::Group, trfm: &usvg::Transform) {
-    use femtovg::{Path, Color, Paint};
+fn render_nodes<T: Renderer>(ctx2d: &mut Canvas<T>, mouse: (f32, f32), parent: &usvg::Group,
+    trfm: &usvg::Transform, images: &mut HashMap<usize, femtovg::ImageId>) {
+    use femtovg::{Path, Color, Paint, ImageFlags};
 
     fn convert_paint(paint: &usvg::Paint, opacity: usvg::Opacity,
         _trfm: &usvg::Transform) -> Option<Paint> {
@@ -721,7 +735,7 @@ fn render_nodes<T: Renderer>(ctx2d: &mut Canvas<T>, mouse: (f32, f32),
 
     for child in parent.children() { match child {
         usvg::Node::Group(group) =>     // trfm is needed on rendering only
-            render_nodes(ctx2d, mouse, group, &trfm.pre_concat(group.transform())),
+            render_nodes(ctx2d, mouse, group, &trfm.pre_concat(group.transform()), images),
             // TODO: deal with group.clip_path()/mask()/filters()
 
         usvg::Node::Path(path) => if path.is_visible() {
@@ -789,16 +803,32 @@ fn render_nodes<T: Renderer>(ctx2d: &mut Canvas<T>, mouse: (f32, f32),
 
         usvg::Node::Image(img) => if img.is_visible() {
             match img.kind() {
-                usvg::ImageKind::GIF(_) | usvg::ImageKind::WEBP(_) |
-                usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) =>
-                    eprintln!("Raster SVG images are not supported by the femtovg viewer"),
+                usvg::ImageKind::GIF(data) | usvg::ImageKind::WEBP(data) |
+                usvg::ImageKind::PNG(data) | usvg::ImageKind::JPEG(data) => {
+                    let key = data.as_ptr() as usize;
+                    let image = if let Some(&image) = images.get(&key) { image } else {
+                        let Ok(image) = ctx2d.load_image_mem(data, ImageFlags::empty())
+                            else { continue };
+                        images.insert(key, image); image
+                    };
+                    let Ok((width, height)) = ctx2d.image_size(image) else { continue };
+                    let (tm, mut path) = (img.abs_transform(), Path::new());
+                    let transform = femtovg::Transform2D::new(
+                        tm.sx, tm.ky, tm.kx, tm.sy, tm.tx, tm.ty);
+                    ctx2d.save();   ctx2d.set_transform(&transform);
+                    path.rect(0., 0., width as _, height as _);
+                    ctx2d.fill_path(&path, &Paint::image(image, 0., 0.,
+                        width as _, height as _, 0., 1.));
+                    ctx2d.restore();
+                }
                 // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
-                usvg::ImageKind::SVG(svg) => render_nodes(ctx2d, mouse, svg.root(), trfm),
+                usvg::ImageKind::SVG(svg) =>
+                    render_nodes(ctx2d, mouse, svg.root(), trfm, images),
             }
         }
 
         usvg::Node::Text(text) => { let group = text.flattened();
-            render_nodes(ctx2d, mouse, group, &trfm.pre_concat(group.transform()));
+            render_nodes(ctx2d, mouse, group, &trfm.pre_concat(group.transform()), images);
         }
     } }
 }

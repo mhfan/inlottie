@@ -5,6 +5,7 @@
  * Copyright (c) 2025 M.H.Fan, All rights reserved.             *
  ****************************************************************/
 
+use std::collections::HashMap;
 use crate::core::{CompositeContext, helpers::{Vec2D, RGBA},
     pathm::{PathBuilder, BezPath, PathFactory},
     schema::{VisualLayer, MatteMode, MaskMode, FillRule, LineJoin, LineCap},
@@ -17,13 +18,25 @@ const  MASK_COLOR: VGColor = VGColor::rgbaf(1., 1., 1., 1.);
 
 pub struct FemtovgContext<'a, T: SurfacelessRenderer> {
     canvas: &'a mut femtovg::Canvas<T>, target: RenderTarget,
+    images: Option<&'a mut ImageCache>,
+}
+#[derive(Default)] pub struct ImageCache(HashMap<usize, ImageId>);
+impl ImageCache {
+    pub fn clear<T: SurfacelessRenderer>(&mut self, canvas: &mut femtovg::Canvas<T>) {
+        for (_, image) in self.0.drain() { canvas.delete_image(image) }
+    }
 }
 pub struct Offscreen { image: ImageId, parent: RenderTarget }
 
 impl<'a, T: SurfacelessRenderer> FemtovgContext<'a, T> {
     pub fn new(canvas: &'a mut femtovg::Canvas<T>) -> Self {
         canvas.set_render_target(RenderTarget::Screen);
-        Self { canvas, target:   RenderTarget::Screen }
+        Self { canvas, target: RenderTarget::Screen, images: None }
+    }
+    pub fn with_image_cache(canvas: &'a mut femtovg::Canvas<T>,
+        images: &'a mut ImageCache) -> Self {
+        canvas.set_render_target(RenderTarget::Screen);
+        Self { canvas, target: RenderTarget::Screen, images: Some(images) }
     }
     fn set_target(&mut self, target: RenderTarget) {
         self.canvas.set_render_target(target);
@@ -175,6 +188,29 @@ impl<T: SurfacelessRenderer> RenderContext for FemtovgContext<'_, T> {
         match &style.1 {
             FSOpts::Fill(_) => self.fill_path(path, &style.0),
             FSOpts::Stroke { .. } => self.stroke_path(path, &style.0),
+        }   Ok(())
+    }
+
+    fn draw_image(&mut self, image: &[u8],
+        width: f32, height: f32) -> Result<(), Self::Error> {
+        let key = image.as_ptr() as usize;
+        let image = if let Some(image) = self.images.as_deref()
+            .and_then(|images| images.0.get(&key)).copied() { image } else {
+            let loaded = self.load_image_mem(image, ImageFlags::empty())?;
+            if let Some(images) = self.images.as_deref_mut() {
+                images.0.insert(key, loaded);
+            }   loaded
+        };
+        let (native_width, native_height) = self.image_size(image)?;
+        let width  = if 0. < width  { width  } else { native_width  as _ };
+        let height = if 0. < height { height } else { native_height as _ };
+
+        let mut path = Self::VGPath::new();
+        path.rect(0., 0., width, height);
+        self.fill_path(&path, &Self::VGStyle::image(image, 0., 0., width, height, 0., 1.));
+        if  self.images.is_none() {
+            // femtovg records the draw command, so consume it before releasing the texture.
+            self.flush(); self.delete_image(image);
         }   Ok(())
     }
 }

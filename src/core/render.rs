@@ -7,6 +7,7 @@
 
 use core::mem;
 use std::{collections::HashMap, rc::Rc};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use super::{composite::{self, CompositeContext},
     helpers::{Vec2D, RGBA, IntBool, ACCURACY_TOLERANCE},
     path_ops::MeasuredPath, style::{StyleConv, MatrixConv, TM2DwO, FSOpts},
@@ -140,6 +141,7 @@ pub struct LottieRuntime {
     elapsed: f32, fnth: f32,
     animation: Animation,
     root: CompositionState,
+    images: HashMap<String, (Box<[u8]>, f32, f32)>,
 }
 
 impl LottieRuntime {
@@ -155,8 +157,20 @@ impl LottieRuntime {
             CompositionState::with_precomps(
                 &animation.layers, &animation, &assets, &mut Vec::new())
         };
+        let mut images = HashMap::new();
+        for asset in &animation.assets {
+            let AssetItem::Image(image) = asset else { continue };
+            let Some((metadata, payload)) = image.file.url.strip_prefix("data:")
+                .and_then(|url| url.split_once(',')) else { continue };
+            if !metadata.split(';').any(|part| part.eq_ignore_ascii_case("base64")) {
+                continue
+            }
+            let Ok(data) = STANDARD.decode(payload) else { continue };
+            images.entry(image.file.base.id.clone())
+                .or_insert((data.into_boxed_slice(), image.w, image.h));
+        }
         let fnth = animation.ip;
-        Ok(Self { animation, elapsed: 0., fnth, root })
+        Ok(Self { animation, images, elapsed: 0., fnth, root })
     }
 
     pub fn animation(&self) -> &Animation { &self.animation }
@@ -191,7 +205,7 @@ impl LottieRuntime {
                 let (width, height) = rctx.get_size();
                 rctx.clear_rect_with(0, 0, width, height, color)?;
             }
-            Self::render_layers(animation, rctx, &TM2DwO::default(),
+            Self::render_layers(animation, &self.images, rctx, &TM2DwO::default(),
                 &animation.layers, self.fnth, &mut self.root)
         })();
         let restored = rctx.restore_state(state);
@@ -203,7 +217,8 @@ impl LottieRuntime {
 
     /// The render order goes from the last element to the first,
     /// items in list coming first will be rendered on top.
-    fn render_layers<RC: CompositeContext>(animation: &Animation, rctx: &mut RC,
+    fn render_layers<RC: CompositeContext>(animation: &Animation,
+        images: &HashMap<String, (Box<[u8]>, f32, f32)>, rctx: &mut RC,
         ptm: &TM2DwO<RC::TM2D>, layers: &[LayerItem], fnth: f32,
         runtime: &mut CompositionState) -> Result<(), RC::Error> {
         let mut composite = composite::Compositor::default();
@@ -211,6 +226,7 @@ impl LottieRuntime {
             LayerItem::Shape(layer) => !layer.vl.should_hide(fnth),
             LayerItem::PrecompLayer(layer) => !layer.vl.should_hide(fnth),
             LayerItem::SolidColor(layer) => !layer.vl.should_hide(fnth),
+            LayerItem::Image(layer) => !layer.vl.should_hide(fnth),
             _ => false,
         });
 
@@ -242,7 +258,7 @@ impl LottieRuntime {
                     let ltm = ltm.clone().compose(ptm);
 
                     composite.render(rctx, &pcl.vl, &ltm, fnth, |rctx|
-                        Self::render_layers(animation, rctx, &ltm,
+                        Self::render_layers(animation, images, rctx, &ltm,
                             &pcomp.layers, child_fnth, &mut child.composition))?;
                 }   // XXX: clipping(pcl.w, pcl.h)?
             }
@@ -259,7 +275,16 @@ impl LottieRuntime {
                     rctx.render_shapes(&ltm, &[DrawItem::Shape(path),
                         DrawItem::Style(Rc::new((style, opts)))]))?;
             }
-            LayerItem::Image(_) | LayerItem::Text(_)  | LayerItem::Data(_)  |
+            LayerItem::Image(layer) =>
+            if let (WorldState::Ready(ltm), Some((image, width, height))) =
+                (&worlds[index], images.get(&layer.rid)) {
+                let ltm = ltm.clone().compose(ptm); handled = true;
+                composite.render(rctx, &layer.vl, &ltm, fnth, |rctx| {
+                    rctx.apply_transform(&ltm.0, Some(ltm.1))?;
+                    rctx.draw_image(image, *width, *height)
+                })?;
+            }
+            LayerItem::Text(_)  | LayerItem::Data(_)  |
             LayerItem::Audio(_) | LayerItem::Camera(_) => dbg!(),     // TODO:
 
             //LayerItem::Null(_) => (),    // used as a parent, nothing to do
@@ -292,6 +317,8 @@ pub trait RenderContext {
         opacity: Option<f32>) -> Result<(), Self::Error>;
     fn fill_stroke(&mut self, path: &Self::VGPath, relative: Option<&Self::TM2D>,
         style: &(Self::VGStyle, FSOpts)) -> Result<(), Self::Error>;
+    fn draw_image(&mut self, image: &[u8],
+        width: f32, height: f32) -> Result<(), Self::Error>;
 
     fn traverse_shapes(&mut self, stm: &TM2DwO<Self::TM2D>,
         relative: Option<&TM2DwO<Self::TM2D>>,

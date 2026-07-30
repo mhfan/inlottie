@@ -220,6 +220,24 @@ impl RenderContext for BLContext {
             }
         }   Ok(())
     }
+
+    fn draw_image(&mut self, image: &[u8],
+        width: f32, height: f32) -> Result<(), Self::Error> {
+        let image = BLImage::read_from_data(image)?;
+        let width  = if 0. < width  { width  } else { image.width()  as _ };
+        let height = if 0. < height { height } else { image.height() as _ };
+        let area: BLRectI = (0, 0, image.width(), image.height()).into();
+        if width == image.width() as f32 && height == image.height() as f32 {
+            self.blit_image_d(BLPoint::new(), &image, &area)
+        } else {
+            let mut scaled = BLImage::new(width.max(0.) as _,
+                height.max(0.) as _, BLFormat::BL_FORMAT_PRGB32)?;
+            scaled.scale(&image, width.max(0.) as _, height.max(0.) as _,
+                intvg::blend2d::BLImageScaleFilter::BL_IMAGE_SCALE_FILTER_BILINEAR)?;
+            let area: BLRectI = (0, 0, scaled.width(), scaled.height()).into();
+            self.blit_image_d(BLPoint::new(), &scaled, &area)
+        }
+    }
 }
 
 impl PathBuilder for BLPath {

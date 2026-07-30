@@ -1,5 +1,8 @@
 
 use intvg::blend2d::*;
+use std::collections::HashMap;
+
+pub type ImageCache = HashMap<usize, BLImage>;
 
 pub fn blend2d_logo(ctx: &mut BLContext) -> Result<(), BLErr> {
     //let mut img = BLImage::new(480, 480, BLFormat::BL_FORMAT_PRGB32); // 0xAARRGGBB
@@ -26,8 +29,8 @@ pub fn blend2d_logo(ctx: &mut BLContext) -> Result<(), BLErr> {
     Ok(())
 }
 
-pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
-    parent: &usvg::Group, trfm: &usvg::Transform) -> Result<(), BLErr> {
+pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32), parent: &usvg::Group,
+    trfm: &usvg::Transform, images: &mut ImageCache) -> Result<(), BLErr> {
     fn convert_paint(paint: &usvg::Paint, opacity: usvg::Opacity,
         _trfm: &usvg::Transform) -> Result<Option<Box<dyn B2DStyle>>, BLErr> {
         fn convert_stops(grad: &mut BLGradient, stops: &[usvg::Stop],
@@ -62,7 +65,7 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
 
     for child in parent.children() { match child {
         usvg::Node::Group(group) =>     // trfm is needed on rendering only
-            render_nodes(blctx, mouse, group, &trfm.pre_concat(group.transform()))?,
+            render_nodes(blctx, mouse, group, &trfm.pre_concat(group.transform()), images)?,
 
         usvg::Node::Path(path) => if path.is_visible() {
             let tpath = if trfm.is_identity() { None
@@ -135,16 +138,28 @@ pub fn render_nodes(blctx: &mut BLContext, mouse: (f32, f32),
 
         usvg::Node::Image(img) => if img.is_visible() {
             match img.kind() {
-                usvg::ImageKind::GIF(_) | usvg::ImageKind::WEBP(_) |
-                usvg::ImageKind::PNG(_) | usvg::ImageKind::JPEG(_) =>
-                    eprintln!("Raster SVG images are not supported by the Blend2D viewer"),
+                usvg::ImageKind::GIF(data) | usvg::ImageKind::WEBP(data) |
+                usvg::ImageKind::PNG(data) | usvg::ImageKind::JPEG(data) => {
+                    let key = data.as_ptr() as usize;
+                    if !images.contains_key(&key) {
+                        images.insert(key, BLImage::read_from_data(data)?);
+                    }
+                    let (image, tm) = (&images[&key], img.abs_transform());
+                    let area: BLRectI = (0, 0, image.width(), image.height()).into();
+                    let transform = BLMatrix2D::new([tm.sx as _, tm.ky as _,
+                             tm.kx as _, tm.sy as _, tm.tx as _, tm.ty as _]);
+                    blctx.save()?;  blctx.apply_transform(&transform);
+                    let result = blctx.blit_image_d(BLPoint::new(), image, &area);
+                    result.and(blctx.restore())?;
+                }
                 // https://github.com/linebender/vello_svg/blob/main/src/lib.rs#L212
-                usvg::ImageKind::SVG(svg) => render_nodes(blctx, mouse, svg.root(), trfm)?,
+                usvg::ImageKind::SVG(svg) =>
+                    render_nodes(blctx, mouse, svg.root(), trfm, images)?,
             }
         }
 
         usvg::Node::Text(text) => { let group = text.flattened();
-            render_nodes(blctx, mouse, group, &trfm.pre_concat(group.transform()))?;
+            render_nodes(blctx, mouse, group, &trfm.pre_concat(group.transform()), images)?;
         }
     } }   Ok(())
 }

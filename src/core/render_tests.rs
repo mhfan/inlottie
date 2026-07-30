@@ -25,6 +25,7 @@ impl StyleConv for TestStyle {
     fills: Vec<(kurbo::Affine, Option<kurbo::Affine>)>,
     offscreens: u32, aborts: u32, masks: u32, mattes: u32, presents: u32,
     opacity: f32, drawn: Vec<f32>, discards: u32,
+    images: Vec<(Vec<u8>, f32, f32)>,
 }
 impl RenderContext for TestContext {
     type VGPath = BezPath;
@@ -54,6 +55,11 @@ impl RenderContext for TestContext {
         _: &(Self::VGStyle, FSOpts)) -> Result<(), Self::Error> {
         self.draw_count += 1; self.drawn.push(self.opacity);
         self.fills.push((self.current, relative.copied())); Ok(())
+    }
+    fn draw_image(&mut self, image: &[u8],
+        width: f32, height: f32) -> Result<(), Self::Error> {
+        self.draw_count += 1; self.drawn.push(self.opacity);
+        self.images.push((image.to_vec(), width, height)); Ok(())
     }
 }
 impl CompositeContext for TestContext {
@@ -278,6 +284,21 @@ fn fill_style() -> DrawItem<BezPath, TestStyle, kurbo::Affine> {
     assert_eq!(graph, runtime.root.parents.as_ptr());
     assert_eq!(child_graph, runtime.root.precomps[0].as_ref().unwrap()
         .composition.parents.as_ptr());
+}
+
+#[test] fn lottie_runtime_renders_embedded_image_assets() {
+    let mut runtime = LottieRuntime::from_reader(&br##"{ "ip":0,"op":2,"fr":1,
+        "assets":[{"id":"picture","p":"data:image/png;base64,AQID","e":1,
+            "w":20,"h":10}],
+        "layers":[{"ty":2,"refId":"picture","st":0,"ip":0,"op":2,
+            "ks":{"p":{"k":[4,5]},"o":{"k":50}}}]
+    }"##[..]).unwrap();
+    let mut context = TestContext::default();
+
+    assert!(runtime.render_next_frame(&mut context, 1., None).unwrap());
+    assert_eq!(context.images, [(vec![1, 2, 3], 20., 10.)]);
+    assert_eq!(context.drawn, [0.5]);
+    assert_eq!(context.transforms.last().unwrap().as_coeffs()[4..], [4., 5.]);
 }
 
 #[test] fn precomp_time_remap_uses_root_fps_after_layer_time_mapping() {
