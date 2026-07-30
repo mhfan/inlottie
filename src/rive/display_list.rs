@@ -108,11 +108,20 @@ pub enum FillRule { NonZero, EvenOdd, Clockwise }
     pub obj_idx: u32, pub rule: FillRule, pub shapes: Arc<[Shape]>,
 }
 
+#[derive(Debug, Clone, PartialEq)] pub struct Image {
+    /// File-asset slot, stable within one Runtime and used by backend caches.
+    pub asset_id: u32,
+    pub data: Arc<[u8]>,
+    pub trfm: Affine2,
+    pub origin: Point,
+}
+
 #[derive(Debug, Clone, PartialEq)] pub struct DrawItem {
     /// One paint application over a combined, ordered set of shape contours.
     pub obj_idx: u32, pub opacity: f32,
     pub paint: Option<Paint>,
     pub shapes: Arc<[Shape]>,
+    pub image: Option<Image>,
     /// Outer-to-inner clips; backends intersect them before drawing the item.
     pub  clips: Arc<[Clip]>,
 }

@@ -16,8 +16,9 @@ use crate::core::pathm::PathBuilder;
 use display_list::{DisplayList, Geometry, PathCommand, PathEffect, Shape, TrimMode};
 
 /// Backend contract for consuming immutable Rive frame snapshots.
-pub trait RenderContext { type Error;
-    fn render_animation(&mut self, list: &DisplayList) -> Result<(), Self::Error>;
+pub trait RenderContext { type Error; type Cache: Default;
+    fn render_animation(&mut self, list: &DisplayList,
+        cache: &mut Self::Cache) -> Result<(), Self::Error>;
 }
 
 /// Canonical work path used only when a backend needs geometry operations.

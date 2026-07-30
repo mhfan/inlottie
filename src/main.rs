@@ -176,6 +176,9 @@ struct WinitApp {
 #[cfg(feature = "rive-rs")] use inlottie::rive::rscpp_nvg::RiveNVG;
 use inlottie::rive::{RenderContext as _, decode::RiveFile,
     display_list::DisplayList, runtime::Runtime as RiveRuntime};
+use inlottie::rive::render_nvg::ImageCache as NvgImageCache;
+#[cfg(feature = "b2d")]
+use inlottie::rive::render_b2d::ImageCache as B2dImageCache;
 
 #[derive(Clone, Copy, PartialEq)] enum BackendChoice { Auto, Femtovg, Blend2d }
 
@@ -187,7 +190,11 @@ impl BackendChoice {
     } }
 }
 
-struct NativeRive { runtime: RiveRuntime, list: DisplayList }
+struct NativeRive {
+    runtime: RiveRuntime, list: DisplayList,
+    nvg_images: NvgImageCache,
+    #[cfg(feature = "b2d")] b2d_images: B2dImageCache,
+}
 
 enum AnimGraph {
     #[cfg(feature =  "lottie")] Lottie(Box<LottieRuntime>),
@@ -289,7 +296,7 @@ impl WinitApp {
                     rive.runtime.write_display_list(&mut rive.list);
                 }
                 blctx.fill_all_rgba32((99, 99, 99, 255).into())?;
-                blctx.render_animation(&rive.list)
+                blctx.render_animation(&rive.list, &mut rive.b2d_images)
             })(),
             AnimGraph::SVG(tree) => (|| {
                 blctx.fill_all_rgba32((99, 99, 99, 255).into())?;
@@ -478,6 +485,9 @@ impl WinitApp {
 
     fn load_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<(), Box<dyn Error>> {
         let path = path.as_ref();
+        if let (AnimGraph::Rive(rive), Some(canvas)) = (&mut self.graph, &mut self.ctx2d) {
+            rive.nvg_images.clear(canvas);
+        }
 
         //path.rfind('.').map_or("", |i| &path[1 + i..])
         //if fs::metadata(&path).is_ok() {} //if path.exists() {}
@@ -514,7 +524,10 @@ impl WinitApp {
         if 0 < runtime.animation_count() { runtime.set_animation(0)?; }
         let mut list = DisplayList::default();
         runtime.write_display_list(&mut list);
-        Ok(AnimGraph::Rive(Box::new(NativeRive { runtime, list })))
+        Ok(AnimGraph::Rive(Box::new(NativeRive {
+            runtime, list, nvg_images: Default::default(),
+            #[cfg(feature = "b2d")] b2d_images: Default::default(),
+        })))
     }
 
     fn resize_viewport(&mut self, wsize: Option<(f32, f32)>) {  // maximize & centralize
@@ -568,7 +581,8 @@ impl WinitApp {
                 }
                 ctx2d.clear_rect(0, 0, ctx2d.width(), ctx2d.height(),
                     femtovg::Color::rgbf(0.4, 0.4, 0.4));
-                if let Err(error) = ctx2d.render_animation(&rive.list) {
+                if let Err(error) =
+                    ctx2d.render_animation(&rive.list, &mut rive.nvg_images) {
                     eprintln!("Rive rendering failed: {error:?}"); return
                 }
             }

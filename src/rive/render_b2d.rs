@@ -1,7 +1,8 @@
 //! Blend2D adapter for backend-neutral Rive display lists.
 
+use std::collections::HashMap;
 use intvg::blend2d::{BLCompOp, BLContext, BLEllipse, BLErr, BLFillRule,
-    BLGeometryDirection, BLGradient, BLLinearGradientValues, BLMatrix2D, BLPath,
+    BLGeometryDirection, BLGradient, BLImage, BLLinearGradientValues, BLMatrix2D, BLPath,
     BLRadialGradientValues, BLRoundRect, BLRgba32, BLStrokeCap, BLStrokeJoin
 };
 use super::{RenderContext, RenderPath, apply_effects, shape_paths,
@@ -10,29 +11,36 @@ use super::{RenderContext, RenderPath, apply_effects, shape_paths,
 };
 
 impl RenderContext for BLContext {
-    fn render_animation(&mut self, list: &DisplayList) -> Result<(), Self::Error> {
-        render(self, list)
-    }   type Error = BLErr;
+    fn render_animation(&mut self, list: &DisplayList,
+        cache: &mut Self::Cache) -> Result<(), Self::Error> {
+        render(self, list, cache)
+    }
+    type Error = BLErr;
+    type Cache = ImageCache;
 }
 
-fn render(blctx: &mut BLContext, list: &DisplayList) -> Result<(), BLErr> {
+#[derive(Default)] pub struct ImageCache(HashMap<u32, BLImage>);
+
+fn render(blctx: &mut BLContext, list: &DisplayList,
+    assets: &mut ImageCache) -> Result<(), BLErr> {
     // Isolate caller state while retaining its viewport transform around Rive world space.
     blctx.save()?;
     blctx.set_global_alpha(1.0);
     blctx.set_stroke_alpha(1.0); blctx.set_fill_alpha(1.0);
     blctx.set_comp_op(BLCompOp::BL_COMP_OP_SRC_OVER);
-    let result = render_range(blctx, list, 0);
+    // Keep decoded images alive until queued Blend2D commands are flushed.
+    let result = render_range(blctx, list, 0, &mut assets.0);
     let restore = blctx.restore();
     let flush   = blctx.flush();
     result.and(restore).and(flush)
 }
 
 fn render_range(blctx: &mut BLContext, items: &[DrawItem],
-    depth: usize) -> Result<(), BLErr> {
+    depth: usize, assets: &mut HashMap<u32, BLImage>) -> Result<(), BLErr> {
     let mut start = 0;
     while   start < items.len() {
         let Some(clip) = items[start].clips.get(depth) else {
-            draw_item(blctx, &items[start])?;
+            draw_item(blctx, &items[start], assets)?;
             start += 1;     continue
         };
         let mut end = start + 1;
@@ -41,20 +49,24 @@ fn render_range(blctx: &mut BLContext, items: &[DrawItem],
                 .is_some_and(|next| next.obj_idx == clip.obj_idx) &&
             items[start].clips.iter().zip(items[end].clips.iter()).take(depth)
                 .all(|(left, right)| left.obj_idx == right.obj_idx) { end += 1; }
-        render_clip(blctx, &items[start..end], clip, depth)?; start = end;
+        render_clip(blctx, &items[start..end], clip, depth, assets)?; start = end;
     }   Ok(())
 }
 
 fn render_clip(blctx: &mut BLContext, items: &[DrawItem],
-    clip: &Clip, depth: usize) -> Result<(), BLErr> {
+    clip: &Clip, depth: usize, assets: &mut HashMap<u32, BLImage>) -> Result<(), BLErr> {
     let path = b2d_shapes(&clip.shapes, clip.rule)?;
     blctx.set_global_alpha(1.0);
     blctx.set_fill_rule(b2d_rule(clip.rule));
     // clip_to_path uses tight offscreen bounds and preserves its layer offset as meta transform.
-    blctx.clip_to_path(&path, |content| render_range(content, items, depth + 1))
+    blctx.clip_to_path(&path, |content| render_range(content, items, depth + 1, assets))
 }
 
-fn draw_item(blctx: &mut BLContext, item: &DrawItem) -> Result<(), BLErr> {
+fn draw_item(blctx: &mut BLContext, item: &DrawItem,
+    assets: &mut HashMap<u32, BLImage>) -> Result<(), BLErr> {
+    if let Some(image) = &item.image {
+        return draw_image(blctx, image, item.opacity, assets)
+    }
     let Some(style) = &item.paint else { return Ok(()) };
     let (brush, effects, rule) = match style {
         RivePaint::Fill   { brush, rule, effects } => (brush, effects.as_ref(), *rule),
@@ -102,6 +114,27 @@ fn draw_item(blctx: &mut BLContext, item: &DrawItem) -> Result<(), BLErr> {
             paint.stroke(blctx, &path)
         }
     }
+}
+
+fn draw_image(blctx: &mut BLContext, image: &super::display_list::Image,
+    opacity: f32, assets: &mut HashMap<u32, BLImage>) -> Result<(), BLErr> {
+    if !assets.contains_key(&image.asset_id) {
+        assets.insert(image.asset_id, BLImage::read_from_data(&image.data)?);
+    }
+    let image_data = &assets[&image.asset_id];
+    let (width, height) = (image_data.width(), image_data.height());
+    let (ox, oy) = (width as f32 * image.origin.x, height as f32 * image.origin.y);
+    let trfm = BLMatrix2D::new([
+        image.trfm.xx as _, image.trfm.yx as _, image.trfm.xy as _, image.trfm.yy as _,
+        (image.trfm.tx - image.trfm.xx * ox - image.trfm.xy * oy) as _,
+        (image.trfm.ty - image.trfm.yx * ox - image.trfm.yy * oy) as _,
+    ]);
+    let previous = blctx.user_transform();
+    blctx.apply_transform(&trfm);
+    blctx.set_global_alpha(opacity.clamp(0.0, 1.0) as _);
+    let result = blctx.blit_image_d((0.0, 0.0).into(), image_data,
+        &(0, 0, width, height).into());
+    blctx.reset_transform(Some(&previous)); result
 }
 
 enum B2DPaint { Solid(BLRgba32), Gradient(BLGradient) }

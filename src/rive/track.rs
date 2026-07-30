@@ -21,6 +21,7 @@ use crate::rive::animation::{Animation, LinearAnimation, RawAnimation, evaluate_
     Visibility { component: u32 },
     ClipVisibility { component: u32 },
     Constraint { component: u32, prop_id: u32 },
+    Image { component: u32, prop_id: u32 },
 }
 
 #[derive(Debug, Clone, Copy)] pub(in crate::rive) struct TrackBinding {
@@ -151,6 +152,8 @@ fn resolve_target(components: &[Component], bindings: &[ComponentTarget],
         TrackValue::Scalar(_) | TrackValue::Bool(_) | TrackValue::Uint(_)
             if state.constraint().is_some() =>
             Some(TrackTarget::Constraint { component, prop_id }),
+        TrackValue::Scalar(_) if state.image().is_some() =>
+            Some(TrackTarget::Image { component, prop_id }),
         TrackValue::Scalar(_) if state.gradient().is_some() =>
             Some(TrackTarget::Gradient { component, prop_id }),
         TrackValue::Scalar(_) | TrackValue::Bool(_) | TrackValue::Uint(_)
@@ -223,6 +226,9 @@ fn apply_track(components: &mut [Component], target: TrackTarget, value: TrackVa
         (TrackTarget::Constraint { component, prop_id }, value) =>
             return components[component as usize].constraint_mut()
                 .is_some_and(|constraint| constraint.set(prop_id, value)),
+        (TrackTarget::Image { component, prop_id }, TrackValue::Scalar(value)) =>
+            return components[component as usize].image_mut()
+                .is_some_and(|image| image.set(prop_id, value)),
         _ => {}
     }   false
 }

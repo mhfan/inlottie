@@ -3,7 +3,7 @@
 use std::{mem, sync::Arc};
 
 use super::{ComponentPaint, DrawGroup, Result, Runtime, RuntimeError, uint,
-    object_ids, property_ids, Clip, DisplayList, DrawItem, Paint, Shape,
+    object_ids, property_ids, Clip, DisplayList, DrawItem, Image, Paint, Shape,
 };
 
 impl Runtime {
@@ -31,7 +31,8 @@ impl Runtime {
                 .filter_map(|&index| clip_paths[index as usize].clone()).collect();
             if group.paints.is_empty() {
                 list.push(DrawItem {
-                    obj_idx: group.obj_idx, opacity, clips, shapes, paint: None });
+                    obj_idx: group.obj_idx, opacity, clips, shapes, paint: None,
+                    image: group.image.map(|index| self.snapshot_image(index)) });
             } else {
                 let start = list.len();
                 list.extend(group.paints.iter().filter_map(|&index| {
@@ -40,14 +41,23 @@ impl Runtime {
                         obj_idx: group.obj_idx, opacity,
                         clips: clips.clone(), shapes: shapes.clone(),
                         paint: Some(paint.value.clone()),
+                        image: None,
                     })
                 }));
                 if  list.len() == start {
                     list.push(DrawItem {
-                        obj_idx: group.obj_idx, opacity, clips, shapes, paint: None });
+                        obj_idx: group.obj_idx, opacity, clips, shapes, paint: None,
+                        image: None });
                 }
             }
         }
+    }
+
+    fn snapshot_image(&self, index: u32) -> Image {
+        let component = &self.components[index as usize];
+        let image = component.image().unwrap();
+        Image { asset_id: image.asset_id, data: image.data.clone(),
+            trfm: component.world, origin: image.origin }
     }
 
     fn snapshot_shapes(&self, indices: &[u32]) -> Arc<[Shape]> {
@@ -80,12 +90,19 @@ impl Runtime {
                 shape_groups[index] = Some(self.draw_groups.len());
                 self.draw_groups.push(DrawGroup {
                     obj_idx: component.obj_idx, opacity_component: index as u32,
-                    components: Vec::new(), paints: Vec::new(), clips: Vec::new(),
+                    components: Vec::new(), paints: Vec::new(), clips: Vec::new(), image: None,
                 });
             } else if component.geom().is_some() && shapes[index].is_none() {
                 self.draw_groups.push(DrawGroup {
                     obj_idx: component.obj_idx, opacity_component: index as u32,
-                    components: vec![index as u32], paints: Vec::new(), clips: Vec::new(),
+                    components: vec![index as u32], paints: Vec::new(),
+                    clips: Vec::new(), image: None,
+                });
+            } else if component.image().is_some() {
+                self.draw_groups.push(DrawGroup {
+                    obj_idx: component.obj_idx, opacity_component: index as u32,
+                    components: Vec::new(), paints: Vec::new(),
+                    clips: Vec::new(), image: Some(index as u32),
                 });
             }
         }
@@ -94,7 +111,8 @@ impl Runtime {
             let group = &mut self.draw_groups[shape_groups[shape as usize].unwrap()];
             if component.geom().is_some() { group.components.push(index as u32) }
             if component.paint().is_some() { group.paints.push(index as u32) }
-        }   self.draw_groups.retain(|group| !group.components.is_empty());
+        }   self.draw_groups.retain(|group|
+            !group.components.is_empty() || group.image.is_some());
     }
 
     pub(super) fn attach_clips(&mut self) {

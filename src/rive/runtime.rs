@@ -1,11 +1,11 @@
 
 //! Retained Rive scene state, artboard selection, hierarchy updates, and playback control.
 
-use std::{error::Error as StdError, fmt, f32};
+use std::{error::Error as StdError, fmt, f32, sync::Arc};
 
 use super::{animation::{LinearAnimation, TrackValue, build_animations},
     display_list::{Affine2, Brush, Clip, DashSegment, DisplayList, FillRule,
-        Geometry, GradientStop, Paint, PathEffect, Point, Shape,
+        Geometry, GradientStop, Image, Paint, PathEffect, Point, Shape,
         DrawItem, StrokeCap, StrokeJoin, TrimMode
     },
     decode::{self, DecodeError, Object, RiveFile, object_ids, property_ids,
@@ -137,6 +137,20 @@ impl ComponentGeom {
     source: u32, rule: FillRule, visible: bool, shapes: Vec<u32>,
 }
 
+#[derive(Debug)] struct ComponentImage {
+    asset_id: u32, data: Arc<[u8]>, origin: Point,
+}
+
+impl ComponentImage {
+    fn set(&mut self, prop_id: u32, value: f32) -> bool {
+        match prop_id {
+            property_ids::IMAGE_ORIGINX => self.origin.x = value,
+            property_ids::IMAGE_ORIGINY => self.origin.y = value,
+            _ => return false,
+        }   true
+    }
+}
+
 #[derive(Debug, Default)] enum ComponentData {
     #[default] None,
     Geometry(ComponentGeom),
@@ -145,6 +159,7 @@ impl ComponentGeom {
     Paint(ComponentPaint),
     Clip(ComponentClip),
     Constraint(Constraint),
+    Image(ComponentImage),
 }
 
 #[derive(Debug)] struct GradientState {
@@ -250,6 +265,12 @@ impl Component {
     fn constraint_mut(&mut self) -> Option<&mut Constraint> {
         if let ComponentData::Constraint(value) = &mut self.data { Some(value) } else { None }
     }
+    fn image(&self) -> Option<&ComponentImage> {
+        if let ComponentData::Image(value) = &self.data { Some(value) } else { None }
+    }
+    fn image_mut(&mut self) -> Option<&mut ComponentImage> {
+        if let ComponentData::Image(value) = &mut self.data { Some(value) } else { None }
+    }
 }
 
 #[derive(Debug)] struct DrawGroup {
@@ -258,6 +279,7 @@ impl Component {
     components: Vec<u32>,
     paints: Vec<u32>,
     clips: Vec<u32>,
+    image: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy)] pub(super) enum ColorTarget {
@@ -372,7 +394,8 @@ impl Runtime {
             float(&file.ocoll[context_start], property_ids::LAYOUTCOMPONENT_WIDTH)?,
             float(&file.ocoll[context_start], property_ids::LAYOUTCOMPONENT_HEIGHT)?,
         );
-        let unsupported = collect_unsupported(&file.ocoll[context_start..context_end]);
+        let mut unsupported = collect_unsupported(&file.ocoll[context_start..context_end]);
+        let image_assets = collect_image_assets(&file)?;
         let (mut components, mut parent_objs) = (Vec::new(), Vec::new());
         let mut obj_comps = vec![None; file.ocoll.len()];
 
@@ -383,7 +406,23 @@ impl Runtime {
             if  obj_idx == u32::MAX { return Err(RuntimeError::TooManyObjects) }
 
             let parent_id = uint(object, property_ids::COMPONENT_PARENTID)?;
-            let data = if object.type_id.0 == object_ids::CLIPPING_SHAPE {
+            let data = if object.type_id.0 == object_ids::IMAGE {
+                let asset_id = uint(object, property_ids::IMAGE_ASSETID)?;
+                if let Some(data) = image_assets.get(asset_id as usize)
+                    .and_then(|data| data.clone()) {
+                    ComponentData::Image(ComponentImage { asset_id, data,
+                        origin: Point {
+                            x: float(object, property_ids::IMAGE_ORIGINX)?,
+                            y: float(object, property_ids::IMAGE_ORIGINY)?,
+                        },
+                    })
+                } else {
+                    if !unsupported.contains(&UnsupportedFeature::Images) {
+                        unsupported.push(UnsupportedFeature::Images);
+                    }
+                    ComponentData::None
+                }
+            } else if object.type_id.0 == object_ids::CLIPPING_SHAPE {
                 ComponentData::Clip(ComponentClip {
                     source: uint(object, property_ids::SOURCEID)?,
                     rule: fill_rule(uint(object, property_ids::CLIPPINGSHAPE_FILLRULE)?),
@@ -420,6 +459,20 @@ impl Runtime {
             };
             components[index].parent = Some(parent);
         }
+        // Mesh and nine-slice images need textured geometry, not a flat image quad.
+        let advanced_images: Vec<_> = components.iter().filter_map(|component| {
+            matches!(file.ocoll[component.obj_idx as usize].type_id.0,
+                object_ids::MESH | object_ids::N_SLICER)
+                .then_some(component.parent).flatten()
+        }).collect();
+        for owner in advanced_images {
+            if components[owner as usize].image().is_some() {
+                components[owner as usize].data = ComponentData::None;
+                if !unsupported.contains(&UnsupportedFeature::Images) {
+                    unsupported.push(UnsupportedFeature::Images);
+                }
+            }
+        }
         for index in 0..components.len() {
             let Some(source_id) = components[index].clip().map(|clip| clip.source) else {
                 continue
@@ -446,6 +499,7 @@ impl Runtime {
         }
 
         let animations = build_animations(&file, context_start, context_end, &obj_comps)?;
+        unsupported.sort();
         let constraint_dirty = if constraints.is_empty() {
             Vec::new()
         } else { vec![false; components.len()] };
@@ -544,8 +598,6 @@ fn collect_unsupported(objects: &[Object]) -> Vec<UnsupportedFeature> {
             object_ids::TENDON | object_ids::WEIGHT => UnsupportedFeature::BonesAndSkins,
             object_ids::I_K_CONSTRAINT | object_ids::FOLLOW_PATH_CONSTRAINT =>
                 UnsupportedFeature::AdvancedConstraints,
-            object_ids::IMAGE | object_ids::IMAGE_ASSET | object_ids::LAYER_IMAGE_ASSET =>
-                UnsupportedFeature::Images,
             object_ids::NESTED_ARTBOARD => UnsupportedFeature::NestedArtboards,
             object_ids::STATE_MACHINE | object_ids::STATE_MACHINE_LAYER |
             object_ids::ANIMATION_STATE => UnsupportedFeature::StateMachines,
@@ -555,6 +607,32 @@ fn collect_unsupported(objects: &[Object]) -> Vec<UnsupportedFeature> {
         };
         if !features.contains(&feature) { features.push(feature) }
     }       features.sort();   features
+}
+
+fn collect_image_assets(file: &RiveFile) -> decode::Result<Vec<Option<Arc<[u8]>>>> {
+    let mut assets = Vec::new();
+    let mut current = None;
+    for object in &file.ocoll { match object.type_id.0 {
+        object_ids::IMAGE_ASSET | object_ids::LAYER_IMAGE_ASSET => {
+            current = Some(assets.len());
+            assets.push(None);
+        }
+        object_ids::FONT_ASSET | object_ids::AUDIO_ASSET | object_ids::BLOB_ASSET |
+        object_ids::SCRIPT_ASSET | object_ids::SHADER_ASSET => {
+            current = None;
+            assets.push(None);
+        }
+        object_ids::FILE_ASSET_CONTENTS => {
+            if let Some(index) = current {
+                if let Some(bytes) = object.bytes(property_ids::BYTES)? {
+                    if !bytes.is_empty() { assets[index] = Some(Arc::from(bytes)) }
+                }
+            }
+            current = None;
+        }
+        _ => {}
+    }}
+    Ok(assets)
 }
 
 fn update_world_state(components: &mut [Component], order: &[u32]) {

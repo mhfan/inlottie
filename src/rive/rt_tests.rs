@@ -37,12 +37,67 @@ fn world(runtime: &Runtime, obj_idx: u32) -> Affine2 {
 
 fn artboard() -> Object { Object::new_simple(object_ids::ARTBOARD) }
 
+fn embedded_image_file(mut objects: Vec<Object>, bytes: &[u8]) -> RiveFile {
+    let image_asset = Object::new_simple(object_ids::IMAGE_ASSET);
+    let mut contents = Object::new_simple(object_ids::FILE_ASSET_CONTENTS);
+    contents.add_prop(VarUInt(property_ids::BYTES), FieldValue::Bytes(bytes.to_vec()));
+    let mut all = vec![image_asset, contents];
+    all.append(&mut objects); file(all)
+}
+
 #[test] fn exposes_artboard_size() {
     let mut artboard = artboard();
     prop(&mut artboard, property_ids::LAYOUTCOMPONENT_WIDTH, 640.0);
     prop(&mut artboard, property_ids::LAYOUTCOMPONENT_HEIGHT, 360.0);
     assert_eq!(Runtime::from_file(file(vec![artboard])).unwrap().artboard_size(),
         (640.0, 360.0));
+}
+
+#[test] fn emits_embedded_image_instances() {
+    let mut image = parented(object_ids::IMAGE, 0);
+    uint_prop(&mut image, property_ids::IMAGE_ASSETID, 0);
+    prop(&mut image, property_ids::NODE_X, 30.0);
+    prop(&mut image, property_ids::NODE_Y, 40.0);
+    prop(&mut image, property_ids::IMAGE_ORIGINX, 0.25);
+    prop(&mut image, property_ids::IMAGE_ORIGINY, 0.75);
+    let runtime = Runtime::from_file(
+        embedded_image_file(vec![artboard(), image], b"encoded-image")).unwrap();
+    let list = display_list(&runtime);
+    let image = list[0].image.as_ref().unwrap();
+    assert_eq!(image.asset_id, 0);
+    assert_eq!(&*image.data, b"encoded-image");
+    assert_eq!(image.origin, Point { x: 0.25, y: 0.75 });
+    assert_eq!((image.trfm.tx, image.trfm.ty), (30.0, 40.0));
+    assert!(runtime.is_fully_supported());
+}
+
+#[test] fn reports_missing_image_assets_and_animates_origin() {
+    let mut missing = parented(object_ids::IMAGE, 0);
+    uint_prop(&mut missing, property_ids::IMAGE_ASSETID, 1);
+    let runtime = Runtime::from_file(
+        embedded_image_file(vec![artboard(), missing], b"image")).unwrap();
+    assert_eq!(runtime.unsupported_features(), &[UnsupportedFeature::Images]);
+    assert!(display_list(&runtime).is_empty());
+
+    let mut image = parented(object_ids::IMAGE, 0);
+    uint_prop(&mut image, property_ids::IMAGE_ASSETID, 0);
+    let objects = vec![artboard(), image, linear_animation(b"origin", 10, 10, 0),
+        keyed_object(1), keyed_property(property_ids::IMAGE_ORIGINX),
+        double_keyframe(0, 0.0, 1), double_keyframe(10, 1.0, 1)];
+    let mut runtime = Runtime::from_file(embedded_image_file(objects, b"image")).unwrap();
+    runtime.set_animation(0).unwrap();
+    runtime.advance(0.5);
+    assert!((display_list(&runtime)[0].image.as_ref().unwrap().origin.x - 0.5).abs() < 1e-5);
+}
+
+#[test] fn reports_textured_mesh_images_as_unsupported() {
+    let mut image = parented(object_ids::IMAGE, 0);
+    uint_prop(&mut image, property_ids::IMAGE_ASSETID, 0);
+    let mesh = parented(object_ids::MESH, 1);
+    let runtime = Runtime::from_file(
+        embedded_image_file(vec![artboard(), image, mesh], b"image")).unwrap();
+    assert_eq!(runtime.unsupported_features(), &[UnsupportedFeature::Images]);
+    assert!(display_list(&runtime).is_empty());
 }
 
 fn parented(type_id: u32, parent: u32) -> Object {

@@ -1,7 +1,8 @@
 //! femtovg adapter for backend-neutral Rive display lists.
 
+use std::collections::HashMap;
 use femtovg::{Canvas, Color, CompositeOperation, ErrorKind, FillRule as VgFillRule,
-    ImageFlags, LineCap, LineJoin, Paint, Path, PixelFormat, RenderTarget, Solidity,
+    ImageFlags, LineCap, LineJoin, Paint, Path, PixelFormat, RenderTarget, Solidity, Transform2D,
     renderer::SurfacelessRenderer
 };
 use super::{RenderContext, RenderPath, apply_effects, shape_paths,
@@ -10,19 +11,31 @@ use super::{RenderContext, RenderPath, apply_effects, shape_paths,
 };
 
 impl<T: SurfacelessRenderer> RenderContext for Canvas<T> {
-    fn render_animation(&mut self, list: &DisplayList) -> Result<(), Self::Error> {
-        FemtovgRenderer::new(self).render(list)
-    }   type Error = ErrorKind;
+    fn render_animation(&mut self, list: &DisplayList,
+        cache: &mut Self::Cache) -> Result<(), Self::Error> {
+        FemtovgRenderer::new(self, cache).render(list)
+    }
+    type Error = ErrorKind;
+    type Cache = ImageCache;
+}
+
+#[derive(Default)] pub struct ImageCache(HashMap<u32, femtovg::ImageId>);
+impl ImageCache {
+    pub fn clear<T: SurfacelessRenderer>(&mut self, canvas: &mut Canvas<T>) {
+        for (_, image) in self.0.drain() { canvas.delete_image(image) }
+    }
 }
 
 struct FemtovgRenderer<'a, T: SurfacelessRenderer> {
     // femtovg executes commands at flush, so temporary images must outlive recursion.
     canvas: &'a mut Canvas<T>, images: Vec<femtovg::ImageId>,
+    assets: &'a mut ImageCache,
 }
 
 impl<T: SurfacelessRenderer> FemtovgRenderer<'_, T> {
-    fn new(canvas: &mut Canvas<T>) -> FemtovgRenderer<'_, T> {
-        FemtovgRenderer { canvas, images: Vec::new() }
+    fn new<'a>(canvas: &'a mut Canvas<T>, assets: &'a mut ImageCache) ->
+        FemtovgRenderer<'a, T> {
+        FemtovgRenderer { canvas, images: Vec::new(), assets }
     }
 
     fn render(mut self, list: &DisplayList) -> Result<(), ErrorKind> {
@@ -45,7 +58,7 @@ impl<T: SurfacelessRenderer> FemtovgRenderer<'_, T> {
         while   start < items.len() {
             let Some(clip) = items[start].clips.get(depth) else {
                 self.canvas.set_render_target(target);
-                self.draw_item(&items[start]); start += 1; continue
+                self.draw_item(&items[start])?; start += 1; continue
             };
             let mut end = start + 1;
             // Render one contiguous run sharing the same clip-prefix only once.
@@ -89,8 +102,9 @@ impl<T: SurfacelessRenderer> FemtovgRenderer<'_, T> {
         canvas.set_transform(&trfm);     Ok(())
     }
 
-    fn draw_item(&mut self, item: &DrawItem) {
-        let Some(style) = &item.paint else { return };
+    fn draw_item(&mut self, item: &DrawItem) -> Result<(), ErrorKind> {
+        if let Some(image) = &item.image { return self.draw_image(image, item.opacity) }
+        let Some(style) = &item.paint else { return Ok(()) };
         let (brush, effects, rule) = match style {
             RivePaint::Fill   { brush, rule, effects } => (brush, effects.as_ref(), *rule),
             RivePaint::Stroke { brush,       effects, .. } =>
@@ -98,7 +112,7 @@ impl<T: SurfacelessRenderer> FemtovgRenderer<'_, T> {
         };
 
         let paths = apply_effects(shape_paths(&item.shapes), effects);
-        if  paths.is_empty() { return }
+        if  paths.is_empty() { return Ok(()) }
         let path = vg_path(&paths, rule);
         let canvas = &mut *self.canvas;
         let (mut paint, brush_opacity) = vg_paint(brush);
@@ -131,7 +145,31 @@ impl<T: SurfacelessRenderer> FemtovgRenderer<'_, T> {
                 });
                 canvas.stroke_path(&path, &paint);
             }
-        }
+        }   Ok(())
+    }
+
+    fn draw_image(&mut self, image: &super::display_list::Image,
+        opacity: f32) -> Result<(), ErrorKind> {
+        let image_id = if let Some(&image_id) = self.assets.0.get(&image.asset_id) {
+            image_id
+        } else {
+            let image_id = self.canvas.load_image_mem(&image.data, ImageFlags::empty())?;
+            self.assets.0.insert(image.asset_id, image_id); image_id
+        };
+        let (width, height) = self.canvas.image_size(image_id)?;
+        let canvas = &mut *self.canvas;
+        let base = canvas.transform();
+        canvas.set_transform(&Transform2D::new(
+            image.trfm.xx, image.trfm.yx, image.trfm.xy,
+            image.trfm.yy, image.trfm.tx, image.trfm.ty));
+        canvas.translate(-(width as f32) * image.origin.x,
+            -(height as f32) * image.origin.y);
+        canvas.set_global_alpha(opacity.clamp(0.0, 1.0));
+        let mut path = Path::new();
+        path.rect(0.0, 0.0, width as _, height as _);
+        canvas.fill_path(&path, &Paint::image(
+            image_id, 0.0, 0.0, width as _, height as _, 0.0, 1.0));
+        canvas.reset_transform(); canvas.set_transform(&base); Ok(())
     }
 
     fn new_target(&mut self) -> Result<femtovg::ImageId, ErrorKind> {
